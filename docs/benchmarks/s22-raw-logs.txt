@@ -40,3 +40,25 @@ BENCH op=merge_contention threads=14 total_merges=42 wall_s=538.592 merges_per_s
 BENCH op=merge_contended scale=2000 samples=42 p50_ns=38786111250 p99_ns=42330754167 min_ns=36687981333 max_ns=42330754167 mean_ns=39454472508 p50_us=38786111.250 p99_us=42330754.167 mean_us=39454472.508 p99_ms=42330.7542
       538.91 real        16.54 user       221.56 sys
             89686016  maximum resident set size
+
+## 1M tier (MNEME_NO_FSYNC=1 for ingest tractability; recall/disk/RSS fsync-independent)
+BENCH meta scale=1000000 recall_samples=3000 write_samples=40 merge_peer=500 merge_iters=0 store_path=/tmp/bench-store-1m
+BENCH op=populate scale=1000000 wall_s=268.562 wall_ms=268561.6 per_entry_us=268.562
+BENCH disk op=after_populate scale=1000000 disk_bytes=332900868 disk_mib=317.48 bytes_per_entry=332.9
+BENCH op=recall_verified scale=1000000 samples=3000 p50_ns=160042 p99_ns=188375 min_ns=38000 max_ns=210541 mean_ns=161750 p50_us=160.042 p99_us=188.375 mean_us=161.750 p99_ms=0.1884
+BENCH op=recall_verified_cached scale=1000000 samples=3000 p50_ns=37375 p99_ns=41792 min_ns=37041 max_ns=43916 mean_ns=37534 p50_us=37.375 p99_us=41.792 mean_us=37.534 p99_ms=0.0418
+BENCH op=recall_raw scale=1000000 samples=3000 p50_ns=64084 p99_ns=70541 min_ns=57584 max_ns=121500 mean_ns=64320 p50_us=64.084 p99_us=70.541 mean_us=64.320 p99_ms=0.0705
+BENCH op=remember scale=1000000 samples=40 p50_ns=12968958 p99_ns=18285750 min_ns=11656875 max_ns=18285750 mean_ns=12986240 p50_us=12968.958 p99_us=18285.750 mean_us=12986.240 p99_ms=18.2858
+BENCH op=forget scale=1000000 samples=40 p50_ns=20230084 p99_ns=22696500 min_ns=17687958 max_ns=22696500 mean_ns=20238721 p50_us=20230.084 p99_us=22696.500 mean_us=20238.721 p99_ms=22.6965
+BENCH disk op=final scale=1000000 disk_bytes=332947368 disk_mib=317.52
+      428.89 real       107.15 user       157.74 sys
+          2434203648  maximum resident set size
+            52609624  peak memory footprint
+
+## fsync tax: 10k populate with MNEME_NO_FSYNC=1 (CPU floor)
+BENCH op=populate scale=10000 wall_s=2.167 wall_ms=2167.3 per_entry_us=216.725
+BENCH op=recall_verified scale=10000 samples=1000 p50_ns=142167 p99_ns=187125 min_ns=38000 max_ns=220583 mean_ns=144180 p50_us=142.167 p99_us=187.125 mean_us=144.180 p99_ms=0.1871
+BENCH op=recall_verified_cached scale=10000 samples=1000 p50_ns=37083 p99_ns=50625 min_ns=36750 max_ns=90250 mean_ns=37791 p50_us=37.083 p99_us=50.625 mean_us=37.791 p99_ms=0.0506
+BENCH op=recall_raw scale=10000 samples=1000 p50_ns=52292 p99_ns=75041 min_ns=50083 max_ns=216958 mean_ns=53637 p50_us=52.292 p99_us=75.041 mean_us=53.637 p99_ms=0.0750
+BENCH op=remember scale=10000 samples=40 p50_ns=11923584 p99_ns=12915334 min_ns=10078917 max_ns=12915334 mean_ns=11828749 p50_us=11923.584 p99_us=12915.334 mean_us=11828.749 p99_ms=12.9153
+BENCH op=forget scale=10000 samples=40 p50_ns=16311750 p99_ns=24930250 min_ns=14020834 max_ns=24930250 mean_ns=16674765 p50_us=16311.750 p99_us=24930.250 mean_us=16674.765 p99_ms=24.9303

@@ -5,7 +5,7 @@
 **Hardware:** Apple **M4 Max**, 14 cores, 36 GiB, APFS SSD. Toolchain: rustc/cargo **1.86.0**, `--release`.
 **Date:** 2026-05-31. **Method:** `tests/bench_recall.rs` (`bench_scale_ops`, `bench_concurrent_merge_contention`), each tier in its own process under `/usr/bin/time -l` for peak RSS. Every number below is copied from a `BENCH …` log line; logs in `/tmp/bench-logs/`.
 
-> **Honesty caveats.** (1) The **1M tier was not run** — at the measured fsync-bound ingest rate it is ≈3 hours of pure I/O; its row is a **labeled linear extrapolation**, not a measurement. (2) A 5k cached-vs-cold run executed *concurrently* with the 100k tier, so its **absolute populate/write times are contention-contaminated**; only its intra-process *ratio* (cached vs cold recall) is cited. 10k and 100k tiers ran in isolation and are authoritative.
+> **Honesty caveats.** (1) The **1M tier was run with `MNEME_NO_FSYNC=1`** (the existing crash-unsafe test knob) purely so ingest fit in ~4.5 min instead of ~3 hr. fsync affects *write durability/latency only* — it does **not** change bytes, memory, or read latency — so the 1M **recall, disk, and RSS numbers are valid as measured**; the 1M *write* latencies are the **CPU floor** (fsync-off), and the fsync-on write cost is the O(1) ~48 ms constant proven at 10k/100k. (2) A 5k cached-vs-cold run executed *concurrently* with the 100k tier, so its **absolute populate/write times are contention-contaminated**; only its intra-process *ratio* (cached vs cold recall) is cited. 10k and 100k tiers ran in isolation.
 
 ---
 
@@ -27,9 +27,9 @@
 |---|---|---|---|---|---|
 | 10,000 | 141.8 µs | **174.9 µs** | 52.7 µs | +89.1 µs | **169 %** |
 | 100,000 | 153.2 µs | **193.6 µs** | 59.2 µs | +94.0 µs | **159 %** |
-| 1,000,000 *(extrapolated)* | ~155 µs | ~200 µs | ~60 µs | ~95 µs | ~160 % |
+| **1,000,000 (measured)** | **160.0 µs** | **188.4 µs** | 64.1 µs | +96.0 µs | **150 %** |
 
-- **Flat across a 10× scale increase** (142 → 153 µs p50, +8 %). Verification is dominated by **constant-cost** work: one Ed25519 root-signature verify + one AEAD payload decrypt + an O(`TREE_DEPTH=256`) SMT auth-path fold — none of which depend on entry count. The 1M row is a sound extrapolation precisely because the cost is structurally scale-independent.
+- **Flat across a 100× scale increase** (142 → 160 µs p50, **+13 %** for 100× the entries). Verification is dominated by **constant-cost** work: one Ed25519 root-signature verify + one AEAD payload decrypt + an O(`TREE_DEPTH=256`) SMT auth-path fold — none of which depend on entry count. p99 stays **188 µs at 1M**, ~5× under the 1 ms gate. This is now a **measurement, not an extrapolation**.
 - **Absolute overhead ~89–94 µs** roughly *triples* a raw (unverified) index fetch — but the *absolute* p99 stays **~175–194 µs**, i.e. ~5× under the 1 ms gate and ~500× under the ~100 ms human-interactive threshold.
 
 ### Verification-overhead composition (the +89 µs)
@@ -67,7 +67,19 @@ An agent would need **~650 cold distinct recalls in a single turn** to reach hum
 |---|---|---|---|
 | `remember` | 47.8 / 65.3 ms | **46.1 / 54.0 ms** | **O(1)** — constant vs size |
 | `forget` | 38.2 / 56.1 ms | 34.9 / 41.0 ms | **O(1)** |
-| `merge` (500 entries → N) | 13.8 s | **18.9 s** | **O(target)** — `rebuild_semantic_index` |
+| `merge` (500 entries → N) | 13.8 s | **18.9 s** | grows with target — fsync count + sidecar rewrite |
+
+### The fsync tax (measured) — and the ≈49× optimization headroom
+
+Toggling the existing `MNEME_NO_FSYNC` knob isolates durability cost from CPU:
+
+| Path | fsync ON | fsync OFF (CPU floor) | fsync share |
+|---|---|---|---|
+| populate (ingest) | 10.6 ms/entry (**~93/s**) | 0.217 ms/entry (**~4,600/s**) | **~98 %** |
+| `remember` | 47.8 ms | 11.9 ms | ~75 % |
+| `forget` | 38.2 ms | 16.3 ms | ~57 % |
+
+A **durable group-commit** (one fsync barrier per transaction instead of ~5 per write / one per object key) therefore has **≈49× ingest headroom**. Correct, crash-safe design + its determinism-fixture blast radius: `DURABILITY_GROUP_COMMIT_DESIGN.md` (scoped as a reviewed change, not rushed — it rewrites the foundation-gate vault digests).
 
 **Root cause (measured, not assumed):** `seal_payload` mints a fresh per-object key via `FileKeyVault::new_key()`, which **fsyncs** the key file. `remember` performs ~5 `F_FULLFSYNC`s (`.incomplete` guard, object write, vault key, checkpoint append, HEAD) ⇒ ~46 ms, **independent of store size** (confirmed: 48 ms @ 10k ≈ 46 ms @ 100k). This is *durability cost*, not algorithmic cost. `merge` additionally rebuilds the semantic index over the **whole** target (O(n)), the only size-dependent write cost (13.8 s @ 10k → 18.9 s @ 100k).
 
@@ -95,10 +107,10 @@ An agent would need **~650 cold distinct recalls in a single turn** to reach hum
 |---|---|---|---|---|
 | 10,000 | 3.17 MiB | 332.1 | 65 MiB | 51.9 MiB |
 | 100,000 | 31.66 MiB | 332.0 | 233 MiB | 52.7 MiB |
-| 1,000,000 *(extrapolated)* | ~317 MiB | 332 | ~2.0–2.3 GiB | ~50–55 MiB |
+| **1,000,000 (measured)** | **317.5 MiB** | **332.9** | **2.43 GiB** | 52.6 MiB |
 
-- **Disk is exactly linear**: 332 B/entry at both scales (object record + per-key vault file + index/journal sidecars).
-- **Peak memory footprint is roughly constant (~52 MiB)** — transient working set is bounded. **Max RSS grows ~linearly with object count** (in-memory `objects`/index maps): 65 → 233 MiB for 10×; 1M extrapolates to ~2 GiB resident, comfortably within a 36 GiB host but a planning input for very large stores (a future on-disk/mmap object store would cap this).
+- **Disk is exactly linear**: ~332 B/entry across all three scales (object record + per-key vault file + index/journal sidecars).
+- **Peak memory footprint is constant (~52 MiB)** at every scale — transient working set is bounded. **Max RSS grows linearly with object count** (in-memory `objects`/index maps): 65 → 233 MiB → **2.43 GiB** (10k → 100k → 1M), comfortably within a 36 GiB host but a planning input for very large stores (a future on-disk/mmap object store would cap this).
 
 ---
 
@@ -108,7 +120,7 @@ An agent would need **~650 cold distinct recalls in a single turn** to reach hum
 |---|---|
 | `recall_verified` overhead un-amortizable below interactive latency even with batching | **NOT TRIGGERED** — overhead flat ~89 µs cold, 0 on cache hit; p99 ≤ 194 µs at 100k; cache −73 % |
 | `<1 ms` verify @ 10k (M4 Max, §19) | **PASS** — p99 174.9 µs |
-| Recall degrades with scale 10k→1M | **FALSE** — flat (SMT-depth-bound) |
+| Recall degrades with scale 10k→1M | **FALSE (measured)** — p50 142→160µs, p99 ≤194µs across 100× entries |
 | **Operational flags (not kill criteria):** ingest ~93/s fsync-bound; `merge` O(target) + fsync-serializes under concurrency; RSS ~linear in objects | **Optimizable** — see §8 |
 
 ---
@@ -152,4 +164,4 @@ Run tiers **sequentially in isolation** — concurrent tiers contend on the fsyn
 
 ## 10. Bottom line
 
-The §22 hot-path concern is **answered and clears**: verified recall is **flat and fast** (≤194 µs p99 to 100k, extrapolated flat to 1M), the verification tax is a **constant ~89 µs** that the verified-root cache amortizes to **near-zero** for repeat recalls, and **no recall kill criterion triggers**. The genuine scaling limits are on the **write/durability side** (fsync-bound ingest, O(target) merge, fsync-serialized concurrency) — real, measured, and optimizable, but outside the §22 recall kill criterion and not a correctness risk.
+The §22 hot-path concern is **answered and clears**: verified recall is **flat and fast — measured to 1M** (p99 188 µs @ 1M, +13 % p50 over 100× the entries), the verification tax is a **constant ~90 µs** that the verified-root cache amortizes to **37 µs (near-zero)** for repeat recalls, and **no recall kill criterion triggers**. The genuine scaling limits are on the **write/durability side** — fsync-bound ingest (measured ≈49× headroom for a durable group-commit), fsync-serialized concurrent merge — all real, measured, and optimizable (`DURABILITY_GROUP_COMMIT_DESIGN.md`), but outside the §22 recall kill criterion and not a correctness risk.
