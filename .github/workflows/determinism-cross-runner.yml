@@ -71,20 +71,24 @@ jobs:
       - name: Download runner reports
         uses: actions/download-artifact@v4
         with:
+          # NO merge-multiple: keep each runner's report under its own artifact
+          # subdir (artifacts/foundation-gate-gh-{ubuntu,macos}/...). Merging would
+          # collapse both `foundation.report.json` files onto each other.
           pattern: foundation-gate-*
-          merge-multiple: true
           path: artifacts
 
       - name: Compare foundation-gate digests across runners
         run: |
           set -euo pipefail
-          UBUNTU="$(find artifacts -path '*/gh-ubuntu/foundation.report.json' | head -1)"
-          MACOS="$(find artifacts -path '*/gh-macos/foundation.report.json' | head -1)"
+          UBUNTU="$(find artifacts -path '*foundation-gate-gh-ubuntu*/foundation.report.json' | head -1)"
+          MACOS="$(find artifacts -path '*foundation-gate-gh-macos*/foundation.report.json' | head -1)"
           if [[ -z "$UBUNTU" || -z "$MACOS" ]]; then
             echo "Missing cross-runner reports (ubuntu=$UBUNTU macos=$MACOS)" >&2
             find artifacts -type f >&2 || true
             exit 1
           fi
+          echo "ubuntu report: $UBUNTU"
+          echo "macos  report: $MACOS"
           bash scripts/ci/determinism-cross-runner.sh compare \
             "$UBUNTU" "$MACOS" gh-ubuntu gh-macos
 
