@@ -1,0 +1,49 @@
+# Heavy proofs that are too slow for per-PR CI: sustained fuzz (§17.4) and the
+# §19/§22 10k recall perf budget. Run nightly + on demand so regressions surface
+# continuously instead of only in a local `validation-lane full`.
+name: Nightly heavy proofs
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz-meaningful:
+    name: fuzz (≥30s/target × 6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/nightly-fuzz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-nightly-fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || cargo install cargo-fuzz
+      - name: Sustained fuzz (all parser/verifier targets)
+        run: bash scripts/ci/fuzz-meaningful.sh
+
+  bench-recall:
+    name: 10k recall perf budget (<1ms)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/nightly-bench
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-nightly-bench
+      - name: Recall perf budget (§19/§22)
+        run: bash scripts/ci/bench-recall-optional.sh

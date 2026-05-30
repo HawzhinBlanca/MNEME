@@ -53,7 +53,7 @@ scripts/demo/killer-demo.sh
 | | GDPR shred + prove absent | **PASS** (e2e) |
 | | Tamper suite ≥120 cases | **PASS** (606 store generative executed; 156 verify tamper cases counted from source by `tamper_suite_meets_150_floor_counted_from_source`, no hand-typed constant) |
 | | CRDT-less paths fuzzed | **PASS** (dcbor, smt, cap, receipt, index_wire, sync_message_parse) |
-| | MCP semantic agent recall | **NEEDS WORK** (MCP wrapper present; live Claude path not CI-gated) |
+| | MCP semantic agent recall | **PASS** (real-client path) — the official `@modelcontextprotocol/sdk` client completes the `initialize` handshake against the `mneme-mcp` binary, discovers tools, and gets **receipt-verified** `memory.recall` (`recall_verified` only, INV-5) with content round-tripping; CI-gated `e2e/mcp/sdk-client.test.mjs`. *Live-LLM-in-the-loop is the optional credential-gated extra.* |
 | | MST merge / anti-entropy | **PASS** (`mneme-crdt` merge + `merge_convergence` proptest; `mnemed` two-peer key convergence; **object sync over the wire**: `Store::merge_from_snapshot` + `mnemed` `MSG_SNAPSHOT` frames, `two_peer_ws_sync` converges `key_index_root`/`dag_head_root` over a real WebSocket and rejects in-transit object tamper) |
 | | Two-machine same root | **PARTIAL** — over-the-wire object sync + content-root convergence is now implemented & tested (`two_peer_ws_sync`); cross-**physical-host** determinism still requires a real peer: run `MNEME_SECOND_HOST=user@peer scripts/ci/determinism-two-machine.sh` (default Mode A is same-host and prints an UNPROVEN banner; `MNEME_STRICT_CROSS_HOST=1` fails closed without a peer) |
 | | Tamper ≥150 | **PASS** (606 store generative + 156 verify tamper cases ≫150; the verify count is computed from source, not a hand-typed constant) |
@@ -65,7 +65,7 @@ scripts/demo/killer-demo.sh
 | | Cross-impl Appendix B vectors | **PASS** (`mneme-crossref` is an independent reference crate with no `mneme-*` deps; `scripts/ci/cross-implementation-vectors.sh` reproduces committed Appendix B bytes) |
 | | 10k recall perf budget | **PASS** — populate 10k **109.9 s**; `recall_verified` **197.7 µs** @ 10k (release isolated; `out/readiness/final-ready-20260531/13-bench-recall.log`); strict **<1000 µs** gate in `tests/bench_recall.rs`; wired in `validation-lane.sh full` via `bench-recall-optional.sh` |
 
-**Overall 90-day milestone: PASS (single-host kernel)** — correctness, tamper, cross-impl Appendix B, dual-workspace determinism, and 10k recall perf budget pass on this host. Live MCP agent path and SSH two-machine determinism remain operational follow-ups (see `READINESS.md`).
+**Overall 90-day milestone: PASS (single-host kernel)** — correctness, tamper, cross-impl Appendix B, dual-workspace determinism, 10k recall perf budget, and real-client MCP agent recall pass on this host; cross-host determinism is proven by the ubuntu-vs-macOS cross-runner. The only credential-gated follow-ups are a live-LLM MCP loop and the named SSH two-machine peer (see `READINESS.md`).
 
 ## Status
 

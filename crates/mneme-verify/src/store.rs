@@ -22,6 +22,10 @@ pub struct SignatureOnlyHead {
     pub root: Root,
 }
 
+/// Signature-only head check. **NOT a tamper gate** (no object scan): agent reads
+/// use `Store::recall_verified`, the full on-disk gate is [`verify_store`], and
+/// `adoption_lint` forbids `mneme-cli` from calling this. Hidden from the API.
+#[doc(hidden)]
 pub fn verify_signed_head_only(
     root: &Root,
     trust: &TrustConfig,

@@ -34,4 +34,21 @@ if [[ -n "$INDEX_HITS" ]]; then
   exit 1
 fi
 
+# Extended trusted surface (§17.6 / TCB_MANIFEST.md): `verify_store` parses the
+# on-disk object-keys / key-index sidecars via `mneme-index::key_index_load`, so
+# that parser is part of the trusted surface even though it lives outside the
+# budgeted `mneme-verify` crate. It is fully-trusted (no test module) and must also
+# carry no panic vectors. Linting the whole crate would false-positive on legit
+# `as`-casts elsewhere, so we lint exactly this file.
+TRUSTED_PARSER="$ROOT/crates/mneme-index/src/key_index_load.rs"
+if [[ -f "$TRUSTED_PARSER" ]]; then
+  PARSER_HITS="$(grep -En "$FORBIDDEN" "$TRUSTED_PARSER" 2>/dev/null || true)"
+  if [[ -n "$PARSER_HITS" ]]; then
+    echo "TCB guard FAILED — forbidden patterns in trusted parser key_index_load.rs:"
+    echo "$PARSER_HITS"
+    exit 1
+  fi
+  echo "TCB guard: trusted parser key_index_load.rs clean"
+fi
+
 echo "TCB guard: mneme-verify source clean (no forbidden patterns, no slice-index panics)"

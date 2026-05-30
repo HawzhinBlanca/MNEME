@@ -93,8 +93,8 @@ jobs:
             npm install
           fi
 
-      - name: Build mneme CLI (release)
-        run: cargo build -p mneme-cli --release
+      - name: Build mneme CLI + MCP server (release)
+        run: cargo build -p mneme-cli -p mneme-mcp --release
 
       - name: Rust CLI integration (cli_e2e.rs)
         run: cargo test -p mneme-cli --test cli_e2e -- --nocapture
@@ -103,6 +103,11 @@ jobs:
         env:
           MNEME_BIN: ${{ github.workspace }}/out/ci-targets/e2e-cli/release/mneme
         run: node --test e2e/cli/*.test.mjs
+
+      - name: Real MCP SDK client interop (e2e/mcp/*.test.mjs)
+        env:
+          MNEME_MCP_BIN: ${{ github.workspace }}/out/ci-targets/e2e-cli/release/mneme-mcp
+        run: node --test e2e/mcp/*.test.mjs
 
       - name: Install Playwright Chromium
         run: npx playwright install chromium --with-deps
