@@ -88,10 +88,31 @@ jobs:
           bash scripts/ci/determinism-cross-runner.sh compare \
             "$UBUNTU" "$MACOS" gh-ubuntu gh-macos
 
+  # `secrets.*` is NOT allowed in a job-level `if:` (GitHub rejects the whole
+  # workflow file → "workflow file issue"). Read the secret inside a step, expose a
+  # boolean output, and gate the optional SSH-peer job on that output instead.
+  detect-peer:
+    name: detect SSH peer secret
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_peer: ${{ steps.check.outputs.has_peer }}
+    steps:
+      - id: check
+        env:
+          PEER: ${{ secrets.MNEME_SECOND_HOST }}
+        run: |
+          if [[ -n "$PEER" ]]; then
+            echo "has_peer=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_peer=false" >> "$GITHUB_OUTPUT"
+          fi
+
   determinism-ssh-peer:
     name: determinism (SSH peer — ops)
     runs-on: ubuntu-latest
-    if: ${{ secrets.MNEME_SECOND_HOST != '' }}
+    needs: detect-peer
+    if: ${{ needs.detect-peer.outputs.has_peer == 'true' }}
     timeout-minutes: 45
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/ssh-peer
