@@ -8,4 +8,13 @@ Pinned digests checked on nightly reliability runs. Populated by the integration
 
 Do not refresh golden files from feature branches without running `validation-lane determinism` twice on clean trees.
 
-Two-machine procedure: see [docs/MNEME_SECOND_HOST.md](../../docs/MNEME_SECOND_HOST.md). Local same-host check: `bash scripts/ci/determinism-local-second-host.sh`.
+## Determinism checks (what each gate proves)
+
+| Check | Command | CI? | Cross-host? |
+|---|---|---|---|
+| Pinned golden match | `check-foundation-digests.sh <report>` | Yes | N/A |
+| Dual-workspace isolation | `determinism-two-machine.sh` (default) | Yes | No — same host, two rsync trees |
+| Local two-run smoke | `determinism-local-second-host.sh` | Optional | No |
+| SSH peer | `MNEME_SECOND_HOST=… determinism-two-machine.sh` | Ops / optional GH job | Yes |
+
+Procedure and CI template: [docs/MNEME_SECOND_HOST.md](../../docs/MNEME_SECOND_HOST.md).

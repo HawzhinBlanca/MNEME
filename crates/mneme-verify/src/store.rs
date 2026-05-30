@@ -17,12 +17,12 @@ pub struct RootReport {
     pub object_count: usize,
 }
 
-pub fn verify_store_head(root: &Root, trust: &TrustConfig) -> Result<RootReport, MnemeError> {
+/// In-memory root signature only — not a store integrity gate (see [`verify_store`]).
+pub struct SignatureOnlyHead { pub root: Root, }
+
+pub fn verify_store_head(root: &Root, trust: &TrustConfig) -> Result<SignatureOnlyHead, MnemeError> {
     verify_root(root, trust, None)?;
-    Ok(RootReport {
-        root: root.clone(),
-        object_count: 0,
-    })
+    Ok(SignatureOnlyHead { root: root.clone() })
 }
 
 /// Fail-closed verifier for an on-disk store directory (§7, §10).

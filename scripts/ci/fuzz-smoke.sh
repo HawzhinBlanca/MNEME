@@ -7,7 +7,9 @@ cd "$ROOT"
 
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-fuzz}"
+mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-fuzz-smoke}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/out/agent-targets/fuzz}"
+mkdir -p "$CARGO_TARGET_DIR"
 
 if [[ ! -d fuzz ]] || ! command -v cargo-fuzz &>/dev/null; then
   echo "fuzz-smoke: fuzz/ targets or cargo-fuzz not present (§17.4) — failing closed." >&2
@@ -20,7 +22,13 @@ if ! rustup run "$FUZZ_TOOLCHAIN" rustc -V &>/dev/null; then
   exit 1
 fi
 
-for target in dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse; do
+FUZZ_TARGETS=(dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse)
+for target in "${FUZZ_TARGETS[@]}"; do
+  corpus="$ROOT/fuzz/corpus/$target"
+  if [[ ! -d "$corpus" ]] || [[ -z "$(find "$corpus" -type f 2>/dev/null | head -n 1)" ]]; then
+    mkdir -p "$corpus"
+    printf '\x00' >"$corpus/seed_minimal"
+  fi
   cargo "+${FUZZ_TOOLCHAIN}" fuzz run "$target" -- -runs=16
 done
 echo "fuzz-smoke: OK (dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse)"

@@ -138,7 +138,7 @@ async fn auth_verify_valid_capability() {
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{}/v1/auth/verify", h.http_base()))
-        .json(&json!({ "capability_b64": mnemed::cap_to_b64(&h.agent_cap) }))
+        .json(&json!({ "capability_b64": mnemed::cap_to_b64(&h.agent_cap).expect("cap b64") }))
         .send()
         .await
         .expect("auth verify");

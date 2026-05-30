@@ -1,4 +1,7 @@
 //! MNEME store kernel: open / remember / recall_verified / forget / promote (blueprint §7).
+//!
+//! **INV-5:** Agent-facing reads use [`Store::recall_verified`] / [`Store::recall_verified_default`]
+//! only. Untrusted recall assembly is `pub(crate)` inside this crate.
 
 mod atomic;
 mod forget;
@@ -151,7 +154,7 @@ impl Store {
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.commit_root_inner()?;
             pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
-            Ok((id, self.current_root()))
+            Ok((id, self.current_root()?))
         })();
 
         match result {
@@ -274,6 +277,7 @@ impl Store {
         Ok((id, id_bytes))
     }
 
+    /// Fail-closed recall: untrusted index fetch plus [`verify_recall`] / semantic gate (INV-5).
     pub fn recall_verified(
         &self,
         query: &Query,
@@ -368,7 +372,7 @@ impl Store {
             .ok_or(MnemeError::ObjectTampered)?;
         let mut record: ObjectRecord = from_bytes_strict(&bytes)?;
         if TrustTier::from_u8(record.trust_tier)? >= to {
-            return Ok(self.current_root());
+            return self.current_root();
         }
         record.trust_tier = to.as_u8();
         self.hlc.tick_local(self.hlc.wall_ms.saturating_add(1));
@@ -402,7 +406,7 @@ impl Store {
             layout::persist_embeddings(&self.path, self)?;
             self.rebuild_semantic_index()?;
             self.commit_root_inner()?;
-            Ok(self.current_root())
+            self.current_root()
         })();
 
         match result {
@@ -429,7 +433,7 @@ impl Store {
     }
 
     pub fn head(&self) -> Result<(Root, Option<Root>), MnemeError> {
-        let current = self.current_root();
+        let current = self.current_root()?;
         let previous = if self.roots.len() > 1 {
             Some(self.roots[self.roots.len() - 2].clone())
         } else {
@@ -438,8 +442,11 @@ impl Store {
         Ok((current, previous))
     }
 
-    pub fn current_root(&self) -> Root {
-        self.roots.last().cloned().expect("genesis root")
+    pub fn current_root(&self) -> Result<Root, MnemeError> {
+        self.roots
+            .last()
+            .cloned()
+            .ok_or(MnemeError::RootInconsistent)
     }
 
     pub fn tamper_object_bytes(&mut self, id: &[u8; 32]) -> Result<(), MnemeError> {

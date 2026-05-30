@@ -2,6 +2,8 @@
 # MNEME validation ladder (blueprint §18).
 #
 # Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full>
+# Fuzz: full → fuzz-meaningful.sh (≥30s/target, 6 targets); quick uses kill-resume only.
+#       Standalone smoke: scripts/ci/fuzz-smoke.sh (-runs=16).
 # Parallel agents: set CARGO_TARGET_DIR=out/agent-targets/ci-harness (or per-lane default applies).
 set -euo pipefail
 
@@ -32,6 +34,7 @@ case "$LANE" in
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
     bash scripts/ci/kill-resume-smoke.sh
+    bash scripts/ci/mcp-smoke.sh
     ;;
 
   crypto)
@@ -93,7 +96,8 @@ case "$LANE" in
     bash scripts/ci/cross-implementation-vectors.sh
     cargo test --workspace -- --nocapture
     bash scripts/ci/bench-recall-optional.sh
-    bash scripts/ci/fuzz-smoke.sh
+    # §17.4 sustained fuzz (≥30s/target, seeded corpus); 16-run smoke is quick-only.
+    bash scripts/ci/fuzz-meaningful.sh
     bash scripts/ci/check-test-vectors.sh
     bash scripts/ci/check-foundation-digests.sh
     ;;

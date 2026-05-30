@@ -46,7 +46,7 @@ impl Store {
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.commit_root_inner()?;
             pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
-            Ok(self.current_root())
+            self.current_root()
         })();
 
         match result {

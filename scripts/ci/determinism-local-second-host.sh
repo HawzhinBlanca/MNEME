@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Local two-run determinism check (B6 partial): same host, two isolated out dirs.
-# Full §17.7 proof still requires MNEME_SECOND_HOST — see docs/MNEME_SECOND_HOST.md.
+# Local two-run determinism smoke: same host, two isolated out dirs.
+# Weaker than dual-workspace (shared checkout/target semantics).
+# CI default: scripts/ci/determinism-two-machine.sh (dual-workspace).
+# Full §17.7 cross-host proof: MNEME_SECOND_HOST — see docs/MNEME_SECOND_HOST.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

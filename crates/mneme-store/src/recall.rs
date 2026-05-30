@@ -7,12 +7,13 @@ use mneme_core::{
     MnemeError, ObjectId, ObjectRecord, ObjectRef, Procedure, Query, TrustTier, from_bytes_strict,
 };
 use mneme_index::{
-    SEMANTIC_BACKEND_ENABLED, default_key_procedure, is_key_index_procedure, procedure_id,
+    SEMANTIC_BACKEND_ENABLED, is_key_index_procedure, procedure_id,
 };
 
 impl Store {
-    /// Key-index or semantic recall under a declared procedure (§7). Produces an untrusted `Recall`.
-    pub fn recall(
+    /// Internal untrusted recall builder for [`Store::recall_verified`] (§7, INV-5).
+    /// External callers must use [`Store::recall_verified`] or [`Store::recall_verified_default`].
+    pub(crate) fn recall(
         &self,
         query: &Query,
         proc: &Procedure,
@@ -23,7 +24,7 @@ impl Store {
             return Err(MnemeError::CapDenied);
         }
         let _pid = procedure_id(proc);
-        let root = self.current_root();
+        let root = self.current_root()?;
 
         if is_key_index_procedure(proc) {
             let proof = self.key_index.prove_membership(&query.logical_key)?;
@@ -72,15 +73,6 @@ impl Store {
         })
     }
 
-    /// Convenience: key recall with the default key-index procedure (v0 compat).
-    pub fn recall_key_default(
-        &self,
-        query: &Query,
-        cap: &Capability,
-    ) -> Result<Recall, MnemeError> {
-        let proc = default_key_procedure();
-        self.recall(query, &proc, cap)
-    }
 }
 
 impl Store {

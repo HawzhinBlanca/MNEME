@@ -17,18 +17,39 @@ struct Args {
 async fn main() {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
-    let http_addr: std::net::SocketAddr = args.http.parse().expect("http addr");
-    let grpc_addr = args.grpc.map(|s| s.parse().expect("grpc addr"));
+    let http_addr = match args.http.parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            eprintln!("invalid --http address: {e}");
+            std::process::exit(1);
+        }
+    };
+    let grpc_addr = match args.grpc {
+        Some(s) => match s.parse() {
+            Ok(addr) => Some(addr),
+            Err(e) => {
+                eprintln!("invalid --grpc address: {e}");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
     let config = ServerConfig {
         http_addr,
         grpc_addr,
         rate_limit_per_minute: 120,
     };
-    let server = mnemed::start(config, &args.store).await;
+    let server = match mnemed::start(config, &args.store).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("failed to start mnemed: {e}");
+            std::process::exit(1);
+        }
+    };
     println!("mnemed listening on http://{}", server.http_addr);
     if let Some(g) = server.grpc_addr {
         println!("mnemed gRPC on {g}");
     }
-    tokio::signal::ctrl_c().await.expect("ctrl-c");
+    let _ = tokio::signal::ctrl_c().await;
     server.shutdown().await;
 }

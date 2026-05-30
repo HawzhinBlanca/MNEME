@@ -47,8 +47,8 @@ fn two_peer_stores_anti_entropy_converges_keys() {
     assert!(store_b.prove_membership(&key_b).is_ok());
 
     assert_eq!(
-        store_a.current_root().key_index_root,
-        store_b.current_root().key_index_root,
+        store_a.current_root().unwrap().key_index_root,
+        store_b.current_root().unwrap().key_index_root,
         "MST key-index roots converge after mutual merge"
     );
 }

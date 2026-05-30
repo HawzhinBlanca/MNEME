@@ -85,14 +85,24 @@ mod tests {
     #[test]
     fn envelope_tag_is_not_plonky2() {
         let tag = std::str::from_utf8(BINDING_ENVELOPE_TAG).expect("utf8 tag");
+        assert_eq!(tag, "MNEME-BINDING-ENVELOPE-v1");
         assert!(!tag.contains("PLONKY2"));
+        assert!(!tag.contains("SNARK"));
         assert!(!tag.contains("ZK"));
+        assert!(BINDING_HONESTY.contains("not zero-knowledge"));
+        assert!(!BINDING_HONESTY.to_uppercase().contains("PLONKY2"));
+        assert!(!BINDING_HONESTY.to_uppercase().contains("SNARK"));
     }
 
     #[test]
     fn privacy_fixture_roundtrip() {
         let raw = fs::read_to_string(fixture_path()).expect("fixture");
         let v: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        let fixture_tag = v["envelope_tag"].as_str().expect("envelope_tag");
+        let tag = std::str::from_utf8(BINDING_ENVELOPE_TAG).expect("utf8 tag");
+        assert_eq!(fixture_tag, tag);
+        assert!(!fixture_tag.contains("PLONKY2"));
+        assert!(!fixture_tag.contains("SNARK"));
         let id_hex = v["object_id"].as_str().expect("object_id");
         let emb_hex = v["embedding_commit"].as_str().expect("embedding_commit");
         let mut object_id = [0u8; 32];

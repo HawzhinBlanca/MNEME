@@ -90,11 +90,17 @@ impl SemanticIndex {
 
         let nodes: Vec<([u8; 32], Vec<[u8; 32]>)> = (0..self.merkle.leaf_count())
             .map(|i| {
-                let commit = self.merkle.leaf_hash(i).expect("leaf index in range");
-                let path = self.merkle.merkle_path(i).expect("path exists");
-                (commit, path)
+                let commit = self
+                    .merkle
+                    .leaf_hash(i)
+                    .ok_or(IndexError::ObjectNotIndexed)?;
+                let path = self
+                    .merkle
+                    .merkle_path(i)
+                    .ok_or(IndexError::ObjectNotIndexed)?;
+                Ok((commit, path))
             })
-            .collect();
+            .collect::<Result<_, IndexError>>()?;
 
         let vo = VerificationObject {
             nodes,

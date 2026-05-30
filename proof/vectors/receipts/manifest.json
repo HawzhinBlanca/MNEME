@@ -21,6 +21,10 @@
     }
   ],
   "partial_vectors": [
-    "zk/privacy_fixture.json"
+    {
+      "path": "zk/privacy_fixture.json",
+      "scope": "commitment_binding roundtrip only",
+      "honesty": "Tagged BLAKE3 binding envelope — NOT zero-knowledge, NOT SNARK, NOT Plonky2"
+    }
   ]
 }

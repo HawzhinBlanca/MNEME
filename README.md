@@ -12,9 +12,11 @@ MNEME makes two limits explicit everywhere this project speaks to users:
 
 2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. It does **not** prove the returned items are the true nearest neighbors.
 
-These limits appear in `MnemeError` messages (e.g. `ProcedureMismatch`, `BelowTierPolicy`, `ZkProofInvalid`), MCP tool descriptions (`mneme-mcp/src/honesty.rs`), and verifier exports (`HONESTY_PROCEDURE`).
+These limits appear in `MnemeError` messages (e.g. `ProcedureMismatch`, `BelowTierPolicy`, `ZkProofInvalid`), MCP tool descriptions (`mneme-mcp/src/honesty.rs`), and verifier exports (`HONESTY_PROCEDURE`, `BINDING_HONESTY`).
 
-Design and API docs must never imply semantic truth or exact-NN guarantees.
+The opt-in `commitment_binding` feature (`zk` alias) ships a **tagged BLAKE3 binding envelope only** — it binds `(object_id, embedding_commit)` to a semantic-leaf commitment and rejects forgeries. It is **not** zero-knowledge, **not** a SNARK, and **not** Plonky2. Full Plonky2/V3DB-style privacy receipts remain deferred.
+
+Design and API docs must never imply semantic truth, exact-NN guarantees, or SNARK/Plonky2 verification for the binding path.
 
 ## Validation ladder (§18)
 
@@ -52,7 +54,7 @@ scripts/demo/killer-demo.sh
 | **12-month** | MST merge / anti-entropy | **PASS** (`mneme-crdt` merge + `merge_convergence` proptest; `mnemed` two-peer key convergence) |
 | | Two-machine same root | **NEEDS WORK** (`determinism-two-machine.sh` is SSH-only and fails closed without `MNEME_SECOND_HOST`; local proxy is labeled LOCAL-ONLY) |
 | | Tamper ≥150 | **PASS** (830 store generative + 147 verify tamper tests ≫150 combined; verify inventory reconciled to 147 executed) |
-| | Plonky2 / ZK privacy receipts | **NEEDS WORK** (`commitment_binding` ships tagged BLAKE3 binding only — not SNARK; `proof/vectors/receipts/zk/` corpus for binding roundtrip) |
+| | Commitment-binding envelope (Plonky2 deferred) | **NEEDS WORK** — binding envelope only: tagged BLAKE3 via `commitment_binding` (`zk` alias); **NOT SNARK, NOT Plonky2**; roundtrip corpus at `proof/vectors/receipts/zk/privacy_fixture.json` |
 | | Chameleon redact + trapdoor docs | **PASS** (`mneme-forget` redact + `TRAPDOOR_CUSTODY.md`; CLI `--mode redact`) |
 | | `mnemed` Unix kernel API + sync frames | **PASS** (`crates/mnemed/src/unix.rs`; HTTP/gRPC retained for tests) |
 | | CLI merge + Sigstore attest | **PASS** (`mneme merge`, `mneme attest`) |

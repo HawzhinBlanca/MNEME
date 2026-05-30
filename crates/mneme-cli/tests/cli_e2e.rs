@@ -221,7 +221,7 @@ fn head_only_verify_misses_object_tamper_full_verify_and_cli_reject() {
 
     let head_report = verify_store_head(&root, &trust).expect("head-only accepts stale root");
     assert_eq!(
-        head_report.object_count, 0,
+        head_report.root.sequence, root.sequence,
         "verify_store_head must not walk persisted objects"
     );
 

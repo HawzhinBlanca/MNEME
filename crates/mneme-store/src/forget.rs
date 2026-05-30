@@ -76,7 +76,7 @@ impl Store {
                     logical_key: logical_key.clone(),
                     key_hash,
                 },
-                self.current_root(),
+                self.current_root()?,
             ))
         })();
 

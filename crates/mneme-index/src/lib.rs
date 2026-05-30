@@ -39,7 +39,8 @@ pub use commitment_binding::{
     prove_binding_receipt, verify_binding_receipt,
 };
 
-/// ADS backend enabled; Plonky2 SNARK remains unimplemented (`commitment_binding` is BLAKE3 only).
+/// ADS backend enabled when the `ads` feature is on.
+/// Privacy path (`commitment_binding` / `zk` alias) is a tagged BLAKE3 binding envelope only — not SNARK, not Plonky2.
 #[cfg(feature = "ads")]
 pub const SEMANTIC_BACKEND_ENABLED: bool = true;
 
@@ -114,7 +115,7 @@ mod tests {
     #[test]
     fn commitment_binding_receipt_is_not_zk() {
         use super::commitment_binding::{
-            BINDING_HONESTY, prove_binding_receipt, verify_binding_receipt,
+            BINDING_ENVELOPE_TAG, BINDING_HONESTY, prove_binding_receipt, verify_binding_receipt,
         };
         let object_id = [0x01; 32];
         let embedding_commit = [0x02; 32];
@@ -122,6 +123,11 @@ mod tests {
         let receipt = prove_binding_receipt(&object_id, &embedding_commit, public_commit);
         verify_binding_receipt(&receipt, &object_id, &embedding_commit).unwrap();
         assert!(BINDING_HONESTY.contains("not zero-knowledge"));
+        assert!(BINDING_HONESTY.contains("not truth"));
+        let tag = std::str::from_utf8(BINDING_ENVELOPE_TAG).expect("utf8 tag");
+        assert!(!tag.contains("PLONKY2"));
+        assert!(!tag.contains("SNARK"));
+        assert!(!tag.contains("ZK"));
     }
 
     #[test]

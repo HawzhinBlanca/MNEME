@@ -8,7 +8,7 @@ async fn websocket_sync_hello_root_proof() {
     let ws_url = format!("ws://{}/v1/sync", h.server.http_addr);
     let (mut ws, _) = connect_async(&ws_url).await.expect("ws connect");
 
-    let hello = mnemed::sync::encode_hello(&h.server.state, [0x02; 16]);
+    let hello = mnemed::sync::encode_hello(&h.server.state, [0x02; 16]).expect("hello");
     ws.send(tokio_tungstenite::tungstenite::Message::Binary(
         hello.into(),
     ))

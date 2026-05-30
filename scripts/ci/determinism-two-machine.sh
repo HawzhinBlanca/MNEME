@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Two-machine determinism gate (blueprint §17.7, §19 12-month, B6).
+# Two-machine determinism gate (blueprint §17.7, audit B4).
 #
-# Mode A — remote SSH (full §17.7): set MNEME_SECOND_HOST=user@peer.example
-# No fallback: same-host checks are LOCAL-ONLY and must use
-# determinism-local-second-host.sh instead.
+# Mode A — dual-workspace (default when MNEME_SECOND_HOST unset):
+#   rsync two isolated trees, independent CARGO_TARGET_DIR per workspace.
+#   Closes CI digest reproducibility; does NOT prove cross-host §17.7.
 #
-# Mode B — dual-workspace (default when MNEME_SECOND_HOST unset): rsync two trees,
-# isolated CARGO_TARGET_DIR per workspace (parallel-safe vs default target/).
+# Mode B — remote SSH (full §17.7): set MNEME_SECOND_HOST=user@peer.example
+#   Optional MNEME_REMOTE_ROOT when remote checkout path differs from driver ROOT.
+#   Localhost SSH is LOCAL-ONLY and must not be reported as cross-host proof.
 #
 # Usage:
 #   scripts/ci/determinism-two-machine.sh
@@ -28,13 +29,17 @@ fi
 TS="${MNEME_DETERMINISM_TS:-1970-01-01T00:00:00Z}"
 PINNED="$ROOT/proof/digests/foundation-gate.v1.json"
 
-DIGEST_KEYS=(
-  head_bytes_hex
-  root_preimage_hex
-  receipt_digest_hex
-  absent_proof_digest_hex
-  semantic_digest_hex
-)
+is_localhost_ssh_target() {
+  local host="$1"
+  case "${host#*@}" in
+    localhost | 127.0.0.1 | ::1 | "[::1]")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 compare_run_a_digests() {
   local report_a="$1"
@@ -81,6 +86,20 @@ PY
 run_ssh_remote() {
   local local_out="$ROOT/out/ci-two-machine-local"
   local remote_out="/tmp/mneme-two-machine-remote"
+  local remote_root="${MNEME_REMOTE_ROOT:-$ROOT}"
+
+  echo "determinism-two-machine: mode=SSH-REMOTE peer=$MNEME_SECOND_HOST"
+  if is_localhost_ssh_target "$MNEME_SECOND_HOST"; then
+    echo "determinism-two-machine: WARNING — MNEME_SECOND_HOST resolves to localhost." >&2
+    echo "  This is LOCAL-ONLY and does not satisfy §17.7 cross-host proof." >&2
+  fi
+
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$MNEME_SECOND_HOST" true; then
+    echo "determinism-two-machine: SSH preflight failed for MNEME_SECOND_HOST=$MNEME_SECOND_HOST" >&2
+    echo "  Ensure passwordless SSH (ssh -o BatchMode=yes $MNEME_SECOND_HOST true)." >&2
+    echo "  For CI without a peer, unset MNEME_SECOND_HOST to use dual-workspace mode." >&2
+    exit 1
+  fi
 
   rm -rf "$local_out"
   cargo run -p mneme-cli -- determinism foundation-gate \
@@ -90,8 +109,8 @@ run_ssh_remote() {
   export LOCAL_OUT="$local_out" REMOTE_OUT="$remote_out" TS ROOT
   ssh "$MNEME_SECOND_HOST" bash -s <<EOF
 set -euo pipefail
-cd "$ROOT"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+cd "$remote_root"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$remote_root/target}"
 rm -rf "$REMOTE_OUT"
 cargo run -p mneme-cli -- determinism foundation-gate \\
   --out "$REMOTE_OUT" \\
@@ -112,6 +131,7 @@ EOF
   bash "$ROOT/scripts/ci/check-foundation-digests.sh" "$local_out/foundation.report.json"
 
   echo "determinism-two-machine: SSH remote mode complete ($MNEME_SECOND_HOST)"
+  echo "  scope: §17.7 cross-host (when peer is a distinct physical host)"
 }
 
 run_dual_workspace() {
@@ -124,7 +144,8 @@ run_dual_workspace() {
   report_a="$out_a/foundation.report.json"
   report_b="$out_b/foundation.report.json"
 
-  echo "determinism-two-machine: dual-workspace isolation (no MNEME_SECOND_HOST)"
+  echo "determinism-two-machine: mode=CI-DUAL-WORKSPACE (no MNEME_SECOND_HOST)"
+  echo "  scope: CI digest reproducibility — NOT §17.7 cross-host proof (see audit B4)"
   echo "  isolation_root: $isolation_root"
 
   local rsync_excludes=(
@@ -167,6 +188,6 @@ if [[ -n "${MNEME_SECOND_HOST:-}" ]]; then
   run_ssh_remote
 else
   echo "determinism-two-machine: MNEME_SECOND_HOST unset — using dual-workspace isolation."
-  echo "  See docs/MNEME_SECOND_HOST.md for optional SSH peer proof."
+  echo "  SSH cross-host proof: docs/MNEME_SECOND_HOST.md"
   run_dual_workspace
 fi

@@ -114,7 +114,10 @@ impl SparseMerkleTree {
 
     pub fn root(&self) -> [u8; 32] {
         self.ensure_cache();
-        self.cache.borrow().root.expect("root cached after ensure")
+        self.cache
+            .borrow()
+            .root
+            .unwrap_or_else(empty_root)
     }
 
     pub fn upsert(&mut self, key: [u8; 32], value: [u8; 32]) {
@@ -174,18 +177,20 @@ impl SparseMerkleTree {
         if self.leaves.contains_key(key) {
             self.ensure_cache();
             let cache = self.cache.borrow();
-            let nodes = cache.nodes.as_ref().expect("nodes cached after ensure");
             let defaults = default_hashes();
-            return (0..TREE_DEPTH)
-                .map(|depth| {
-                    let child_depth = depth + 1;
-                    let sibling = sibling_prefix(key, child_depth);
-                    nodes
-                        .get(&(child_depth, sibling))
-                        .copied()
-                        .unwrap_or(defaults[TREE_DEPTH - child_depth])
-                })
-                .collect();
+            if let Some(nodes) = cache.nodes.as_ref() {
+                return (0..TREE_DEPTH)
+                    .map(|depth| {
+                        let child_depth = depth + 1;
+                        let sibling = sibling_prefix(key, child_depth);
+                        nodes
+                            .get(&(child_depth, sibling))
+                            .copied()
+                            .unwrap_or(defaults[TREE_DEPTH - child_depth])
+                    })
+                    .collect();
+            }
+            drop(cache);
         }
 
         // Non-membership: keys that share a prefix with an existing leaf need the
@@ -343,13 +348,17 @@ fn hash_subtree(
                 });
             }
             Work::Merge => {
-                let right = out.pop().expect("merge right");
-                let left = out.pop().expect("merge left");
+                let Some(right) = out.pop() else {
+                    return empty_root();
+                };
+                let Some(left) = out.pop() else {
+                    return empty_root();
+                };
                 out.push(hash_smt_internal(&left, &right));
             }
         }
     }
-    out.pop().expect("root hash")
+    out.pop().unwrap_or_else(empty_root)
 }
 
 pub fn root_from_leaves(leaves: &BTreeMap<[u8; 32], [u8; 32]>) -> [u8; 32] {

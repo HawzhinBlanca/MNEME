@@ -19,7 +19,7 @@ pub struct TestHarness {
 impl TestHarness {
     pub async fn new() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let (state, operator, agent) = mnemed::test_state(dir.path());
+        let (state, operator, agent) = mnemed::test_state(dir.path()).expect("test_state");
         let agent_cap = agent_cap(&operator, agent.public_key_bytes()).expect("agent cap");
         let tool_cap = tool_channel_cap(&operator, agent.public_key_bytes()).expect("tool cap");
         {
@@ -33,7 +33,7 @@ impl TestHarness {
             grpc_addr: Some("127.0.0.1:0".parse().expect("addr")),
             rate_limit_per_minute: 120,
         };
-        let server = start_with_state(config, state).await;
+        let server = start_with_state(config, state).await.expect("start");
         Self {
             _dir: dir,
             operator,
@@ -53,11 +53,11 @@ impl TestHarness {
     }
 
     pub fn agent_auth_header(&self) -> String {
-        format!("Bearer {}", cap_to_b64(&self.agent_cap))
+        format!("Bearer {}", cap_to_b64(&self.agent_cap).expect("cap b64"))
     }
 
     pub fn tool_auth_header(&self) -> String {
-        format!("Bearer {}", cap_to_b64(&self.tool_cap))
+        format!("Bearer {}", cap_to_b64(&self.tool_cap).expect("cap b64"))
     }
 }
 

@@ -22,9 +22,9 @@ async fn spawn_unix(path: PathBuf, state: mnemed::AppState) -> JoinHandle<()> {
 async fn unix_remember_and_head_roundtrip() {
     let dir = tempdir().expect("tempdir");
     let sock = dir.path().join("mneme.sock");
-    let (state, operator, agent) = test_state(dir.path());
+    let (state, operator, agent) = test_state(dir.path()).expect("test_state");
     let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
-    let cap_b64 = cap_to_b64(&cap);
+    let cap_b64 = cap_to_b64(&cap).expect("cap b64");
     {
         let mut store = state.store.lock().expect("lock");
         store.trust = store.trust.clone().with_writer(agent.public_key_bytes());
@@ -75,7 +75,7 @@ async fn unix_remember_and_head_roundtrip() {
 async fn unix_sync_hello_returns_root_proof() {
     let dir = tempdir().expect("tempdir");
     let sock = dir.path().join("sync.sock");
-    let (state, _operator, _agent) = test_state(dir.path());
+    let (state, _operator, _agent) = test_state(dir.path()).expect("test_state");
     let handle = spawn_unix(sock.clone(), state).await;
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

@@ -9,6 +9,7 @@ Fail-closed verifier TCB: root signature, membership/non-membership proofs, key 
 ```rust
 verify_root, verify_recall, verify_semantic_recall, verify_semantic_receipt
 verify_membership_proof, verify_store, verify_store_head
+SignatureOnlyHead, RootReport
 HONESTY_PROCEDURE  // re-exported honesty boundary (§3)
 TCB_LINE_BUDGET
 ```
@@ -16,6 +17,7 @@ TCB_LINE_BUDGET
 ## Invariants owned
 
 - **INV-5** Fail-closed reads — no entry path without verified receipt against signed root
+- **`verify_store_head`** — signature-only diagnostic; **not** a store integrity gate (use `verify_store`)
 - **INV-9** Typed `MnemeError` only on trusted path (no `anyhow`, no stringly escape hatch)
 - **§3 honesty** — exported `HONESTY_PROCEDURE` and semantic gate errors: authenticated `≠` true; receipts prove procedure-faithfulness over committed data, **not** exact nearest-neighbor optimality or semantic truth
 

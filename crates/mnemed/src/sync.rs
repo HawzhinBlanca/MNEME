@@ -50,7 +50,7 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
                 let response = match data[0] {
                     MSG_HELLO => handle_hello(&state, &data[1..]).await,
                     MSG_BYE => None,
-                    _ => Some(encode_root_proof(&state)),
+                    _ => encode_root_proof(&state),
                 };
                 if let Some(bytes) = response {
                     if socket.send(Message::Binary(bytes.into())).await.is_err() {
@@ -70,7 +70,7 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
 async fn handle_hello(state: &AppState, payload: &[u8]) -> Option<Vec<u8>> {
     let _hello: Hello = ciborium::from_reader(payload).ok()?;
     let store = state.store.lock().ok()?;
-    let root = store.current_root();
+    let root = store.current_root().ok()?;
     drop(store);
     let proof = RootProof {
         root_hash: root.preimage_hash,
@@ -84,24 +84,24 @@ async fn handle_hello(state: &AppState, payload: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn encode_root_proof(state: &AppState) -> Vec<u8> {
-    let store = state.store.lock().expect("store lock");
-    let root = store.current_root();
+fn encode_root_proof(state: &AppState) -> Option<Vec<u8>> {
+    let store = state.store.lock().ok()?;
+    let root = store.current_root().ok()?;
     let proof = RootProof {
         root_hash: root.preimage_hash,
         sequence: root.sequence,
     };
     let mut body = Vec::new();
-    ciborium::into_writer(&proof, &mut body).expect("canonical");
+    ciborium::into_writer(&proof, &mut body).ok()?;
     let mut out = Vec::with_capacity(1 + body.len());
     out.push(MSG_ROOT_PROOF);
     out.extend(body);
-    out
+    Some(out)
 }
 
-pub fn encode_hello(state: &AppState, node_id: [u8; 16]) -> Vec<u8> {
-    let store = state.store.lock().expect("store lock");
-    let root = store.current_root();
+pub fn encode_hello(state: &AppState, node_id: [u8; 16]) -> Option<Vec<u8>> {
+    let store = state.store.lock().ok()?;
+    let root = store.current_root().ok()?;
     let hello = Hello {
         proto_ver: 1,
         node_id,
@@ -109,9 +109,9 @@ pub fn encode_hello(state: &AppState, node_id: [u8; 16]) -> Vec<u8> {
         head_sig: root.signature.clone(),
     };
     let mut body = Vec::new();
-    ciborium::into_writer(&hello, &mut body).expect("canonical");
+    ciborium::into_writer(&hello, &mut body).map_err(|_| ()).ok()?;
     let mut out = Vec::with_capacity(1 + body.len());
     out.push(MSG_HELLO);
     out.extend(body);
-    out
+    Some(out)
 }

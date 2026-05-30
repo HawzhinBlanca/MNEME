@@ -104,6 +104,30 @@ fn forgery_store_head_accepts_no_objects_but_rejects_bad_sig() {
 }
 
 #[test]
+fn forgery_store_head_skips_object_integrity_verify_store_fails_closed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let f = build_valid_recall();
+    persist_forgery_store(dir.path(), &f);
+    let object_id = f.input.receipt.object_id;
+    let obj_hex = hex32(&object_id);
+    let obj_path = dir
+        .path()
+        .join(format!("objects/{}/{}.cbor", &obj_hex[..2], obj_hex));
+    let mut bytes = std::fs::read(&obj_path).expect("object bytes");
+    bytes[0] ^= 0x01;
+    std::fs::write(&obj_path, &bytes).expect("tamper object");
+
+    let head = verify_store_head(&f.input.root, &f.trust).expect("signature-only accepts head");
+    assert_eq!(head.root.preimage_hash, f.input.root.preimage_hash);
+
+    match verify_store(dir.path(), &f.trust) {
+        Err(MnemeError::ObjectTampered) | Err(MnemeError::SchemaDrift) | Err(MnemeError::RootInconsistent) => {}
+        Err(e) => panic!("verify_store must fail closed on tampered object, got {e:?}"),
+        Ok(_) => panic!("verify_store must reject tampered object bytes"),
+    }
+}
+
+#[test]
 fn forgery_semantic_receipt_binds_to_alien_semantic_commit() {
     let mut f = build_valid_semantic_recall();
     f.receipt.semantic_commit[0] ^= 0x01;

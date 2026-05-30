@@ -15,9 +15,9 @@ fast-hnsw = "1.0.1"
 [features]
 default = ["ads"]
 ads = []
-# Tagged BLAKE3 commitment-binding envelope (§9.2). NOT a SNARK; Plonky2 deferred.
+# Tagged BLAKE3 commitment-binding envelope (§9.2). Binding only — NOT zero-knowledge, NOT SNARK, NOT Plonky2.
 commitment_binding = []
-# Deprecated alias for `commitment_binding`.
+# Deprecated alias for `commitment_binding` (name does not imply Plonky2/SNARK).
 zk = ["commitment_binding"]
 
 [dev-dependencies]
