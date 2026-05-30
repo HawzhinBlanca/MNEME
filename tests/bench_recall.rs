@@ -7,7 +7,7 @@ use mneme_cap::agent_cap;
 use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_store::Store;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const BENCH_ENTRY_COUNT: usize = 10_000;
 const SIDECAR_REWRITE_ENTRY_COUNT: usize = 2_000;
@@ -415,5 +415,4 @@ fn bench_concurrent_merge_contention() {
         merges_per_s,
     );
     report("merge_contended", base, all_ns);
-    let _ = Duration::from_secs(0);
 }

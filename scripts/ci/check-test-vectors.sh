@@ -120,10 +120,25 @@ def validate_receipts(manifest):
             count += 1
     for item in manifest.get("partial_vectors", []):
         if isinstance(item, str):
-            require_payload(vector_root / "receipts" / item, "receipts partial")
+            require_partial(vector_root / "receipts" / item)
         elif isinstance(item, dict) and item.get("path"):
-            require_payload(vector_root / "receipts" / item["path"], "receipts partial")
+            require_partial(vector_root / "receipts" / item["path"])
     return count
+
+
+def require_partial(path: Path):
+    # Partial vectors may be a single payload file or a directory group (e.g.
+    # receipts/zk/): a directory must exist and hold at least one committed,
+    # non-empty payload. Path strings keep a trailing slash for directories.
+    if str(path).endswith("/") or path.is_dir():
+        if not path.is_dir():
+            errors.append(f"receipts partial: missing dir {path}")
+            return
+        payloads = [p for p in path.iterdir() if p.is_file() and p.stat().st_size > 0]
+        if not payloads:
+            errors.append(f"receipts partial: empty dir {path}")
+        return
+    require_payload(path, "receipts partial")
 
 
 def validate_capabilities(manifest):
