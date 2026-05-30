@@ -6,9 +6,7 @@ use mneme_cap::Capability;
 use mneme_core::{
     MnemeError, ObjectId, ObjectRecord, ObjectRef, Procedure, Query, TrustTier, from_bytes_strict,
 };
-use mneme_index::{
-    SEMANTIC_BACKEND_ENABLED, is_key_index_procedure, procedure_id,
-};
+use mneme_index::{SEMANTIC_BACKEND_ENABLED, is_key_index_procedure, procedure_id};
 
 impl Store {
     /// Internal untrusted recall builder for [`Store::recall_verified`] (§7, INV-5).
@@ -72,7 +70,6 @@ impl Store {
             root,
         })
     }
-
 }
 
 impl Store {

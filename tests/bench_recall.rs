@@ -180,25 +180,27 @@ fn bench_scale_ops() {
     let merge_iters = env_usize("MNEME_BENCH_MERGE_ITERS", 3);
 
     // Store lives in MNEME_BENCH_STORE_DIR (persistent, for disk measurement) or a
-    // tempdir. Keep the TempDir guard alive for the whole test.
-    let persistent = std::env::var("MNEME_BENCH_STORE_DIR").ok();
+    // tempdir. Keep the TempDir guard alive for the whole test. We retain the
+    // operator keypair so the merge peer can write with a trusted subject (the
+    // §9.4 merge gate rejects objects from unauthorized writers).
     let _tmp_guard;
-    let (mut store, cap, store_path) = if let Some(dir) = persistent {
+    let store_path = if let Some(dir) = std::env::var("MNEME_BENCH_STORE_DIR").ok() {
         let path = std::path::PathBuf::from(&dir);
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("mk store dir");
-        let operator = KeyPair::generate();
-        let agent = KeyPair::generate();
-        let cap = agent_cap(&operator, agent.public_key_bytes()).expect("agent cap");
-        let mut s = Store::create(&path, operator).expect("create");
-        s.trust_mut().authorized_writers.push(cap.subject);
-        (s, cap, path)
+        path
     } else {
-        let (s, cap, dir) = agent_store();
+        let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().to_path_buf();
         _tmp_guard = dir;
-        (s, cap, path)
+        path
     };
+    mneme_store::test_clear_pause();
+    let operator = KeyPair::generate();
+    let agent = KeyPair::generate();
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("agent cap");
+    let mut store = Store::create(&store_path, operator.clone()).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
 
     eprintln!(
         "BENCH meta scale={scale} recall_samples={recall_samples} write_samples={write_samples} merge_peer={merge_peer} merge_iters={merge_iters} store_path={}",
@@ -294,11 +296,10 @@ fn bench_scale_ops() {
         let mut merge_ns = Vec::with_capacity(merge_iters);
         for iter in 0..merge_iters {
             let peer_dir = tempfile::tempdir().expect("peer tempdir");
-            let operator = KeyPair::generate();
-            let pagent = KeyPair::generate();
-            let pcap = agent_cap(&operator, pagent.public_key_bytes()).expect("peer cap");
-            let mut peer = Store::create(peer_dir.path(), operator).expect("peer create");
-            peer.trust_mut().authorized_writers.push(pcap.subject);
+            // Peer writes with the SAME operator/cap subject the target trusts,
+            // so the §9.4 merge gate accepts the divergent objects.
+            let mut peer = Store::create(peer_dir.path(), operator.clone()).expect("peer create");
+            peer.trust_mut().authorized_writers.push(cap.subject);
             for j in 0..merge_peer {
                 let draft = Draft {
                     namespace: "peer".into(),
@@ -310,7 +311,7 @@ fn bench_scale_ops() {
                     trust_tier: None,
                     embedding: None,
                 };
-                peer.remember(draft, &pcap).expect("peer remember");
+                peer.remember(draft, &cap).expect("peer remember");
             }
             let t = Instant::now();
             store
@@ -365,7 +366,7 @@ fn bench_concurrent_merge_contention() {
                 let operator = KeyPair::from_seed([0x10u8.wrapping_add(tid as u8); 32]);
                 let agent = KeyPair::generate();
                 let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
-                let mut store = Store::create(dir.path(), operator).expect("create");
+                let mut store = Store::create(dir.path(), operator.clone()).expect("create");
                 store.trust_mut().authorized_writers.push(cap.subject);
                 store
                     .bench_populate_semantic_entries("bench", base, &cap)
@@ -374,11 +375,9 @@ fn bench_concurrent_merge_contention() {
                 let mut per_merge_ns = Vec::with_capacity(merges);
                 for m in 0..merges {
                     let peer_dir = tempfile::tempdir().expect("peer tempdir");
-                    let operator = KeyPair::generate();
-                    let pagent = KeyPair::generate();
-                    let pcap = agent_cap(&operator, pagent.public_key_bytes()).expect("peer cap");
-                    let mut peer = Store::create(peer_dir.path(), operator).expect("peer create");
-                    peer.trust_mut().authorized_writers.push(pcap.subject);
+                    let mut peer =
+                        Store::create(peer_dir.path(), operator.clone()).expect("peer create");
+                    peer.trust_mut().authorized_writers.push(cap.subject);
                     for j in 0..peer_entries {
                         let draft = Draft {
                             namespace: "peer".into(),
@@ -390,7 +389,7 @@ fn bench_concurrent_merge_contention() {
                             trust_tier: None,
                             embedding: None,
                         };
-                        peer.remember(draft, &pcap).expect("peer remember");
+                        peer.remember(draft, &cap).expect("peer remember");
                     }
                     let t = Instant::now();
                     store

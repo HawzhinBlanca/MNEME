@@ -109,7 +109,9 @@ pub fn encode_hello(state: &AppState, node_id: [u8; 16]) -> Option<Vec<u8>> {
         head_sig: root.signature.clone(),
     };
     let mut body = Vec::new();
-    ciborium::into_writer(&hello, &mut body).map_err(|_| ()).ok()?;
+    ciborium::into_writer(&hello, &mut body)
+        .map_err(|_| ())
+        .ok()?;
     let mut out = Vec::with_capacity(1 + body.len());
     out.push(MSG_HELLO);
     out.extend(body);

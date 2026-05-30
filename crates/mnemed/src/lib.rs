@@ -82,12 +82,10 @@ pub async fn start_with_state(
             path: config.http_addr.to_string(),
             kind: e.to_string(),
         })?;
-    let http_addr = listener
-        .local_addr()
-        .map_err(|e| MnemeError::IoFailed {
-            path: config.http_addr.to_string(),
-            kind: e.to_string(),
-        })?;
+    let http_addr = listener.local_addr().map_err(|e| MnemeError::IoFailed {
+        path: config.http_addr.to_string(),
+        kind: e.to_string(),
+    })?;
     let mut shutdown_rx_http = shutdown_rx.clone();
     let http_handle = tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, http_app)
@@ -104,10 +102,12 @@ pub async fn start_with_state(
     let mut grpc_addr = None;
 
     if let Some(addr) = config.grpc_addr {
-        let listener = TcpListener::bind(addr).await.map_err(|e| MnemeError::IoFailed {
-            path: addr.to_string(),
-            kind: e.to_string(),
-        })?;
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|e| MnemeError::IoFailed {
+                path: addr.to_string(),
+                kind: e.to_string(),
+            })?;
         let bound = listener.local_addr().map_err(|e| MnemeError::IoFailed {
             path: addr.to_string(),
             kind: e.to_string(),

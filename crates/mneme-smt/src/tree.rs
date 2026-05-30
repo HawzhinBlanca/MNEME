@@ -114,10 +114,7 @@ impl SparseMerkleTree {
 
     pub fn root(&self) -> [u8; 32] {
         self.ensure_cache();
-        self.cache
-            .borrow()
-            .root
-            .unwrap_or_else(empty_root)
+        self.cache.borrow().root.unwrap_or_else(empty_root)
     }
 
     pub fn upsert(&mut self, key: [u8; 32], value: [u8; 32]) {

@@ -45,3 +45,8 @@ harness = true
 name = "bench_recall"
 path = "../../tests/bench_recall.rs"
 harness = true
+
+[[test]]
+name = "chaos"
+path = "../../tests/chaos/mod.rs"
+harness = true
