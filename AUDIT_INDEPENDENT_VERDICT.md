@@ -81,15 +81,37 @@
 - **F-5 (Medium) — RESTATED.** "Two-machine determinism" is same-host dual-workspace CI reproducibility;
   §17.7 cross-host proof remains **OPEN** (`MNEME_SECOND_HOST` unset). READINESS now says so.
 
+### §22 hot-path performance delta (K1–K6, post-audit perf remediation)
+
+After the functional remediation above, the §22 benchmark gate was re-measured on the same M4 Max host.
+The before-fix run found verified-recall p99 breaching the §19 1 ms line at 25k/50k and an O(n) write path;
+both the named §22 mitigations (proof batching, session verified-root cache) were **absent**. The remediation
+implements root-caused fixes — **not** claim inflation — verified by reproduction. Full before/after with raw
+`BENCH ...` lines: `docs/benchmarks/BENCHMARK_REPORT_S22.md` §12; logs `out/benchmarks/s22-after-20260530T150620Z/`.
+
+- **K2 — CLOSED.** Vault now serves payload keys from an in-memory cache populated once on open (no per-recall
+  disk I/O). `recall_verified` p99 flattens to **150 / 181 / 167 µs** at 10k / 25k / 50k (was 136 µs / 2.73 ms /
+  4.15 ms) — **15–25× lower** beyond 10k. Isolated §19 gate **48.4 µs** (`s19_gate.log`).
+- **K3 — ADDRESSED.** Session recall cache keyed by `(signed root hash, key hash, min_tier)`, **fail-closed**:
+  any mutation rotates the signed root and drops the cache. The TCB (`mneme-verify`) is untouched and stays
+  in budget.
+- **K5 — CLOSED.** Journal-append sidecars + incremental SMT root make `remember`/`forget` **flat with scale**
+  (`remember` 656 ms→70 ms @10k, 3.11 s→48 ms @50k; `forget` 337 ms→56 ms @10k).
+- **K6 — IMPROVED.** `merge` writes only newly-merged objects: **436 s → 20.4 s @10k (21×)**; still O(merged-set).
+- **Honest residual:** ingest remains fsync-per-key-bound and `merge` linear in the merged-set — flagged, not
+  claimed fixed.
+
 ### Still open (unchanged from audit)
 
 - **F-3, F-6, F-7 (Low)** — unchanged; documented as defense-in-depth residuals in `READINESS.md`.
 
 ### Net effect on verdict
 
-The **High** finding (F-2) and the blocking **F-1** are closed and reproduced; F-4/F-5 are downgraded to
-honest deferrals rather than fixed. This moves the **single-host v0 kernel** to a defensible **READY**;
-the **unqualified / 12-month / multi-machine** system remains **NOT READY** (§11 + §17.7 + ZK + sustained
-fuzz outstanding).
+The **High** finding (F-2) and the blocking **F-1** are closed and reproduced (F-2's replay/rollback code is now
+**committed**, not just a working-tree change); the §22 perf gate (K1–K6) reproduces with verified-recall p99 flat
+below 1 ms across 10k→50k; F-4/F-5 are downgraded to honest deferrals rather than fixed. This moves the
+**single-host v0 kernel** to a defensible **READY**; the **unqualified / 12-month / multi-machine** system remains
+**NOT READY** (§11 + §17.7 + ZK + sustained fuzz outstanding).
 
-— MNEME team (remediation), reproductions under `out/readiness/continue-hard-20260530T122918Z/`
+— MNEME team (remediation), reproductions under `out/readiness/continue-hard-20260530T122918Z/` and
+`out/benchmarks/s22-after-20260530T150620Z/`

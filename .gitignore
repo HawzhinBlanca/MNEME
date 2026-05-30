@@ -8,3 +8,8 @@ package-lock.json
 /out/
 /out/agent-targets/
 **/*.incomplete
+# Tooling / fuzz transient artifacts — never commit.
+/.cocoindex_code/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
