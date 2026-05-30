@@ -6,7 +6,7 @@ mod atomic;
 mod checkpoint;
 mod wire;
 
-pub use checkpoint::CheckpointLog;
+pub use checkpoint::{CheckpointLog, max_signed_checkpoint};
 
 use mneme_core::{MnemeError, Root, RootPreimage, from_bytes_strict, to_bytes_canonical};
 use mneme_crypto::{KeyPair, verify_signature_bytes};

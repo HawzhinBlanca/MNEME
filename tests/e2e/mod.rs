@@ -15,7 +15,7 @@ use mneme_index::{default_key_procedure, default_semantic_procedure};
 use mneme_smt::SparseMerkleTree;
 use mneme_store::Store;
 use mneme_verify::{RecallContext, RecallInput, verify_recall};
-use mneme_verify::{verify_store, verify_store_head};
+use mneme_verify::{verify_signed_head_only, verify_store};
 use std::collections::BTreeMap;
 use tempfile::tempdir;
 
@@ -333,7 +333,7 @@ fn e2e_killer_demo_agent_a_vs_agent_b_adb() {
     let (root, _) = store.head().unwrap();
     let trust = store.trust().clone();
     assert!(
-        verify_store_head(&root, &trust).is_ok(),
+        verify_signed_head_only(&root, &trust).is_ok(),
         "signed head alone does not prove object integrity (B1 honesty)"
     );
     let verify_err = verify_store(store_dir.path(), &trust)
@@ -521,7 +521,7 @@ fn e2e_bypass_verify_store_head_with_tampered_object() {
     store.tamper_object_bytes(id.as_bytes()).unwrap();
     let (root, _) = store.head().unwrap();
     let trust = store.trust().clone();
-    let head = verify_store_head(&root, &trust).expect("head accepts valid signature only");
+    let head = verify_signed_head_only(&root, &trust).expect("head accepts valid signature only");
     assert_eq!(head.root.sequence, root.sequence);
     let verify_err = verify_store(store_dir.path(), &trust)
         .err()
@@ -1082,26 +1082,36 @@ fn hostile_areplay_rollback_resurrects_forgotten_entry_on_cold_open() {
     std::fs::write(&head_path, &pre_forget_head).unwrap();
     std::fs::write(&kidx_path, &pre_forget_kidx).unwrap();
 
-    let mut reopened = Store::open(dir.path(), operator).unwrap();
-    reopened.trust_mut().authorized_writers.push(cap.subject);
-    let q = Query {
-        logical_key: theme_key("gdpr", "pii"),
-        min_tier: TrustTier::Working,
-        embedding: None,
-    };
-    let result = reopened.recall_verified(&q, &default_key_procedure(), &cap);
-
     // INV-6 / §2.4 A-REPLAY: a forgotten entry must NOT be resurrectable by
-    // presenting a stale-but-validly-signed earlier root on cold open.
-    match result {
-        Err(_) => { /* defended */ }
-        Ok(entries) => panic!(
-            "A-REPLAY BYPASS: forgotten entry resurrected via cold-open rollback: {:?}",
-            entries
-                .iter()
-                .map(|e| e.plaintext.clone())
-                .collect::<Vec<_>>()
+    // presenting a stale-but-validly-signed earlier root on cold open. The
+    // checkpoint-log max-sequence scan (F-2 fix) rejects the rollback at
+    // `Store::open` itself, because the post-forget checkpoint (`roots/<seq>`)
+    // is still on disk above the rolled-back HEAD. Should open ever be relaxed,
+    // recall must still fail closed.
+    match Store::open(dir.path(), operator) {
+        Err(e) => assert_eq!(
+            e,
+            MnemeError::RootReplayed,
+            "cold-open rollback must fail closed with RootReplayed, got {e:?}"
         ),
+        Ok(mut reopened) => {
+            reopened.trust_mut().authorized_writers.push(cap.subject);
+            let q = Query {
+                logical_key: theme_key("gdpr", "pii"),
+                min_tier: TrustTier::Working,
+                embedding: None,
+            };
+            match reopened.recall_verified(&q, &default_key_procedure(), &cap) {
+                Err(_) => { /* defended at recall */ }
+                Ok(entries) => panic!(
+                    "A-REPLAY BYPASS: forgotten entry resurrected via cold-open rollback: {:?}",
+                    entries
+                        .iter()
+                        .map(|e| e.plaintext.clone())
+                        .collect::<Vec<_>>()
+                ),
+            }
+        }
     }
 }
 

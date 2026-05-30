@@ -184,7 +184,7 @@ fn bench_scale_ops() {
     // operator keypair so the merge peer can write with a trusted subject (the
     // §9.4 merge gate rejects objects from unauthorized writers).
     let _tmp_guard;
-    let store_path = if let Some(dir) = std::env::var("MNEME_BENCH_STORE_DIR").ok() {
+    let store_path = if let Ok(dir) = std::env::var("MNEME_BENCH_STORE_DIR") {
         let path = std::path::PathBuf::from(&dir);
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("mk store dir");

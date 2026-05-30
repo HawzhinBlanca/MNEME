@@ -1331,6 +1331,7 @@ dependencies = [
  "hex",
  "mneme-core",
  "mneme-smt",
+ "serde",
  "serde_json",
  "thiserror",
 ]

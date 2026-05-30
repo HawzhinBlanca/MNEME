@@ -11,6 +11,8 @@ mneme-smt.workspace = true
 blake3 = "1.8"
 thiserror.workspace = true
 fast-hnsw = "1.0.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 
 [features]
 default = ["ads"]

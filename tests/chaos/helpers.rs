@@ -107,6 +107,7 @@ pub struct ChaosTarget<'a> {
     pub golden_body: Vec<u8>,
 }
 
+#[allow(clippy::too_many_arguments)] // test helper: explicit golden-recall fixture params
 pub fn post_fault_checks_at(
     path: &Path,
     operator: &KeyPair,
@@ -147,8 +148,10 @@ fn post_fault_checks_inner(
     target: &ChaosTarget<'_>,
     expect_golden_recall: bool,
 ) -> PostFaultVerdict {
-    let mut v = PostFaultVerdict::default();
-    v.incomplete = target.path.join(".incomplete").exists();
+    let mut v = PostFaultVerdict {
+        incomplete: target.path.join(".incomplete").exists(),
+        ..Default::default()
+    };
 
     let trust = target.trust;
     let verify_out = catch_unwind(AssertUnwindSafe(|| verify_store(target.path, trust)));
@@ -294,6 +297,10 @@ fn readonly_dir(dir: &Path) {
     let _ = std::fs::set_permissions(dir, perms);
 }
 
+// Test-only: deliberately restore writability so the readonly fault tree can be
+// cleaned up by the tempdir guard. World-writability inside a throwaway temp dir
+// is acceptable here; the lint guards production code, not chaos fixtures.
+#[allow(clippy::permissions_set_readonly_false)]
 fn writable_dir(dir: &Path) {
     if dir.is_dir() {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {

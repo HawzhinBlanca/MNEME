@@ -1,14 +1,13 @@
 //! Stand-alone store verifier (§7 `verify_store`, boot-time / CI gate).
 
 use crate::root::verify_root;
-use mneme_core::{
-    MnemeError, ObjectId, ObjectRecord, Root, decode_hex32, from_bytes_strict, hash_obj,
-};
+use mneme_core::{MnemeError, ObjectId, ObjectRecord, Root, from_bytes_strict, hash_obj};
 use mneme_crypto::TrustConfig;
 use mneme_dag::DagIndex;
+use mneme_index::load_key_index_tree;
 use mneme_root::StoredRoot;
 use mneme_smt::SparseMerkleTree;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -28,17 +27,6 @@ pub fn verify_signed_head_only(
     verify_root(root, trust, None)?;
     Ok(SignatureOnlyHead { root: root.clone() })
 }
-#[deprecated(
-    since = "0.1.0",
-    note = "verify_signed_head_only; use verify_store for boot/CI"
-)]
-#[doc(hidden)]
-pub fn verify_store_head(
-    root: &Root,
-    trust: &TrustConfig,
-) -> Result<SignatureOnlyHead, MnemeError> {
-    verify_signed_head_only(root, trust)
-}
 /// Fail-closed verifier for an on-disk store directory (§7, §10).
 pub fn verify_store(path: &Path, trust: &TrustConfig) -> Result<RootReport, MnemeError> {
     if path.join(".incomplete").exists() {
@@ -50,7 +38,20 @@ pub fn verify_store(path: &Path, trust: &TrustConfig) -> Result<RootReport, Mnem
     }
     let previous = load_previous_root(path, stored.sequence)?;
     let root = stored.to_root();
-    verify_root(&root, trust, previous.as_ref())?;
+    // A-REPLAY / INV-6: scan the append-only checkpoint log; a HEAD below an
+    // on-disk signed checkpoint is a rollback, and the log's max HLC is the
+    // monotonic floor pinned into `last_seen_hlc` for the replay gate.
+    let mut trust = trust.clone();
+    if let Some((max_seq, max_hlc)) = mneme_root::max_signed_checkpoint(path, &trust.operator_keys)?
+    {
+        if max_seq > stored.sequence {
+            return Err(MnemeError::RootReplayed);
+        }
+        if trust.last_seen_hlc.map(|h| max_hlc > h).unwrap_or(true) {
+            trust.last_seen_hlc = Some(max_hlc);
+        }
+    }
+    verify_root(&root, &trust, previous.as_ref())?;
     let state = load_state(path)?;
     if state.key_index.root() != root.key_index_root || state.dag.root() != root.dag_head_root {
         return Err(MnemeError::RootInconsistent);
@@ -106,7 +107,7 @@ fn load_state(path: &Path) -> Result<LoadedState, MnemeError> {
     if objects_dir.exists() {
         walk_objects(&objects_dir, &mut objects)?;
     }
-    let key_index = load_key_index(path)?;
+    let key_index = load_key_index_tree(path)?;
     let mut dag = DagIndex::new();
     let entries = objects
         .iter()
@@ -123,59 +124,6 @@ fn load_state(path: &Path) -> Result<LoadedState, MnemeError> {
         dag,
         objects,
     })
-}
-
-#[derive(serde::Deserialize, Default)]
-struct KeyIndexSidecar {
-    entries: HashMap<String, String>,
-    tombstones: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-enum KeyIndexJournalEntry {
-    Upsert { key: String, object: String },
-    Tombstone { key: String },
-}
-
-fn load_key_index(path: &Path) -> Result<SparseMerkleTree, MnemeError> {
-    let sidecar_path = path.join("meta/key_index.json");
-    let mut sidecar = if sidecar_path.exists() {
-        let data = fs::read_to_string(&sidecar_path).map_err(|e| io_err(&sidecar_path, e))?;
-        serde_json::from_str(&data).map_err(|_| MnemeError::SerializationNonCanonical)?
-    } else {
-        KeyIndexSidecar::default()
-    };
-    let journal_path = path.join("meta/key_index.journal");
-    if journal_path.exists() {
-        let data = fs::read_to_string(&journal_path).map_err(|e| io_err(&journal_path, e))?;
-        for line in data.lines().filter(|l| !l.trim().is_empty()) {
-            match serde_json::from_str(line).map_err(|_| MnemeError::SerializationNonCanonical)? {
-                KeyIndexJournalEntry::Upsert { key, object } => {
-                    decode_hex32(&key)?;
-                    decode_hex32(&object)?;
-                    sidecar.tombstones.retain(|t| t != &key);
-                    sidecar.entries.insert(key, object);
-                }
-                KeyIndexJournalEntry::Tombstone { key } => {
-                    decode_hex32(&key)?;
-                    sidecar.entries.remove(&key);
-                    if !sidecar.tombstones.contains(&key) {
-                        sidecar.tombstones.push(key);
-                    }
-                }
-            }
-        }
-    }
-    let mut tree = SparseMerkleTree::new();
-    for (k, v) in sidecar.entries {
-        tree.upsert(decode_hex32(&k)?, decode_hex32(&v)?);
-    }
-    for t in sidecar.tombstones {
-        tree.tombstone(decode_hex32(&t)?);
-    }
-    tree.rebuild_root_cache();
-    Ok(tree)
 }
 
 fn walk_objects(dir: &Path, out: &mut BTreeMap<[u8; 32], Vec<u8>>) -> Result<(), MnemeError> {

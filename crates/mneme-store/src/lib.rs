@@ -88,11 +88,24 @@ impl Store {
 
     pub fn open(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
         layout::check_incomplete(path)?;
-        let trust = TrustConfig::new(operator.public_key_bytes());
+        let mut trust = TrustConfig::new(operator.public_key_bytes());
         let state = layout::load_state(path)?;
         let stored = layout::read_head(path)?;
         stored.verify_signature(&operator.verifying_key())?;
+        // A-REPLAY / INV-6: reject a cold open whose HEAD has been rolled back below
+        // an on-disk signed checkpoint, and pin the log's max HLC as the replay floor
+        // (mirrors `verify_store`; the `.incomplete` guard above covers the
+        // append→write_head crash window so this only fires on genuine rollback).
         let root = stored.to_root();
+        if let Some((max_seq, max_hlc)) =
+            mneme_root::max_signed_checkpoint(path, &trust.operator_keys)?
+        {
+            if max_seq > stored.sequence {
+                return Err(MnemeError::RootReplayed);
+            }
+            trust.last_seen_hlc = Some(max_hlc);
+        }
+        mneme_root::check_replay(&root, trust.last_seen_hlc)?;
         let mut store = Self {
             path: path.to_path_buf(),
             operator,

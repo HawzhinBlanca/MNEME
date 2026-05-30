@@ -15,8 +15,6 @@ pub use root::verify_root;
 pub use semantic::{
     HONESTY_PROCEDURE, SemanticRecallInput, verify_semantic_recall, verify_semantic_receipt,
 };
-#[allow(deprecated)]
-pub use store::verify_store_head;
 pub use store::{RootReport, SignatureOnlyHead, verify_signed_head_only, verify_store};
 
 /// TCB line budget (§17.6). Raise only with invariant justification.
