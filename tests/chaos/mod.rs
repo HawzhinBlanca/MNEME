@@ -207,11 +207,11 @@ fn fault_clock_skew_merge(iter: u32, seed: u64) {
 fn fault_clock_skew_merge_injected(iter: u32, seed: u64) {
     test_clear_pause();
 
-    // --- (a) deterministic convergence, independent of real wall time. ---
-    let conv_1 = merge_convergence_roots(seed);
-    std::thread::sleep(std::time::Duration::from_millis(3)); // real time passes
-    let conv_2 = merge_convergence_roots(seed);
-    let deterministic = conv_1 == conv_2;
+    // --- (a) deterministic, order-independent convergence (independent of
+    // real wall time, since no wall clock is read). Merging is a pure function
+    // of object content: A<-B and B<-A must reach the same state roots. ---
+    let deterministic = converges_order_independent(seed);
+    std::thread::sleep(std::time::Duration::from_millis(3)); // real time passes; must not matter
 
     // --- (b) live pair for the root replay-gate injection. ---
     let dir = tempdir().unwrap();
@@ -247,7 +247,6 @@ fn fault_clock_skew_merge_injected(iter: u32, seed: u64) {
 
     let mut replay_summary = String::from("no-current-root");
     let mut regression_rejected = false;
-    let mut forward_accepted = false;
     let mut regressed_accept_unsafe = false;
     if let Some(cur) = &cur {
         let mut trust_seen = trust.clone();
@@ -264,7 +263,7 @@ fn fault_clock_skew_merge_injected(iter: u32, seed: u64) {
 
         // FORWARD skew: monotonic future high-water mark. Benign => accepted.
         let forward = forge_successor(cur, [0xFFu8; 14], &operator);
-        forward_accepted = verify_root(&forward, &trust_seen, Some(cur)).is_ok();
+        let forward_accepted = verify_root(&forward, &trust_seen, Some(cur)).is_ok();
 
         replay_summary = format!("regressed={regressed_res:?} forward_accepted={forward_accepted}");
     }
@@ -337,10 +336,12 @@ fn forge_successor(cur: &Root, hlc_max: [u8; 14], operator: &KeyPair) -> Root {
     .to_root()
 }
 
-/// Build two peers deterministically (seeded operator, non-conflicting keys),
-/// merge B into A, and return (key_index_root, dag_head_root) of the merged
-/// HEAD. Equal inputs MUST yield equal roots regardless of real elapsed time.
-fn merge_convergence_roots(seed: u64) -> ([u8; 32], [u8; 32]) {
+/// Prove deterministic, order-independent convergence: build peers A and B
+/// once (AEAD nonces fix the object bytes), then merge B into a copy of A and
+/// A into a copy of B. Both replicas must reach IDENTICAL state roots
+/// (key_index_root, dag_head_root). Real elapsed wall time is irrelevant
+/// because the store reads no wall clock.
+fn converges_order_independent(seed: u64) -> bool {
     let dir = tempdir().unwrap();
     let path_a = dir.path().join("a");
     let path_b = dir.path().join("b");
@@ -348,11 +349,43 @@ fn merge_convergence_roots(seed: u64) -> ([u8; 32], [u8; 32]) {
     let cap = agent_cap(&operator, operator.public_key_bytes()).unwrap();
     build_skew_peer(&path_a, &operator, &cap, "k", b"alpha");
     build_skew_peer(&path_b, &operator, &cap, "k2", b"beta");
-    let mut a = Store::open(&path_a, operator.clone()).unwrap();
-    a.trust_mut().authorized_writers.push(cap.subject);
-    match a.merge_from_path(&path_b) {
-        Ok(root) => (root.key_index_root, root.dag_head_root),
-        Err(_) => ([0u8; 32], [0u8; 32]),
+
+    let a_copy = dir.path().join("a_copy");
+    let b_copy = dir.path().join("b_copy");
+    copy_dir_recursive(&path_a, &a_copy);
+    copy_dir_recursive(&path_b, &b_copy);
+
+    let ab = merge_into(&a_copy, &path_b, &operator, &cap); // A <- B
+    let ba = merge_into(&b_copy, &path_a, &operator, &cap); // B <- A
+    match (ab, ba) {
+        (Some(ab), Some(ba)) => {
+            ab.key_index_root == ba.key_index_root && ab.dag_head_root == ba.dag_head_root
+        }
+        _ => false,
+    }
+}
+
+fn merge_into(
+    local: &std::path::Path,
+    peer: &std::path::Path,
+    operator: &KeyPair,
+    cap: &mneme_cap::Capability,
+) -> Option<Root> {
+    let mut s = Store::open(local, operator.clone()).ok()?;
+    s.trust_mut().authorized_writers.push(cap.subject);
+    s.merge_from_path(peer).ok()
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst).unwrap();
+    for entry in std::fs::read_dir(src).unwrap().flatten() {
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to);
+        } else {
+            std::fs::copy(&from, &to).unwrap();
+        }
     }
 }
 

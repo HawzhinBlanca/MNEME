@@ -47,7 +47,7 @@ while [[ $(date +%s) -lt $end_epoch ]]; do
     echo "run $run: FAIL (see log)" >>"$SUMMARY"
     exit 1
   fi
-  grep '^CHAOS_ROW|' "$LOG" | tail -n $((ITERATIONS * 8)) | while IFS='|' read -r _ json; do
+  grep '^CHAOS_ROW|' "$LOG" | tail -n $((ITERATIONS * 9)) | while IFS='|' read -r _ json; do
     fault=$(echo "$json" | sed -n 's/.*"fault":"\([^"]*\)".*/\1/p')
     iter=$(echo "$json" | sed -n 's/.*"iter":\([0-9]*\).*/\1/p')
     injection=$(echo "$json" | sed -n 's/.*"injection_point":"\([^"]*\)".*/\1/p')
@@ -65,7 +65,7 @@ while [[ $(date +%s) -lt $end_epoch ]]; do
   done
 done
 
-total_rows=$((run * ITERATIONS * 8))
+total_rows=$((run * ITERATIONS * 9))
 unsafe_count=$(grep -c '^' "$UNSAFE_LOG" 2>/dev/null || true)
 unsafe_count=${unsafe_count:-0}
 
