@@ -247,6 +247,25 @@ fn bench_scale_ops() {
     }
     report("recall_verified", scale, verified_ns.clone());
 
+    // --- recall_verified CACHED (§22 mitigation: verified-root session cache) ----
+    // Repeat ONE fixed query: after the first verify, the K3 session cache keyed on
+    // (signed root hash, key hash, min_tier) returns the verified entries without
+    // re-running the verifier. This isolates the cache-hit cost vs the cold verify.
+    let cached_q = bench_query(scale, 42);
+    let _ = store
+        .recall_verified_default(&cached_q, &cap)
+        .expect("prime cache");
+    let mut cached_ns = Vec::with_capacity(recall_samples);
+    for _ in 0..recall_samples {
+        let t = Instant::now();
+        let e = store
+            .recall_verified_default(&cached_q, &cap)
+            .expect("recall_verified cached");
+        cached_ns.push(t.elapsed().as_nanos());
+        std::hint::black_box(&e);
+    }
+    report("recall_verified_cached", scale, cached_ns);
+
     // --- raw recall (untrusted assembly; verification overhead = verified - raw)
     let mut raw_ns = Vec::with_capacity(recall_samples);
     for i in 0..recall_samples {
