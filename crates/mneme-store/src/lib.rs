@@ -126,11 +126,33 @@ impl Store {
     }
 
     pub fn open(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
+        Self::open_pinned(path, operator, None)
+    }
+
+    /// Cold-open with an optional operator-supplied trusted root pin (§2.4 residual).
+    ///
+    /// INV-6 / `Store::open` already reject the *disk-detectable* A-REPLAY rollback
+    /// (a HEAD below an on-disk signed checkpoint). The remaining variant — an
+    /// attacker who **deletes** the newer checkpoint and rolls the entire store back
+    /// to a self-consistent older snapshot — is byte-indistinguishable from a
+    /// legitimately-older store and cannot be rejected from disk alone. When the
+    /// operator carries the expected HEAD `preimage_hash` out-of-band and passes it
+    /// here, a mismatch is rejected as `RootReplayed`, closing that residual.
+    pub fn open_pinned(
+        path: &Path,
+        operator: KeyPair,
+        pinned_root: Option<[u8; 32]>,
+    ) -> Result<Self, MnemeError> {
         layout::check_incomplete(path)?;
         let mut trust = TrustConfig::new(operator.public_key_bytes());
         let state = layout::load_state(path)?;
         let stored = layout::read_head(path)?;
         stored.verify_signature(&operator.verifying_key())?;
+        if let Some(expected) = pinned_root {
+            if stored.preimage_hash != expected {
+                return Err(MnemeError::RootReplayed);
+            }
+        }
         // A-REPLAY / INV-6: reject a cold open whose HEAD has been rolled back below
         // an on-disk signed checkpoint, and pin the log's max HLC as the replay floor
         // (mirrors `verify_store`; the `.incomplete` guard above covers the

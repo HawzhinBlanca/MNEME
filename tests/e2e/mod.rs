@@ -1268,3 +1268,65 @@ fn e2e_persisted_metadata_is_byte_deterministic() {
         assert_eq!(ba, bb, "{rel} must be byte-identical across processes");
     }
 }
+
+// --- §2.4 residual: operator root-pin defeats the full-snapshot rollback ---
+
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) {
+    std::fs::create_dir_all(dst).expect("mkdir");
+    for entry in std::fs::read_dir(src).expect("read_dir") {
+        let entry = entry.expect("entry");
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_all(&from, &to);
+        } else {
+            std::fs::copy(&from, &to).expect("copy");
+        }
+    }
+}
+
+/// The *delete-newer-checkpoint* rollback rolls the entire store back to a
+/// self-consistent older snapshot that is byte-indistinguishable from a
+/// legitimately-older store — `Store::open` (correctly) accepts it. An operator
+/// carrying the expected HEAD `preimage_hash` out-of-band closes the residual:
+/// `open_pinned` rejects the stale snapshot as `RootReplayed`.
+#[test]
+fn e2e_open_pinned_rejects_full_snapshot_rollback() {
+    let operator = KeyPair::from_seed([0x5a; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let dir = tempdir().expect("dir");
+    let store_path = dir.path().join("store");
+    let backup = dir.path().join("seq2-snapshot");
+
+    let mut store = Store::create(&store_path, operator.clone()).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    store
+        .remember(semantic_draft("user", "secret", b"VALUE-1"), &cap)
+        .expect("remember 1");
+    drop(store);
+    copy_dir_all(&store_path, &backup); // attacker's future self-consistent older tree
+
+    let mut store = Store::open(&store_path, operator.clone()).expect("reopen");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let (_id, seq3_root) = store
+        .remember(semantic_draft("user", "secret", b"VALUE-2"), &cap)
+        .expect("remember 2");
+    let pinned = seq3_root.preimage_hash;
+    drop(store);
+
+    // Attacker swaps the whole store for the older self-consistent snapshot.
+    std::fs::remove_dir_all(&store_path).expect("rm");
+    copy_dir_all(&backup, &store_path);
+
+    // Unpinned open ACCEPTS (the documented residual — indistinguishable from disk).
+    assert!(
+        Store::open(&store_path, operator.clone()).is_ok(),
+        "full-snapshot rollback is byte-indistinguishable without a pin"
+    );
+    // Pinned open REJECTS the stale snapshot.
+    match Store::open_pinned(&store_path, operator, Some(pinned)) {
+        Err(MnemeError::RootReplayed) => {}
+        Err(other) => panic!("pinned open must reject as RootReplayed, got {other:?}"),
+        Ok(_) => panic!("pinned open must reject the stale full-snapshot rollback"),
+    }
+}
