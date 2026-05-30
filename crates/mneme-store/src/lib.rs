@@ -27,10 +27,47 @@ use mneme_smt::NonMembershipProof;
 use mneme_verify::{
     RecallContext, RecallInput, SemanticRecallInput, verify_recall, verify_semantic_recall,
 };
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+/// Upper bound on distinct (key, tier) results held by the session recall cache.
+/// Bounded so a long sweep of unique queries cannot grow it without limit; once
+/// full the slot set is reset rather than evicted one-by-one (deterministic).
+const RECALL_CACHE_CAP: usize = 256;
+
+/// §22 session verified-recall cache (K3 "cache last verified root + receipt for
+/// repeated queries in a session"). Holds results that already passed
+/// [`verify_recall`], keyed by `(logical_key_hash, min_tier)` and bound to the
+/// signed root they were verified under. It is **fail-closed**: any store mutation
+/// commits a new root (new `preimage_hash`), so a stale `root_hash` invalidates the
+/// whole cache on the next read — a forgotten or superseded entry can never be
+/// served. Only key-index recalls are cached; semantic recalls bypass it.
+#[derive(Default)]
+struct RecallSessionCache {
+    root_hash: [u8; 32],
+    entries: HashMap<([u8; 32], u8), Vec<Entry>>,
+}
+
+impl RecallSessionCache {
+    fn lookup(&self, root_hash: &[u8; 32], key: &([u8; 32], u8)) -> Option<Vec<Entry>> {
+        if &self.root_hash != root_hash {
+            return None;
+        }
+        self.entries.get(key).cloned()
+    }
+
+    fn store(&mut self, root_hash: [u8; 32], key: ([u8; 32], u8), entries: &[Entry]) {
+        if self.root_hash != root_hash || self.entries.len() >= RECALL_CACHE_CAP {
+            self.entries.clear();
+            self.root_hash = root_hash;
+        }
+        self.entries.insert(key, entries.to_vec());
+    }
+}
+
 pub use layout::Tombstone;
+pub use merge::SyncSnapshot;
 pub use pause::{
     AFTER_APPEND_CHECKPOINT, AFTER_BEGIN_INCOMPLETE, AFTER_KEY_INDEX, AFTER_OBJECT_WRITE,
     AFTER_PERSIST_INDEX, AFTER_WRITE_HEAD, BEFORE_COMMIT_INCOMPLETE, test_clear_pause,
@@ -52,6 +89,7 @@ pub struct Store {
     roots: Vec<Root>,
     hlc: mneme_core::Hlc,
     sequence: u64,
+    recall_cache: RefCell<RecallSessionCache>,
 }
 
 pub struct Recall {
@@ -81,6 +119,7 @@ impl Store {
             roots: Vec::new(),
             hlc: mneme_core::Hlc::zero(node_id),
             sequence: 0,
+            recall_cache: RefCell::new(RecallSessionCache::default()),
         };
         store.commit_root()?;
         Ok(store)
@@ -121,6 +160,7 @@ impl Store {
             roots: vec![root.clone()],
             hlc: state.hlc,
             sequence: stored.sequence,
+            recall_cache: RefCell::new(RecallSessionCache::default()),
         };
         store.rebuild_semantic_index()?;
         Ok(store)
@@ -156,14 +196,19 @@ impl Store {
         pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
         let result = (|| -> Result<(ObjectId, Root), MnemeError> {
             let (id, _) = self.apply_remember_draft(&draft, cap, tier, true, true)?;
-            let key_hash = LogicalKey {
+            let logical_key = LogicalKey {
                 namespace: draft.namespace.clone(),
                 name: draft.logical_name.clone(),
-            }
-            .hash();
+            };
+            let key_hash = logical_key.hash();
+            // Incremental sidecar persistence: append-only journal entries instead
+            // of an O(n) `object_keys.json`/`embeddings.json` rewrite per write
+            // (§22 K5). Replay on open reconstructs the maps (`load_state`).
             layout::persist_key_index_upsert(&self.path, &key_hash, id.as_bytes())?;
-            layout::persist_object_keys(&self.path, self)?;
-            layout::persist_embeddings(&self.path, self)?;
+            layout::persist_object_keys_upsert(&self.path, id.as_bytes(), &logical_key)?;
+            if let Some(emb) = draft.embedding.as_ref() {
+                layout::persist_embeddings_upsert(&self.path, id.as_bytes(), emb)?;
+            }
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.commit_root_inner()?;
             pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
@@ -297,6 +342,24 @@ impl Store {
         proc: &Procedure,
         cap: &Capability,
     ) -> Result<Vec<Entry>, MnemeError> {
+        // Authorize once here (cap signature + read scope); the internal `recall`
+        // assembly no longer re-verifies, so neither cache hits nor misses pay a
+        // double cap check on the hot path.
+        self.authorize_read(query, cap)?;
+        // §22 K3 session cache: serve a repeated key-index query from the last
+        // verified result while the signed root is unchanged. Fail-closed — any
+        // store mutation rotates the signed root and invalidates the cache.
+        let cache_key = if mneme_index::is_key_index_procedure(proc) {
+            let root_hash = self.current_root()?.preimage_hash;
+            let key = (query.logical_key.hash(), query.min_tier.as_u8());
+            if let Some(entries) = self.recall_cache.borrow().lookup(&root_hash, &key) {
+                return Ok(entries);
+            }
+            Some((root_hash, key))
+        } else {
+            None
+        };
+
         let recall = self.recall(query, proc, cap)?;
         let previous_root = self.roots.get(self.roots.len().wrapping_sub(2));
         if let Some(receipt) = recall.receipt {
@@ -319,6 +382,11 @@ impl Store {
             };
             let mut entries = verify_recall(&input, query, &self.trust, &ctx)?;
             self.decrypt_entries(&mut entries)?;
+            if let Some((root_hash, key)) = cache_key {
+                self.recall_cache
+                    .borrow_mut()
+                    .store(root_hash, key, &entries);
+            }
             return Ok(entries);
         }
         if let Some(semantic_receipt) = recall.semantic_receipt {
@@ -354,9 +422,20 @@ impl Store {
     /// production API: this path is fail-open and must never be exposed to agents.
     #[doc(hidden)]
     pub fn bench_recall_raw(&self, query: &Query, cap: &Capability) -> Result<(), MnemeError> {
+        self.authorize_read(query, cap)?;
         let proc = mneme_index::default_key_procedure();
         let recall = self.recall(query, &proc, cap)?;
         std::hint::black_box(&recall);
+        Ok(())
+    }
+
+    /// Read authorization shared by all verified-recall entry points: cap
+    /// signature validity plus read scope for the query's namespace/tier (§7).
+    fn authorize_read(&self, query: &Query, cap: &Capability) -> Result<(), MnemeError> {
+        self.verify_cap(cap)?;
+        if !cap.permits_read(&query.logical_key.namespace, query.min_tier) {
+            return Err(MnemeError::CapDenied);
+        }
         Ok(())
     }
 

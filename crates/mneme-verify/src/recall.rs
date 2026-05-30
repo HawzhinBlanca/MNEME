@@ -50,6 +50,14 @@ pub fn verify_recall(
     verify_writer_and_tier(&record, trust, query)?;
     verify_not_forgotten(&recall.receipt.logical_key, ctx.key_index)?;
 
+    // F-6 layering contract: the TCB returns the integrity/provenance/authorization-
+    // verified `ObjectRecord`. `Entry.plaintext` here is the AEAD *ciphertext* body
+    // (`payload_enc.body`); AEAD-open against the per-key AAD is performed by the
+    // store layer (`Store::recall_verified` → `decrypt_entries`), which alone holds
+    // the key vault. Keeping decryption out of the verifier preserves the minimal
+    // TCB (§17.6) — the vault never enters the trusted line budget. A wholly-missing
+    // key (vs the tombstone gate above) likewise fails closed one layer out:
+    // `Store::recall` returns no receipt → `ReceiptRootMismatch`, never plaintext.
     Ok(vec![Entry {
         id: ObjectId(computed_id),
         record: record.clone(),

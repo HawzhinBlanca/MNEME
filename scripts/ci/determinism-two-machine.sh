@@ -201,6 +201,17 @@ run_dual_workspace() {
   echo "  scope: CI digest reproducibility — NOT §17.7 cross-host proof (see audit B4)"
   echo "  isolation_root: $isolation_root"
 
+  # F-B: dual-workspace is a SAME-HOST proxy. It must never be mistaken for the
+  # cross-host §17.7 milestone. A strict caller (e.g. a release gate that intends
+  # to *prove* two-machine determinism) sets MNEME_STRICT_CROSS_HOST=1 and this
+  # path fails closed, forcing a real MNEME_SECOND_HOST peer.
+  if [[ "${MNEME_STRICT_CROSS_HOST:-}" == "1" ]]; then
+    echo "determinism-two-machine: MNEME_STRICT_CROSS_HOST=1 but MNEME_SECOND_HOST is unset." >&2
+    echo "  Dual-workspace is a same-host proxy and does NOT satisfy §17.7. Failing closed." >&2
+    echo "  Set MNEME_SECOND_HOST=user@peer (a distinct physical host) and re-run." >&2
+    exit 1
+  fi
+
   local rsync_excludes=(
     --exclude target/
     --exclude out/
@@ -237,6 +248,11 @@ run_dual_workspace() {
   echo "  workspace-a report: $report_a"
   echo "  workspace-b report: $report_b"
   echo "  isolation_root (retained for inspection): $isolation_root"
+  echo "  ┌────────────────────────────────────────────────────────────────────┐"
+  echo "  │ §17.7 TWO-MACHINE (cross-host) MILESTONE: UNPROVEN — single host.    │"
+  echo "  │ This run proves only same-host digest reproducibility. To prove the  │"
+  echo "  │ milestone set MNEME_SECOND_HOST=user@peer (distinct physical host).  │"
+  echo "  └────────────────────────────────────────────────────────────────────┘"
 }
 
 if [[ "${1:-}" == "--compare-reports" ]]; then

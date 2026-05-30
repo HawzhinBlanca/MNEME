@@ -90,6 +90,81 @@ pub fn max_signed_checkpoint(
     Ok(best)
 }
 
+/// Field-compare every on-disk checkpoint `roots/<n>.root.cbor` against the
+/// verified `head` and against the chain links (INV-4, F-3 completeness).
+///
+/// `max_signed_checkpoint` only *ignores* an unparseable/unsigned checkpoint
+/// (it never trusts one), and `verify_root` only re-checks HEAD's immediate
+/// predecessor (`seq-1`). A tampered **non-adjacent** intermediate checkpoint
+/// therefore left `verify_store == Ok`. This walk closes that gap: every present
+/// checkpoint file must (a) carry a sequence matching its filename, (b) verify
+/// under an `operator_keys` member, (c) for the present predecessor link its
+/// `prev_root` to checkpoint `n-1`'s preimage hash (or the zero root at `n==1`),
+/// (d) never exceed `head.sequence`, and (e) at `head.sequence` be byte-identical
+/// (preimage + signature + prev_root) to the verified HEAD. Missing intermediate
+/// files are tolerated (sparse fixtures): this re-verifies what exists rather than
+/// imposing contiguity, so it never rejects a legitimately-built store.
+pub fn verify_checkpoint_chain(
+    store: &Path,
+    operator_keys: &[[u8; 32]],
+    head: &StoredRoot,
+) -> Result<(), MnemeError> {
+    let dir = store.join("roots");
+    let read = match fs::read_dir(&dir) {
+        Ok(r) => r,
+        Err(_) => return Ok(()),
+    };
+    let mut by_seq: std::collections::BTreeMap<u64, StoredRoot> = std::collections::BTreeMap::new();
+    for entry in read {
+        let path = entry.map_err(|e| io_err(&dir, e))?.path();
+        let seq = match path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".root.cbor"))
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            Some(s) => s,
+            None => continue,
+        };
+        let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+        let stored = StoredRoot::from_bytes(&bytes)?;
+        if stored.sequence != seq {
+            return Err(MnemeError::RootInconsistent);
+        }
+        if !checkpoint_signature_valid(&stored, operator_keys) {
+            return Err(MnemeError::RootSigInvalid);
+        }
+        if seq > head.sequence {
+            return Err(MnemeError::RootReplayed);
+        }
+        by_seq.insert(seq, stored);
+    }
+    for (&seq, stored) in &by_seq {
+        match seq.checked_sub(1) {
+            Some(0) | None => {
+                if stored.prev_root != [0u8; 32] {
+                    return Err(MnemeError::RootInconsistent);
+                }
+            }
+            Some(parent_seq) => {
+                if let Some(parent) = by_seq.get(&parent_seq) {
+                    if stored.prev_root != parent.preimage_hash {
+                        return Err(MnemeError::RootInconsistent);
+                    }
+                }
+            }
+        }
+        if seq == head.sequence
+            && (stored.preimage_hash != head.preimage_hash
+                || stored.signature != head.signature
+                || stored.prev_root != head.prev_root)
+        {
+            return Err(MnemeError::RootInconsistent);
+        }
+    }
+    Ok(())
+}
+
 fn checkpoint_signature_valid(stored: &StoredRoot, operator_keys: &[[u8; 32]]) -> bool {
     if stored.preimage().hash() != stored.preimage_hash {
         return false;

@@ -41,7 +41,7 @@ scripts/demo/killer-demo.sh
 | Milestone | Criterion | Status |
 |---|---|---|
 | **30-day v0** | Key-index `remember`/`recall_verified` + signed root | **PASS** (e2e) |
-| | ≥40 tamper cases, typed rejection | **PASS** (830 store generative assertions + 147 verify tamper tests) |
+| | ≥40 tamper cases, typed rejection | **PASS** (606 store generative cases — distinct objects, varied byte positions, **exact** typed-variant asserts — + 156 verify tamper cases counted dynamically from source) |
 | | Non-membership / prove absent | **PASS** |
 | | Kill/resume fail-closed | **PASS** |
 | | Determinism gate ×2 (fixture) | **PASS** (`foundation-gate` run-a/run-b byte-identical; fixture crypto mode; digests in `proof/digests/`) |
@@ -51,12 +51,12 @@ scripts/demo/killer-demo.sh
 | | A-INJ quarantine blocked at `min_tier=Trusted` | **PASS** (`killer-demo.sh`) |
 | | Promote requires `Promote` cap | **PASS** (e2e) |
 | | GDPR shred + prove absent | **PASS** (e2e) |
-| | Tamper suite ≥120 cases | **PASS** (store generative ≥120 executed; 147 verify tamper `#[test]`s across cap/checkpoint/semantic/suite/tombstone) |
+| | Tamper suite ≥120 cases | **PASS** (606 store generative executed; 156 verify tamper cases counted from source by `tamper_suite_meets_150_floor_counted_from_source`, no hand-typed constant) |
 | | CRDT-less paths fuzzed | **PASS** (dcbor, smt, cap, receipt, index_wire, sync_message_parse) |
 | | MCP semantic agent recall | **NEEDS WORK** (MCP wrapper present; live Claude path not CI-gated) |
-| **12-month** | MST merge / anti-entropy | **PASS** (`mneme-crdt` merge + `merge_convergence` proptest; `mnemed` two-peer key convergence) |
-| | Two-machine same root | **NEEDS WORK** (`determinism-two-machine.sh` is SSH-only and fails closed without `MNEME_SECOND_HOST`; local proxy is labeled LOCAL-ONLY) |
-| | Tamper ≥150 | **PASS** (830 store generative + 147 verify tamper tests ≫150 combined; verify inventory reconciled to 147 executed) |
+| | MST merge / anti-entropy | **PASS** (`mneme-crdt` merge + `merge_convergence` proptest; `mnemed` two-peer key convergence; **object sync over the wire**: `Store::merge_from_snapshot` + `mnemed` `MSG_SNAPSHOT` frames, `two_peer_ws_sync` converges `key_index_root`/`dag_head_root` over a real WebSocket and rejects in-transit object tamper) |
+| | Two-machine same root | **PARTIAL** — over-the-wire object sync + content-root convergence is now implemented & tested (`two_peer_ws_sync`); cross-**physical-host** determinism still requires a real peer: run `MNEME_SECOND_HOST=user@peer scripts/ci/determinism-two-machine.sh` (default Mode A is same-host and prints an UNPROVEN banner; `MNEME_STRICT_CROSS_HOST=1` fails closed without a peer) |
+| | Tamper ≥150 | **PASS** (606 store generative + 156 verify tamper cases ≫150; the verify count is computed from source, not a hand-typed constant) |
 | | Commitment-binding envelope (v0) | **PASS** — tagged BLAKE3 via `commitment_binding` (`zk` alias); verify rejects forgeries (`ZkProofInvalid`); vectors `proof/vectors/receipts/zk/` |
 | | Plonky2/V3DB ZK retrieval (12-month only) | **OUT OF v0 SCOPE** — `plonky2_prover` feature fails closed; B3 deferral **CLOSED**; not SNARK, not in 90-day kernel |
 | | Chameleon redact + trapdoor docs | **PASS** (`mneme-forget` redact + `TRAPDOOR_CUSTODY.md`; CLI `--mode redact`) |

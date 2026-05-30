@@ -26,7 +26,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Operator seed file (32 bytes hex) for store crypto; generated on first use if missing
+    /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; generated and stored on first use if absent
     #[arg(long, global = true, env = "MNEME_OPERATOR_SEED")]
     operator_seed: Option<String>,
 }
@@ -131,7 +131,7 @@ enum ForgetModeArg {
 enum CliErrorKind {
     Usage,
     StoreUnavailable,
-    VerifyFailed,
+    VerifyFailed(MnemeError),
     Kernel(MnemeError),
 }
 
@@ -146,7 +146,7 @@ fn main() -> ExitCode {
                     3,
                     "store kernel not available: build mneme-store and re-run".to_string(),
                 ),
-                CliErrorKind::VerifyFailed => (4, "verify failed".to_string()),
+                CliErrorKind::VerifyFailed(e) => (4, format!("verify failed: {e}")),
                 CliErrorKind::Kernel(e) => (5, format!("{e}")),
             };
             eprintln!("mneme: {msg}");
@@ -172,7 +172,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let trust = TrustConfig::new(operator.public_key_bytes());
-            let report = verify_store(&store, &trust).map_err(|_| CliErrorKind::VerifyFailed)?;
+            let report = verify_store(&store, &trust).map_err(CliErrorKind::VerifyFailed)?;
             println!(
                 "verify ok: root seq {} objects {}",
                 report.root.sequence, report.object_count

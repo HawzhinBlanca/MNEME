@@ -91,7 +91,12 @@ case "$LANE" in
     bash "$0" tamper
     bash "$0" determinism
     bash scripts/ci/determinism-local-second-host.sh
-    echo "validation-lane (full): real two-machine proof is separate and fail-closed; set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh"
+    # F-B: the full lane runs ONLY the same-host dual-workspace reproducibility
+    # check. It is explicitly NOT the §17.7 cross-host milestone, which stays
+    # UNPROVEN until run with MNEME_SECOND_HOST=<distinct host> (and, for a strict
+    # release gate, MNEME_STRICT_CROSS_HOST=1 to force fail-closed without a peer).
+    echo "validation-lane (full): §17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
+    echo "validation-lane (full): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."
     bash scripts/ci/determinism-two-machine.sh
     bash scripts/ci/cross-implementation-vectors.sh
     cargo test --workspace -- --nocapture

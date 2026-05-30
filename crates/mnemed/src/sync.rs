@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 const MSG_HELLO: u8 = 0x01;
 const MSG_ROOT_PROOF: u8 = 0x02;
 const MSG_BYE: u8 = 0x07;
+/// §11 anti-entropy: peer requests this node's authenticated structure snapshot.
+pub const MSG_SNAPSHOT_REQ: u8 = 0x10;
+/// §11 anti-entropy: CBOR-serialized [`mneme_store::SyncSnapshot`] response.
+pub const MSG_SNAPSHOT: u8 = 0x11;
 
 #[derive(Serialize, Deserialize)]
 struct Hello {
@@ -49,6 +53,7 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
                 }
                 let response = match data[0] {
                     MSG_HELLO => handle_hello(&state, &data[1..]).await,
+                    MSG_SNAPSHOT_REQ => encode_snapshot(&state),
                     MSG_BYE => None,
                     _ => encode_root_proof(&state),
                 };
@@ -97,6 +102,32 @@ fn encode_root_proof(state: &AppState) -> Option<Vec<u8>> {
     out.push(MSG_ROOT_PROOF);
     out.extend(body);
     Some(out)
+}
+
+/// Serialize this node's [`mneme_store::SyncSnapshot`] as a `MSG_SNAPSHOT` frame.
+fn encode_snapshot(state: &AppState) -> Option<Vec<u8>> {
+    let store = state.store.lock().ok()?;
+    let snapshot = store.export_sync_snapshot();
+    drop(store);
+    let mut body = Vec::new();
+    ciborium::into_writer(&snapshot, &mut body).ok()?;
+    let mut out = Vec::with_capacity(1 + body.len());
+    out.push(MSG_SNAPSHOT);
+    out.extend(body);
+    Some(out)
+}
+
+/// Build a bare `MSG_SNAPSHOT_REQ` frame (peer/client driver helper).
+pub fn encode_snapshot_request() -> Vec<u8> {
+    vec![MSG_SNAPSHOT_REQ]
+}
+
+/// Decode a `MSG_SNAPSHOT` frame into a [`mneme_store::SyncSnapshot`].
+pub fn decode_snapshot(frame: &[u8]) -> Option<mneme_store::SyncSnapshot> {
+    match frame.split_first() {
+        Some((&MSG_SNAPSHOT, body)) => ciborium::from_reader(body).ok(),
+        _ => None,
+    }
 }
 
 pub fn encode_hello(state: &AppState, node_id: [u8; 16]) -> Option<Vec<u8>> {

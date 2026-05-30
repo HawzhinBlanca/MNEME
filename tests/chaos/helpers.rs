@@ -246,7 +246,12 @@ pub fn corrupt_random_artifact(store_path: &Path, seed: u64) -> (String, PathBuf
 
 fn collect_artifacts(store_path: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for rel in ["roots/HEAD", "meta/key_index.json", "meta/object_keys.json"] {
+    for rel in [
+        "roots/HEAD",
+        "meta/key_index.json",
+        "meta/object_keys.json",
+        "meta/object_keys.journal",
+    ] {
         let p = store_path.join(rel);
         if p.is_file() {
             out.push(p);

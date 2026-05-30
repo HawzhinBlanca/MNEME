@@ -22,6 +22,10 @@ name = "two_peer_sync"
 path = "tests/two_peer_sync.rs"
 
 [[test]]
+name = "two_peer_ws_sync"
+path = "tests/two_peer_ws_sync.rs"
+
+[[test]]
 name = "unix_api"
 path = "tests/unix_api.rs"
 

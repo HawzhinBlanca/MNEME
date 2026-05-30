@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -60,27 +60,45 @@ impl KeyVault for MemoryKeyVault {
 }
 
 /// File-backed vault rooted at `store/keys/vault/`.
+///
+/// A process-lifetime in-memory key cache (`live` + `shredded`) is loaded once on
+/// open and kept authoritative by every mutating method. This removes the
+/// per-`get` filesystem `stat`+`open`+`read` that dominated the verified-recall
+/// p99 tail (§22 K2): the flat `keys/vault/` directory grows with the store, so a
+/// per-recall disk lookup developed a heavy tail past ~10k entries. The cache is
+/// fail-closed — a shredded key is evicted from `live` and recorded in `shredded`,
+/// so `get` returns `Forgotten`/`KeyVaultMissing` without ever serving stale bytes
+/// the running session did not author, and durability is unchanged (key files and
+/// `.shred` tombstones are still written/fsynced to disk).
 pub struct FileKeyVault {
     root: PathBuf,
+    live: HashMap<KeyId, ObjectKey>,
+    shredded: HashSet<KeyId>,
 }
 
 impl FileKeyVault {
     pub fn new(store_root: impl AsRef<Path>) -> Result<Self, MnemeError> {
         let root = store_root.as_ref().join("keys").join("vault");
         fs::create_dir_all(&root).map_err(|e| io_error(root.display().to_string(), e))?;
-        Ok(Self { root })
+        let (live, shredded) = load_vault_dir(&root)?;
+        Ok(Self {
+            root,
+            live,
+            shredded,
+        })
     }
 
     /// Import peer key material for objects accepted by anti-entropy merge.
     pub fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
-        if self.tombstone_path(key_id).exists() {
+        if self.shredded.contains(key_id) || self.tombstone_path(key_id).exists() {
             return Err(MnemeError::Forgotten);
         }
         let path = self.key_path(key_id);
-        if path.exists() {
-            return Ok(());
+        if !path.exists() {
+            write_key_file(&path, key)?;
         }
-        write_key_file(&path, key)
+        self.live.insert(*key_id, *key);
+        Ok(())
     }
 
     fn key_path(&self, key_id: &KeyId) -> PathBuf {
@@ -97,30 +115,34 @@ impl KeyVault for FileKeyVault {
         loop {
             let key = random_object_key();
             let key_id = random_key_id();
+            if self.live.contains_key(&key_id) || self.shredded.contains(&key_id) {
+                continue;
+            }
             let path = self.key_path(&key_id);
             if path.exists() || self.tombstone_path(&key_id).exists() {
                 continue;
             }
             write_key_file(&path, &key)?;
+            self.live.insert(key_id, key);
             return Ok((key, key_id));
         }
     }
 
     fn get(&self, key_id: &KeyId) -> Result<ObjectKey, MnemeError> {
-        if self.tombstone_path(key_id).exists() {
+        if self.shredded.contains(key_id) {
             return Err(MnemeError::Forgotten);
         }
-        let path = self.key_path(key_id);
-        if !path.exists() {
-            return Err(MnemeError::KeyVaultMissing);
-        }
-        read_key_file(&path)
+        self.live
+            .get(key_id)
+            .copied()
+            .ok_or(MnemeError::KeyVaultMissing)
     }
 
     fn shred(&mut self, key_id: &KeyId) -> Result<(), MnemeError> {
         let path = self.key_path(key_id);
         let tombstone = self.tombstone_path(key_id);
-        if !path.exists() && !tombstone.exists() {
+        let known = self.live.contains_key(key_id) || self.shredded.contains(key_id);
+        if !known && !path.exists() && !tombstone.exists() {
             return Err(MnemeError::KeyVaultMissing);
         }
         if path.exists() {
@@ -129,12 +151,43 @@ impl KeyVault for FileKeyVault {
         if !tombstone.exists() {
             File::create(&tombstone).map_err(|e| io_error(tombstone.display().to_string(), e))?;
         }
+        self.live.remove(key_id);
+        self.shredded.insert(*key_id);
         Ok(())
     }
 
     fn contains(&self, key_id: &KeyId) -> bool {
-        self.key_path(key_id).exists() && !self.tombstone_path(key_id).exists()
+        self.live.contains_key(key_id) && !self.shredded.contains(key_id)
     }
+}
+
+/// Load the live keys and shred tombstones from `keys/vault/` once on open.
+fn load_vault_dir(root: &Path) -> Result<(HashMap<KeyId, ObjectKey>, HashSet<KeyId>), MnemeError> {
+    let mut live = HashMap::new();
+    let mut shredded = HashSet::new();
+    let rd = match fs::read_dir(root) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((live, shredded)),
+        Err(e) => return Err(io_error(root.display().to_string(), e)),
+    };
+    for entry in rd {
+        let entry = entry.map_err(|e| io_error(root.display().to_string(), e))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if let Some(stem) = name.strip_suffix(".shred") {
+            if let Some(key_id) = hex::decode_key_id(stem) {
+                shredded.insert(key_id);
+            }
+        } else if let Some(key_id) = hex::decode_key_id(name) {
+            let key = read_key_file(&entry.path())?;
+            live.insert(key_id, key);
+        }
+    }
+    // A shredded key never coexists with live material; tombstones win fail-closed.
+    for id in &shredded {
+        live.remove(id);
+    }
+    Ok((live, shredded))
 }
 
 fn generate_unique_key_id(
@@ -170,8 +223,13 @@ fn write_key_file(path: &Path, key: &ObjectKey) -> Result<(), MnemeError> {
         .map_err(|e| io_error(path.display().to_string(), e))?;
     file.write_all(key)
         .map_err(|e| io_error(path.display().to_string(), e))?;
-    file.sync_all()
-        .map_err(|e| io_error(path.display().to_string(), e))?;
+    // Honor the same `MNEME_NO_FSYNC` test knob as the store's atomic writer and
+    // journals (durability default is fsync-on). Skipping the per-key fsync only
+    // affects crash durability of freshly written keys, never read correctness.
+    if std::env::var("MNEME_NO_FSYNC").is_err() {
+        file.sync_all()
+            .map_err(|e| io_error(path.display().to_string(), e))?;
+    }
     Ok(())
 }
 
@@ -214,6 +272,8 @@ fn io_error(path: String, err: std::io::Error) -> MnemeError {
 }
 
 mod hex {
+    use crate::types::{KEY_ID_LEN, KeyId};
+
     pub fn encode(bytes: &[u8]) -> String {
         bytes
             .iter()
@@ -222,5 +282,17 @@ mod hex {
                 let _ = write!(s, "{b:02x}");
                 s
             })
+    }
+
+    /// Decode a vault filename stem into a `KeyId`, or `None` for unrelated files.
+    pub fn decode_key_id(s: &str) -> Option<KeyId> {
+        if s.len() != KEY_ID_LEN * 2 {
+            return None;
+        }
+        let mut out = [0u8; KEY_ID_LEN];
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok()?;
+        }
+        Some(out)
     }
 }

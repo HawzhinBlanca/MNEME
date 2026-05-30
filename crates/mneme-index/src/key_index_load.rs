@@ -7,7 +7,7 @@
 //! verifier TCB minimal (§17.6) and to avoid duplicating the sidecar/journal
 //! format across crates. Error types are preserved verbatim for the tamper suite.
 
-use mneme_core::{MnemeError, decode_hex32};
+use mneme_core::{LogicalKey, MnemeError, decode_hex32};
 use mneme_smt::SparseMerkleTree;
 use std::collections::HashMap;
 use std::fs;
@@ -17,6 +17,70 @@ use std::path::Path;
 struct KeyIndexSidecar {
     entries: HashMap<String, String>,
     tombstones: Vec<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct ObjectKeysSidecar {
+    entries: HashMap<String, LogicalKeySidecarEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct LogicalKeySidecarEntry {
+    namespace: String,
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ObjectKeysJournalEntry {
+    id: String,
+    namespace: String,
+    name: String,
+}
+
+/// Replay the `meta/object_keys.json` snapshot + `meta/object_keys.journal` into
+/// the reverse index (`object_id → LogicalKey`), mirroring `Store`'s loader.
+///
+/// This sidecar carries `object_id → (namespace, name)` plaintext that the store
+/// trusts (e.g. as AEAD AAD on decrypt) but which is **not** recoverable from the
+/// signed key-index (the SMT is keyed by `LogicalKey.hash()`). The verifier
+/// cross-checks the decoded entries against already-verified state (§7, B-1), so
+/// this reconstruction is not itself trust-critical: any parse/hex fault fails
+/// closed with `SchemaDrift`, mirroring `Store::open`. It lives here (alongside
+/// `load_key_index_tree`) to keep the verifier TCB minimal (§17.6). The journal is
+/// applied after the snapshot (last write wins per object id), matching the store.
+pub fn load_object_keys(store: &Path) -> Result<Vec<([u8; 32], LogicalKey)>, MnemeError> {
+    let mut merged: HashMap<[u8; 32], LogicalKey> = HashMap::new();
+    let snapshot = store.join("meta/object_keys.json");
+    if snapshot.exists() {
+        let data = fs::read_to_string(&snapshot).map_err(|e| io_err(&snapshot, e))?;
+        let sidecar: ObjectKeysSidecar =
+            serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
+        for (id_hex, entry) in sidecar.entries {
+            merged.insert(
+                decode_hex32(&id_hex)?,
+                LogicalKey {
+                    namespace: entry.namespace,
+                    name: entry.name,
+                },
+            );
+        }
+    }
+    let journal = store.join("meta/object_keys.journal");
+    if journal.exists() {
+        let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+        for line in data.lines().filter(|l| !l.trim().is_empty()) {
+            let entry: ObjectKeysJournalEntry =
+                serde_json::from_str(line).map_err(|_| MnemeError::SchemaDrift)?;
+            merged.insert(
+                decode_hex32(&entry.id)?,
+                LogicalKey {
+                    namespace: entry.namespace,
+                    name: entry.name,
+                },
+            );
+        }
+    }
+    Ok(merged.into_iter().collect())
 }
 
 #[derive(serde::Deserialize)]

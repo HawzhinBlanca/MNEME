@@ -11,13 +11,15 @@ use mneme_smt::{SparseMerkleTree, TREE_DEPTH};
 fn tamper_suite_generative_byte_mutations() {
     let mut cases = 0u32;
 
-    for _ in 0..30 {
+    // (1) Object-byte tamper through the real fail-closed recall path. Each case
+    // stores a DISTINCT object (varied body) so these are not identical repeats;
+    // `recall_verified` re-hashes the bytes before decode, so any mutation surfaces
+    // as exactly `ObjectTampered`. Asserts the exact typed variant, not `is_err()`.
+    for i in 0..30u32 {
         let (mut store, cap, _dir) = agent_store();
+        let body = format!("mneme-tamper-fixture-{i:02}");
         let (id, _) = store
-            .remember(
-                semantic_draft("tamper", "payload", b"mneme-tamper-fixture-bytes"),
-                &cap,
-            )
+            .remember(semantic_draft("tamper", "payload", body.as_bytes()), &cap)
             .unwrap();
         let query = Query {
             logical_key: theme_key("tamper", "payload"),
@@ -25,8 +27,11 @@ fn tamper_suite_generative_byte_mutations() {
             embedding: None,
         };
         store.tamper_object_bytes(id.as_bytes()).unwrap();
-        let err = store.recall_verified_default(&query, &cap).unwrap_err();
-        assert_eq!(err, MnemeError::ObjectTampered);
+        assert_eq!(
+            store.recall_verified_default(&query, &cap).unwrap_err(),
+            MnemeError::ObjectTampered,
+            "object tamper case {i}"
+        );
         cases += 1;
     }
 
@@ -47,53 +52,65 @@ fn tamper_suite_generative_byte_mutations() {
         .prove_membership(&query.logical_key)
         .expect("membership proof");
 
+    // (2) Membership auth-path siblings: flip every depth at a depth-dependent byte
+    // position (covers positions across the 32-byte node, not just byte 0) and
+    // assert the EXACT `IndexPathInvalid` variant.
     for i in 0..proof.path.len() {
         let mut bad = proof.clone();
-        bad.path[i][0] ^= 0x01;
-        assert!(
-            SparseMerkleTree::verify_membership(&bad).is_err(),
-            "membership path tamper {i}"
+        bad.path[i][i % 32] ^= 0x01;
+        assert_eq!(
+            SparseMerkleTree::verify_membership(&bad).unwrap_err(),
+            MnemeError::IndexPathInvalid,
+            "membership path tamper depth {i}"
         );
         cases += 1;
     }
 
-    for i in 0..32 {
+    // (3) Membership committed root — every byte position, exact variant.
+    for b in 0..32usize {
         let mut bad = proof.clone();
-        bad.root[i % 32] ^= 0x01;
-        assert!(
-            SparseMerkleTree::verify_membership(&bad).is_err(),
-            "membership root tamper {i}"
+        bad.root[b] ^= 0x01;
+        assert_eq!(
+            SparseMerkleTree::verify_membership(&bad).unwrap_err(),
+            MnemeError::IndexPathInvalid,
+            "membership root tamper byte {b}"
         );
         cases += 1;
     }
 
-    for i in 0..proof.path.len() {
+    // (4) Membership leaf value — every byte position, exact variant. (A single bit
+    // flip cannot collide with the TOMBSTONE sentinel, so this is never `Forgotten`.)
+    for b in 0..32usize {
         let mut bad = proof.clone();
-        bad.value[i % 32] ^= 0x02;
-        assert!(
-            SparseMerkleTree::verify_membership(&bad).is_err(),
-            "membership value tamper {i}"
+        bad.value[b] ^= 0x02;
+        assert_eq!(
+            SparseMerkleTree::verify_membership(&bad).unwrap_err(),
+            MnemeError::IndexPathInvalid,
+            "membership value tamper byte {b}"
         );
         cases += 1;
     }
 
+    // (5) Non-membership proof path — every depth, depth-dependent position, exact
+    // variant. Proves a forged "absent" proof for a present-or-arbitrary key fails.
     let absent_key = theme_key("tamper", "never-written");
     let absent = store.prove_absent(&absent_key).unwrap();
     for i in 0..absent.path.len() {
         let mut bad = absent.clone();
-        bad.path[i][0] ^= 0x01;
-        assert!(
-            SparseMerkleTree::verify_non_membership(&bad).is_err(),
-            "non-membership tamper {i}"
+        bad.path[i][(i * 7 + 3) % 32] ^= 0x01;
+        assert_eq!(
+            SparseMerkleTree::verify_non_membership(&bad).unwrap_err(),
+            MnemeError::IndexPathInvalid,
+            "non-membership path tamper depth {i}"
         );
         cases += 1;
     }
 
     assert!(
-        cases >= 120,
-        "tamper suite must cover ≥120 distinct cases (got {cases})"
+        cases >= 150,
+        "store generative tamper must cover ≥150 distinct cases (got {cases})"
     );
-    eprintln!("tamper_suite (store): {cases} cases passed");
+    eprintln!("tamper_suite (store): {cases} distinct cases passed, exact typed variants");
 }
 
 #[test]

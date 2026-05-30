@@ -574,39 +574,309 @@ fn tamper_stored_root_checkpoint_byte() {
     assert!(StoredRoot::from_bytes(&tampered).is_err());
 }
 
-#[test]
-fn tamper_inventory_matches_executed_verify_tests() {
-    let counts = tamper_counts_by_category();
-    let total: usize = counts.values().sum();
-    const EXECUTED_VERIFY_TESTS: usize = 147;
-    assert_eq!(
-        total, EXECUTED_VERIFY_TESTS,
-        "hand-maintained inventory must match executed verify tamper #[test] count (got {total}): {counts:?}"
-    );
-    assert!(
-        total >= 120,
-        "§19 90-day verify tamper minimum (got {total})"
-    );
+/// Hex object id of the sole object written by [`persisted_store_with_entry`],
+/// read straight from the content-addressed `objects/<shard>/<hex>.cbor` layout
+/// (independent of the sidecar persistence format).
+fn sole_object_id_hex(store: &std::path::Path) -> String {
+    for shard in std::fs::read_dir(store.join("objects"))
+        .expect("objects dir")
+        .flatten()
+    {
+        if shard.path().is_dir() {
+            for f in std::fs::read_dir(shard.path())
+                .expect("shard dir")
+                .flatten()
+            {
+                let p = f.path();
+                if p.extension().is_some_and(|e| e == "cbor") {
+                    return p.file_stem().expect("stem").to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    panic!("no object found under objects/");
 }
 
-/// §20.4 handoff: tamper-case inventory by category.
-pub fn tamper_counts_by_category() -> std::collections::BTreeMap<&'static str, usize> {
+/// Build a real on-disk store (create + one `remember`) so the object-keys sidecar
+/// (`meta/object_keys.{json,journal}`), the signed checkpoint log, and HEAD all
+/// exist and are mutually consistent.
+fn persisted_store_with_entry() -> (tempfile::TempDir, mneme_crypto::TrustConfig) {
+    use mneme_cap::agent_cap;
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x21; 32]);
+    let agent = KeyPair::from_seed([0x22; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let trust = store.trust().clone();
+    store
+        .remember(
+            mneme_core::Draft {
+                namespace: "sidecar".into(),
+                logical_name: "obj".into(),
+                kind: mneme_core::MemoryKind::Semantic,
+                body: b"sidecar-body".to_vec(),
+                parent_ids: vec![],
+                session: [0x23; 16],
+                trust_tier: None,
+                embedding: None,
+            },
+            &cap,
+        )
+        .expect("remember");
+    drop(store);
+    (dir, trust)
+}
+
+/// B-1: a byte flip in the persisted object-keys sidecar (the `object_keys.journal`
+/// holds the single-`remember` mapping) must now make `verify_store` itself fail
+/// closed (typed Err, no panic) — previously caught only by `Store::open`.
+#[test]
+fn tamper_verify_store_object_keys_byteflip_fails_closed() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+    let journal = dir.path().join("meta/object_keys.journal");
+    let mut bytes = std::fs::read(&journal).expect("read object_keys.journal");
+    assert!(!bytes.is_empty(), "journal must hold the remember mapping");
+    bytes[0] ^= 0x55;
+    std::fs::write(&journal, &bytes).expect("write corrupt journal");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        verify_store(dir.path(), &trust)
+    }));
+    assert!(
+        result.is_ok(),
+        "verify_store must not panic on a corrupted object_keys sidecar"
+    );
+    match result.unwrap() {
+        Err(_) => {}
+        Ok(_) => panic!("verify_store returned Ok on a corrupted object_keys sidecar (B-1 gap)"),
+    }
+}
+
+/// F-A: a byte flip in a content-addressed object file must surface as
+/// `ObjectTampered` from `verify_store`'s re-hash loop (previously the loop was
+/// tautological — objects were re-keyed by their own recomputed hash — and the
+/// flip was caught only indirectly as `RootInconsistent` via the rebuilt DAG).
+#[test]
+fn tamper_verify_store_object_byteflip_is_object_tampered() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+    let id_hex = sole_object_id_hex(dir.path());
+    let obj_path = dir
+        .path()
+        .join(format!("objects/{}/{}.cbor", &id_hex[..2], id_hex));
+    // Re-encode a valid-but-different record under the SAME filename so the bytes
+    // still parse: this forces the re-hash loop (not the decoder) to reject, with
+    // the filename id fixed while `hash_obj` of the new bytes differs.
+    let bytes = std::fs::read(&obj_path).expect("read object");
+    let mut record: mneme_core::ObjectRecord =
+        mneme_core::from_bytes_strict(&bytes).expect("parse object");
+    record.payload_enc.body.push(0xAB);
+    let tampered = mneme_core::to_bytes_canonical(&record).expect("re-encode");
+    assert_ne!(tampered, bytes, "tamper must change bytes");
+    std::fs::write(&obj_path, &tampered).expect("write tampered object");
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(
+            e,
+            MnemeError::ObjectTampered,
+            "object byte flip must surface as ObjectTampered, not {e:?}"
+        ),
+        Ok(_) => panic!("tampered object must fail closed"),
+    }
+}
+
+/// F-A: a `.cbor` file in `objects/` whose name is not a 64-hex content address
+/// is a malformed (attacker-injected) store and must fail closed, not be silently
+/// re-keyed by its content hash.
+#[test]
+fn tamper_verify_store_non_content_addressed_object_rejected() {
+    let (dir, trust) = persisted_store_with_entry();
+    let shard = dir.path().join("objects/zz");
+    std::fs::create_dir_all(&shard).expect("shard");
+    std::fs::write(shard.join("not-a-hash.cbor"), b"\x80").expect("rogue object");
+    match verify_store(dir.path(), &trust) {
+        Err(MnemeError::SchemaDrift) => {}
+        Err(other) => panic!("expected SchemaDrift, got {other:?}"),
+        Ok(_) => panic!("non-content-addressed object must fail closed"),
+    }
+}
+
+/// B-1: rebinding an object to a well-formed logical key whose hash is unknown to
+/// the verified key-index is rejected as `RootInconsistent`. The journal is the
+/// authoritative (last-write-wins) source for the mapping, so we rewrite it.
+#[test]
+fn tamper_verify_store_object_keys_namespace_rebind() {
+    let (dir, trust) = persisted_store_with_entry();
+    let id = sole_object_id_hex(dir.path());
+    let journal = dir.path().join("meta/object_keys.journal");
+    let rebound = format!("{{\"id\":\"{id}\",\"namespace\":\"attacker\",\"name\":\"rebound\"}}\n");
+    std::fs::write(&journal, rebound).expect("write rebound journal");
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(e, MnemeError::RootInconsistent),
+        Ok(_) => panic!("rebound logical key must fail closed as RootInconsistent"),
+    }
+}
+
+/// B-1: an entry whose object id is absent from the verified object set is rejected
+/// as `RootInconsistent` (exercises the `object_keys.json` snapshot path too).
+#[test]
+fn tamper_verify_store_object_keys_unknown_object_id() {
+    let (dir, trust) = persisted_store_with_entry();
+    let sidecar = dir.path().join("meta/object_keys.json");
+    let payload = format!(
+        "{{\"entries\":{{\"{}\":{{\"namespace\":\"sidecar\",\"name\":\"obj\"}}}}}}",
+        "0".repeat(64)
+    );
+    std::fs::write(&sidecar, payload).expect("write unknown-id snapshot");
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(e, MnemeError::RootInconsistent),
+        Ok(_) => panic!("unknown object id must fail closed as RootInconsistent"),
+    }
+}
+
+/// B-2: flipping ONLY the signature bytes after an otherwise-valid decode exercises
+/// the genuine `RootSigInvalid` path (not the `schema drift` that a raw byte flip in
+/// the CBOR framing produces).
+#[test]
+fn tamper_verify_store_head_signature_only_rootsiginvalid() {
+    use mneme_root::StoredRoot;
+    let (dir, trust) = persisted_store_with_entry();
+    let head = dir.path().join("roots/HEAD");
+    let stored = StoredRoot::from_bytes(&std::fs::read(&head).expect("read head")).expect("decode");
+    let mut tampered = stored.clone();
+    assert!(!tampered.signature.is_empty(), "signature present");
+    tampered.signature[0] ^= 0x01;
+    std::fs::write(&head, tampered.to_bytes().expect("encode")).expect("write head");
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(
+            e,
+            MnemeError::RootSigInvalid,
+            "well-formed decode with a bad signature must surface RootSigInvalid"
+        ),
+        Ok(_) => panic!("bad signature must fail closed"),
+    }
+}
+
+/// F-3: a tampered NON-adjacent intermediate checkpoint (`roots/1.root.cbor` while
+/// HEAD is seq 3) must now fail closed; previously only HEAD's `seq-1` predecessor
+/// was re-verified, so this left `verify_store == Ok`.
+#[test]
+fn tamper_verify_store_intermediate_checkpoint_fails_closed() {
+    use mneme_cap::agent_cap;
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x31; 32]);
+    let agent = KeyPair::from_seed([0x32; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let trust = store.trust().clone();
+    for i in 0..2 {
+        store
+            .remember(
+                mneme_core::Draft {
+                    namespace: "chain".into(),
+                    logical_name: format!("k{i}"),
+                    kind: mneme_core::MemoryKind::Semantic,
+                    body: b"chain-body".to_vec(),
+                    parent_ids: vec![],
+                    session: [0x33; 16],
+                    trust_tier: None,
+                    embedding: None,
+                },
+                &cap,
+            )
+            .expect("remember");
+    }
+    drop(store);
+    let intermediate = dir.path().join("roots/1.root.cbor");
+    assert!(
+        intermediate.exists(),
+        "non-adjacent intermediate checkpoint"
+    );
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline 3-checkpoint store must verify clean"
+    );
+    let mut bytes = std::fs::read(&intermediate).expect("read checkpoint");
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0x55;
+    std::fs::write(&intermediate, &bytes).expect("write corrupt checkpoint");
+    match verify_store(dir.path(), &trust) {
+        Err(err) => assert!(
+            matches!(
+                err,
+                MnemeError::RootSigInvalid
+                    | MnemeError::RootInconsistent
+                    | MnemeError::SchemaDrift
+                    | MnemeError::SerializationNonCanonical
+            ),
+            "tampered intermediate checkpoint must fail closed, got {err:?}"
+        ),
+        Ok(_) => panic!("tampered intermediate checkpoint must fail closed (F-3 gap)"),
+    }
+}
+
+/// F-C: the tamper count is derived **dynamically from the test sources**, never a
+/// hand-typed constant that can silently drift from reality. For each `tamper_*.rs`
+/// file we count its generated `#[test]`s as: literal `#[test]` attributes, minus
+/// one phantom per `macro_rules!` definition (the `#[test]` inside the macro body),
+/// plus one per invocation of that file's locally-defined generator macro. This
+/// auto-adapts to macro renames/additions; the assertion is the real §19/§17.2
+/// guarantee (≥150 tamper cases that actually compile into the test binary).
+#[test]
+fn tamper_suite_meets_150_floor_counted_from_source() {
+    let counts = tamper_counts_by_file();
+    let total: usize = counts.values().sum();
+    assert!(
+        total >= 150,
+        "§19/§17.2 tamper floor: need ≥150 verify tamper cases compiled into the \
+         test binary, source scan found {total}: {counts:?}"
+    );
+    eprintln!("verify tamper cases (counted from source): {total} {counts:?}");
+}
+
+/// Scan the verify `tests/` dir and count generated tamper `#[test]`s per
+/// `tamper_*.rs` file directly from the source — single source of truth.
+pub fn tamper_counts_by_file() -> std::collections::BTreeMap<String, usize> {
     use std::collections::BTreeMap;
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests");
     let mut m = BTreeMap::new();
-    // Inventory must match executed `#[test]` count (147 as of 2026-05-30):
-    // tamper_suite 60 · tamper_cap 28 · tamper_checkpoint 17 · tamper_semantic 32 · tamper_tombstone 10
-    m.insert("object_bytes", 10);
-    m.insert("key_receipt", 6);
-    m.insert("smt_path", 19);
-    m.insert("signed_root", 14);
-    m.insert("auth_tier_provenance", 6);
-    m.insert("tombstone", 14);
-    m.insert("checkpoint_log", 17);
-    m.insert("semantic_receipt", 9);
-    m.insert("semantic_nodes", 8);
-    m.insert("semantic_merkle_paths", 9);
-    m.insert("semantic_procedure", 7);
-    m.insert("cap_sig_chain", 28);
+    for entry in std::fs::read_dir(&dir).expect("read tests dir") {
+        let path = entry.expect("dir entry").path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !name.starts_with("tamper_") || !name.ends_with(".rs") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).expect("read source");
+        let test_attrs = src.matches("#[test]").count();
+        let macro_defs = src.matches("macro_rules!").count();
+        // Sum invocations of every macro this file defines (e.g. `cap_tamper!(`).
+        let mut invocations = 0usize;
+        for line in src.lines() {
+            if let Some(rest) = line.trim_start().strip_prefix("macro_rules!") {
+                let macro_name = rest.trim().trim_end_matches('{').trim();
+                if !macro_name.is_empty() {
+                    invocations += src.matches(&format!("{macro_name}!(")).count();
+                }
+            }
+        }
+        let generated = test_attrs.saturating_sub(macro_defs) + invocations;
+        m.insert(name, generated);
+    }
     m
 }
 

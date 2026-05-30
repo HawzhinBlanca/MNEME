@@ -15,12 +15,12 @@ impl Store {
         &self,
         query: &Query,
         proc: &Procedure,
-        cap: &Capability,
+        _cap: &Capability,
     ) -> Result<Recall, MnemeError> {
-        self.verify_cap(cap)?;
-        if !cap.permits_read(&query.logical_key.namespace, query.min_tier) {
-            return Err(MnemeError::CapDenied);
-        }
+        // Authorization is performed once by the verified-recall entry points
+        // (`recall_verified` / `bench_recall_raw`) via `authorize_read`, so this
+        // internal assembly does not re-verify the cap (INV-5: `recall` is
+        // `pub(crate)` and unreachable by agents).
         let _pid = procedure_id(proc);
         let root = self.current_root()?;
 

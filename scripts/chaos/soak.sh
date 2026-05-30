@@ -47,22 +47,12 @@ while [[ $(date +%s) -lt $end_epoch ]]; do
     echo "run $run: FAIL (see log)" >>"$SUMMARY"
     exit 1
   fi
-  grep '^CHAOS_ROW|' "$LOG" | tail -n $((ITERATIONS * 9)) | while IFS='|' read -r _ json; do
-    fault=$(echo "$json" | sed -n 's/.*"fault":"\([^"]*\)".*/\1/p')
-    iter=$(echo "$json" | sed -n 's/.*"iter":\([0-9]*\).*/\1/p')
-    injection=$(echo "$json" | sed -n 's/.*"injection_point":"\([^"]*\)".*/\1/p')
-    expected=$(echo "$json" | sed -n 's/.*"expected":"\([^"]*\)".*/\1/p')
-    actual=$(echo "$json" | sed -n 's/.*"actual":"\([^"]*\)".*/\1/p')
-    verify=$(echo "$json" | sed -n 's/.*"verify_result":"\([^"]*\)".*/\1/p')
-    incomplete=$(echo "$json" | sed -n 's/.*"incomplete":\([a-z]*\).*/\1/p')
-    open_r=$(echo "$json" | sed -n 's/.*"open_result":"\([^"]*\)".*/\1/p')
-    unsafe=$(echo "$json" | sed -n 's/.*"unsafe_state":\([a-z]*\).*/\1/p')
-    reason=$(echo "$json" | sed -n 's/.*"unsafe_reason":"\([^"]*\)".*/\1/p')
-    echo -e "$run\t$iter\t$fault\t$injection\t$expected\t$actual\t$verify\t$incomplete\t$open_r\t$unsafe\t$reason" >>"$MATRIX_TSV"
-    if [[ "$unsafe" == "true" ]]; then
-      echo "run=$run iter=$iter fault=$fault reason=$reason" >>"$UNSAFE_LOG"
-    fi
-  done
+  # Parse the authoritative CHAOS_ROW|{json} lines with a JSON-aware extractor
+  # (the previous `sed` columns shifted on rows whose `actual` carried escaped
+  # quotes). The matrix TSV now matches the JSON ground truth byte-for-byte.
+  grep '^CHAOS_ROW|' "$LOG" | tail -n $((ITERATIONS * 9)) \
+    | python3 "$ROOT/scripts/chaos/chaos_rows_to_tsv.py" "$run" "$UNSAFE_LOG" \
+        >>"$MATRIX_TSV"
 done
 
 total_rows=$((run * ITERATIONS * 9))

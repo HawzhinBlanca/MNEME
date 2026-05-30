@@ -66,7 +66,12 @@ impl Store {
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
             self.hlc.tick_local(self.hlc.wall_ms.saturating_add(1));
             layout::persist_key_index_tombstone(&self.path, &key_hash)?;
-            layout::persist_embeddings(&self.path, self)?;
+            // Shred drops the per-object embedding; record it incrementally rather
+            // than rewriting the whole `embeddings.json` sidecar (§22 K5). Redact
+            // leaves embeddings unchanged.
+            if let ForgetMode::Shred = mode {
+                layout::persist_embeddings_remove(&self.path, &object_id)?;
+            }
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.rebuild_semantic_index()?;
             self.commit_root_inner()?;

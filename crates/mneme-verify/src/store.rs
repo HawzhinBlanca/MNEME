@@ -1,7 +1,9 @@
 //! Stand-alone store verifier (§7 `verify_store`, boot-time / CI gate).
 
 use crate::root::verify_root;
-use mneme_core::{MnemeError, ObjectId, ObjectRecord, Root, from_bytes_strict, hash_obj};
+use mneme_core::{
+    MnemeError, ObjectId, ObjectRecord, Root, decode_hex32, from_bytes_strict, hash_obj,
+};
 use mneme_crypto::TrustConfig;
 use mneme_dag::DagIndex;
 use mneme_index::load_key_index_tree;
@@ -52,6 +54,9 @@ pub fn verify_store(path: &Path, trust: &TrustConfig) -> Result<RootReport, Mnem
         }
     }
     verify_root(&root, &trust, previous.as_ref())?;
+    // F-3 / INV-4: re-verify every on-disk checkpoint (not just HEAD's `seq-1`
+    // predecessor) so a tampered non-adjacent intermediate checkpoint fails closed.
+    mneme_root::verify_checkpoint_chain(path, &trust.operator_keys, &stored)?;
     let state = load_state(path)?;
     if state.key_index.root() != root.key_index_root || state.dag.root() != root.dag_head_root {
         return Err(MnemeError::RootInconsistent);
@@ -69,6 +74,21 @@ pub fn verify_store(path: &Path, trust: &TrustConfig) -> Result<RootReport, Mnem
             if hash_obj(parent_bytes) != *parent {
                 return Err(MnemeError::ProvenanceBroken);
             }
+        }
+    }
+    // B-1 / §7 verifier completeness: the `meta/object_keys.json` reverse-index
+    // sidecar carries `object_id → LogicalKey` plaintext the store trusts (decrypt
+    // AAD) but which is NOT recoverable from the signed key-index (the SMT is keyed
+    // by `LogicalKey.hash()`). Cross-check it against already-verified state and
+    // fail closed on any tamper: every entry's id must be a content-verified object,
+    // and its logical key must be known (live or tombstone) to the verified
+    // key-index. Parse/hex faults already fail closed as `SchemaDrift`.
+    for (id, logical_key) in mneme_index::load_object_keys(path)? {
+        if !state.objects.contains_key(&id) {
+            return Err(MnemeError::RootInconsistent);
+        }
+        if state.key_index.get(&logical_key.hash()).is_none() {
+            return Err(MnemeError::RootInconsistent);
         }
     }
     Ok(RootReport {
@@ -134,7 +154,14 @@ fn walk_objects(dir: &Path, out: &mut BTreeMap<[u8; 32], Vec<u8>>) -> Result<(),
             walk_objects(&path, out)?;
         } else if path.extension().is_some_and(|e| e == "cbor") {
             let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
-            out.insert(hash_obj(&bytes), bytes);
+            // INV-1/A-DB: key by the on-disk filename (claimed content address),
+            // not by re-hashing the bytes — else `verify_store`'s re-hash is
+            // tautological. A byte flip leaves the id fixed while `hash_obj` moves.
+            let claimed_id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or(MnemeError::SchemaDrift)?;
+            out.insert(decode_hex32(claimed_id)?, bytes);
         }
     }
     Ok(())

@@ -28,7 +28,7 @@ mod plonky2_prover;
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
-pub use key_index_load::load_key_index_tree;
+pub use key_index_load::{load_key_index_tree, load_object_keys};
 pub use procedure::{
     IndexedEntry, PROC_DOMAIN, default_key_procedure, default_semantic_procedure,
     execute_procedure_p, is_key_index_procedure, procedure_id, replay_from_candidates,

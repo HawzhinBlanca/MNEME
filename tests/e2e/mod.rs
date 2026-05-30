@@ -111,6 +111,71 @@ fn e2e_remember_appends_key_index_journal_without_rewriting_base() {
     assert_eq!(entries[0].plaintext, b"2");
 }
 
+// --- §22 K3: session recall cache is fail-closed (invalidated by mutation) ---
+
+#[test]
+fn e2e_session_recall_cache_invalidated_by_forget() {
+    let (mut store, cap, _store_dir) = agent_store();
+    store
+        .remember(semantic_draft("session", "k", b"cached-body"), &cap)
+        .unwrap();
+    let query = Query {
+        logical_key: theme_key("session", "k"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    let proc = default_key_procedure();
+
+    // Prime the cache: a repeated identical recall must return the same verified
+    // result while the signed root is unchanged.
+    let first = store.recall_verified(&query, &proc, &cap).unwrap();
+    assert_eq!(first[0].plaintext, b"cached-body");
+    let second = store.recall_verified(&query, &proc, &cap).unwrap();
+    assert_eq!(second[0].plaintext, b"cached-body");
+
+    // Forgetting rotates the signed root; the cached entry must NOT be served.
+    store
+        .forget(
+            ForgetTarget::LogicalKey(theme_key("session", "k")),
+            &cap,
+            ForgetMode::Shred,
+        )
+        .unwrap();
+    let after = store.recall_verified(&query, &proc, &cap);
+    assert!(
+        matches!(after, Err(MnemeError::Forgotten)),
+        "stale cache served a forgotten entry: {after:?}"
+    );
+}
+
+#[test]
+fn e2e_session_recall_cache_reflects_overwrite() {
+    let (mut store, cap, _store_dir) = agent_store();
+    store
+        .remember(semantic_draft("session", "k", b"old"), &cap)
+        .unwrap();
+    let query = Query {
+        logical_key: theme_key("session", "k"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    let proc = default_key_procedure();
+    assert_eq!(
+        store.recall_verified(&query, &proc, &cap).unwrap()[0].plaintext,
+        b"old"
+    );
+
+    // Overwrite the same logical key; the new signed root must invalidate the
+    // cached "old" payload so the next recall reflects the latest value.
+    store
+        .remember(semantic_draft("session", "k", b"new"), &cap)
+        .unwrap();
+    assert_eq!(
+        store.recall_verified(&query, &proc, &cap).unwrap()[0].plaintext,
+        b"new"
+    );
+}
+
 // --- §17.2 tamper: single-byte mutation rejected with typed variant ---
 
 #[test]
@@ -1164,5 +1229,42 @@ fn hostile_verify_store_rejects_multibyte_key_index_without_panic() {
         Err(MnemeError::SchemaDrift) => {}
         Err(other) => panic!("expected SchemaDrift, got {other:?}"),
         Ok(_) => panic!("expected SchemaDrift, verify_store succeeded"),
+    }
+}
+
+// --- F-D: persisted store metadata must be byte-deterministic (§17.7) ---
+
+/// Two stores built from identical seeds + identical op sequences must produce
+/// byte-identical persisted metadata (`object_keys.json`, `key_index.json`,
+/// `embeddings.json`). Regression guard for the HashMap→BTreeMap sidecar fix:
+/// HashMap iteration order made `object_keys.json` differ across processes even
+/// though the signed root matched, defeating full-tree cross-host reproduction.
+#[test]
+fn e2e_persisted_metadata_is_byte_deterministic() {
+    fn build(dir: &std::path::Path) {
+        let operator = KeyPair::from_seed([0x7a; 32]);
+        let agent = KeyPair::from_seed([0x7b; 32]);
+        let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+        let mut store = Store::create(dir, operator).expect("create");
+        store.trust_mut().authorized_writers.push(cap.subject);
+        // Insert in an order whose HashMap layout historically diverged.
+        for name in ["zebra", "alpha", "mike", "bravo", "yankee", "delta"] {
+            store
+                .remember(semantic_draft("user", name, name.as_bytes()), &cap)
+                .expect("remember");
+        }
+    }
+    let a = tempdir().expect("a");
+    let b = tempdir().expect("b");
+    build(a.path());
+    build(b.path());
+    for rel in [
+        "meta/object_keys.json",
+        "meta/key_index.json",
+        "meta/embeddings.json",
+    ] {
+        let ba = std::fs::read(a.path().join(rel)).unwrap_or_default();
+        let bb = std::fs::read(b.path().join(rel)).unwrap_or_default();
+        assert_eq!(ba, bb, "{rel} must be byte-identical across processes");
     }
 }

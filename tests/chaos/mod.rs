@@ -69,7 +69,16 @@ fn fault_disk_full(iter: u32, seed: u64) {
     test_clear_pause();
     let fs = FaultStore::fresh(seed);
     let path = fs.path().to_path_buf();
-    set_readonly_tree(&path);
+    // Late-stage write fault: open succeeds and the transaction BEGINS (the
+    // `.incomplete` sentinel is created in the writable root), then the durable
+    // object write into the now-read-only `objects/` subtree fails — exercising the
+    // mid-transaction `.incomplete` fail-closed guard rather than failing at
+    // tx-begin. HONEST CAVEAT: this is a permission-based proxy for a genuine
+    // mid-object-write `ENOSPC`; a literal ENOSPC needs a size-capped/fault
+    // filesystem (tmpfs cap / fault FS) which is not available without root on the
+    // macOS/Linux CI hosts. The injection stage (object write) is faithful even
+    // though the errno (EACCES) is not literally ENOSPC.
+    let objects_dir = path.join("objects");
     let remember_err = match Store::open(&path, fs.operator.clone()) {
         Ok(mut store) => {
             store.trust_mut().authorized_writers.push(fs.cap.subject);
@@ -83,17 +92,19 @@ fn fault_disk_full(iter: u32, seed: u64) {
                 trust_tier: None,
                 embedding: None,
             };
-            store.remember(draft, &fs.cap).err()
+            set_readonly_tree(&objects_dir);
+            let err = store.remember(draft, &fs.cap).err();
+            clear_readonly_tree(&objects_dir);
+            err
         }
         Err(e) => Some(e),
     };
-    clear_readonly_tree(&path);
     let v = post_fault_checks(&fs, true);
     finish_row(
         iter,
         "disk_full_mid_txn",
-        "remember on readonly store (ENOSPC sim)",
-        "Err on write; .incomplete or fail-closed open; golden intact",
+        "remember with read-only objects/ tree (mid-write ENOSPC proxy, EACCES not literal ENOSPC)",
+        "Err during object write; .incomplete guard or fail-closed open; golden state intact",
         &format!("remember: {:?}", remember_err),
         &v,
     );
@@ -104,8 +115,14 @@ fn fault_corrupt_blob(iter: u32, seed: u64) {
     let fs = FaultStore::fresh(seed);
     let (label, _) = corrupt_random_artifact(fs.path(), seed.wrapping_add(17));
     let mut v = post_fault_checks(&fs, false);
+    // B-1: the `meta/object_keys.{json,journal}` reverse-index sidecar is now inside
+    // the `verify_store` walk (cross-checked against the verified object set +
+    // key-index), so a byte flip there must surface a typed verify Err — no longer
+    // an audit gap.
     let in_verify_tcb = label.starts_with("roots/HEAD")
         || label.contains("key_index.json")
+        || label.contains("object_keys.json")
+        || label.contains("object_keys.journal")
         || label.contains("objects/");
     if in_verify_tcb {
         mark_verify_pass_on_corrupt(&mut v, &label);
@@ -113,7 +130,7 @@ fn fault_corrupt_blob(iter: u32, seed: u64) {
     let expected = if in_verify_tcb {
         "verify_store Err (typed); no panic"
     } else {
-        "sidecar outside verify_store walk; document if verify Ok (audit gap)"
+        "artifact outside verify_store walk; document if verify Ok (audit gap)"
     };
     finish_row(
         iter,
