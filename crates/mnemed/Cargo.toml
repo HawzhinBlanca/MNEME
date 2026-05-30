@@ -62,3 +62,6 @@ tonic = { workspace = true, features = ["transport"] }
 
 [build-dependencies]
 tonic-build = "0.13"
+# Self-sufficient protoc: vendored binary so the build never depends on a
+# system `protoc` being installed (fixes CI/e2e-daemon + fresh local checkouts).
+protoc-bin-vendored = "3"
