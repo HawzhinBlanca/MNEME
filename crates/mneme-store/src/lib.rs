@@ -67,7 +67,7 @@ impl RecallSessionCache {
 }
 
 pub use layout::Tombstone;
-pub use merge::SyncSnapshot;
+pub use merge::{SyncManifest, SyncSnapshot};
 pub use pause::{
     AFTER_APPEND_CHECKPOINT, AFTER_BEGIN_INCOMPLETE, AFTER_KEY_INDEX, AFTER_OBJECT_WRITE,
     AFTER_PERSIST_INDEX, AFTER_WRITE_HEAD, BEFORE_COMMIT_INCOMPLETE, test_clear_pause,

@@ -14,11 +14,21 @@ use serde::{Deserialize, Serialize};
 
 const MSG_HELLO: u8 = 0x01;
 const MSG_ROOT_PROOF: u8 = 0x02;
+/// Explicit "send me your signed root proof" request (replaces the old catch-all).
+pub const MSG_ROOT_PROOF_REQ: u8 = 0x03;
 const MSG_BYE: u8 = 0x07;
 /// §11 anti-entropy: peer requests this node's authenticated structure snapshot.
 pub const MSG_SNAPSHOT_REQ: u8 = 0x10;
 /// §11 anti-entropy: CBOR-serialized [`mneme_store::SyncSnapshot`] response.
 pub const MSG_SNAPSHOT: u8 = 0x11;
+/// §11 INCREMENTAL anti-entropy: peer requests the structure manifest (no bytes).
+pub const MSG_MANIFEST_REQ: u8 = 0x12;
+/// CBOR-serialized [`mneme_store::SyncManifest`] response.
+pub const MSG_MANIFEST: u8 = 0x13;
+/// Peer requests a delta of object bytes by id (CBOR `Vec<[u8;32]>`).
+pub const MSG_WANT_OBJECTS: u8 = 0x14;
+/// Delta of object bytes (CBOR `Vec<Vec<u8>>`).
+pub const MSG_HAVE_OBJECTS: u8 = 0x15;
 
 #[derive(Serialize, Deserialize)]
 struct Hello {
@@ -53,9 +63,15 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
                 }
                 let response = match data[0] {
                     MSG_HELLO => handle_hello(&state, &data[1..]).await,
+                    MSG_ROOT_PROOF_REQ => encode_root_proof(&state),
                     MSG_SNAPSHOT_REQ => encode_snapshot(&state),
+                    MSG_MANIFEST_REQ => encode_manifest(&state),
+                    MSG_WANT_OBJECTS => encode_have_objects(&state, &data[1..]),
                     MSG_BYE => None,
-                    _ => encode_root_proof(&state),
+                    // Fail closed: an unrecognized tag (incl. server→client RESPONSE
+                    // tags replayed by an A-NET probe) gets no reply, not a volunteered
+                    // root proof. Real clients use the explicit request tags above.
+                    _ => None,
                 };
                 if let Some(bytes) = response {
                     if socket.send(Message::Binary(bytes.into())).await.is_err() {
@@ -126,6 +142,67 @@ pub fn encode_snapshot_request() -> Vec<u8> {
 pub fn decode_snapshot(frame: &[u8]) -> Option<mneme_store::SyncSnapshot> {
     match frame.split_first() {
         Some((&MSG_SNAPSHOT, body)) => ciborium::from_reader(body).ok(),
+        _ => None,
+    }
+}
+
+// --- §11 incremental anti-entropy (manifest + delta) ---
+
+/// Serialize this node's [`mneme_store::SyncManifest`] (structure, no object bytes).
+fn encode_manifest(state: &AppState) -> Option<Vec<u8>> {
+    let store = state.store.lock().ok()?;
+    let manifest = store.export_sync_manifest();
+    drop(store);
+    let mut body = Vec::new();
+    ciborium::into_writer(&manifest, &mut body).ok()?;
+    let mut out = Vec::with_capacity(1 + body.len());
+    out.push(MSG_MANIFEST);
+    out.extend(body);
+    Some(out)
+}
+
+/// Answer a `MSG_WANT_OBJECTS` request (CBOR `Vec<[u8;32]>`) with the object bytes
+/// this node holds for those ids (`MSG_HAVE_OBJECTS`, CBOR `Vec<Vec<u8>>`).
+fn encode_have_objects(state: &AppState, payload: &[u8]) -> Option<Vec<u8>> {
+    let ids: Vec<[u8; 32]> = ciborium::from_reader(payload).ok()?;
+    let store = state.store.lock().ok()?;
+    let objects = store.export_objects(&ids);
+    drop(store);
+    let mut body = Vec::new();
+    ciborium::into_writer(&objects, &mut body).ok()?;
+    let mut out = Vec::with_capacity(1 + body.len());
+    out.push(MSG_HAVE_OBJECTS);
+    out.extend(body);
+    Some(out)
+}
+
+/// Bare `MSG_MANIFEST_REQ` frame (client driver helper).
+pub fn encode_manifest_request() -> Vec<u8> {
+    vec![MSG_MANIFEST_REQ]
+}
+
+/// Decode a `MSG_MANIFEST` frame into a [`mneme_store::SyncManifest`].
+pub fn decode_manifest(frame: &[u8]) -> Option<mneme_store::SyncManifest> {
+    match frame.split_first() {
+        Some((&MSG_MANIFEST, body)) => ciborium::from_reader(body).ok(),
+        _ => None,
+    }
+}
+
+/// Build a `MSG_WANT_OBJECTS` frame requesting the given object ids.
+pub fn encode_want_objects(ids: &[[u8; 32]]) -> Option<Vec<u8>> {
+    let mut body = Vec::new();
+    ciborium::into_writer(&ids, &mut body).ok()?;
+    let mut out = Vec::with_capacity(1 + body.len());
+    out.push(MSG_WANT_OBJECTS);
+    out.extend(body);
+    Some(out)
+}
+
+/// Decode a `MSG_HAVE_OBJECTS` frame into the delta object byte vectors.
+pub fn decode_have_objects(frame: &[u8]) -> Option<Vec<Vec<u8>>> {
+    match frame.split_first() {
+        Some((&MSG_HAVE_OBJECTS, body)) => ciborium::from_reader(body).ok(),
         _ => None,
     }
 }

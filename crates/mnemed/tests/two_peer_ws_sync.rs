@@ -173,3 +173,117 @@ async fn wire_object_tamper_is_not_ingested() {
         "tampered wire object must NOT be ingested under its claimed key"
     );
 }
+
+/// Phase 2a: incremental anti-entropy over a real WebSocket — pull the peer's
+/// manifest, then fetch ONLY the missing object delta, then merge. Converges the
+/// content roots while transferring just the delta (not the full snapshot).
+async fn pull_incremental(local: &AppState, peer: &RunningServer) -> usize {
+    let url = format!("ws://{}/v1/sync", peer.http_addr);
+    let (mut ws, _) = connect_async(&url).await.expect("ws connect");
+
+    // 1) manifest (structure only, no object bytes)
+    ws.send(Message::Binary(
+        mnemed::sync::encode_manifest_request().into(),
+    ))
+    .await
+    .expect("send manifest req");
+    let manifest_frame = loop {
+        match ws.next().await.expect("frame").expect("ok") {
+            Message::Binary(d) => break d,
+            _ => continue,
+        }
+    };
+    let manifest = mnemed::sync::decode_manifest(&manifest_frame).expect("decode manifest");
+
+    // 2) compute the missing delta locally, fetch only those object bytes
+    let missing = {
+        let store = local.store.lock().expect("lock");
+        store.missing_object_ids(&manifest)
+    };
+    let delta = if missing.is_empty() {
+        Vec::new()
+    } else {
+        ws.send(Message::Binary(
+            mnemed::sync::encode_want_objects(&missing)
+                .expect("want")
+                .into(),
+        ))
+        .await
+        .expect("send want");
+        let have_frame = loop {
+            match ws.next().await.expect("frame").expect("ok") {
+                Message::Binary(d) => break d,
+                _ => continue,
+            }
+        };
+        mnemed::sync::decode_have_objects(&have_frame).expect("decode have")
+    };
+    let fetched = delta.len();
+
+    // 3) merge manifest + delta
+    {
+        let mut store = local.store.lock().expect("lock");
+        store
+            .merge_from_manifest(&manifest, delta)
+            .expect("merge manifest");
+    }
+    fetched
+}
+
+#[tokio::test]
+async fn two_daemons_converge_incrementally_over_websocket() {
+    let operator = KeyPair::from_seed([0x77; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (state_a, _da) = build_peer(&operator, &cap);
+    let (state_b, _db) = build_peer(&operator, &cap);
+    remember(&state_a, "peer", "only-a", b"alpha", &cap);
+    remember(&state_b, "peer", "only-b", b"beta", &cap);
+
+    let server_a = serve(state_a.clone()).await;
+    let server_b = serve(state_b.clone()).await;
+
+    let fetched_b = pull_incremental(&state_a, &server_b).await;
+    assert_eq!(fetched_b, 1, "A fetched only B's single missing object");
+    let fetched_a = pull_incremental(&state_b, &server_a).await;
+    assert_eq!(fetched_a, 1, "B fetched only A's single missing object");
+
+    // Re-pull is a no-op delta (idempotent).
+    assert_eq!(
+        pull_incremental(&state_a, &server_b).await,
+        0,
+        "converged: empty delta"
+    );
+
+    let key_a = LogicalKey {
+        namespace: "peer".into(),
+        name: "only-a".into(),
+    };
+    let key_b = LogicalKey {
+        namespace: "peer".into(),
+        name: "only-b".into(),
+    };
+    let (root_a, root_b) = {
+        let sa = state_a.store.lock().unwrap();
+        let sb = state_b.store.lock().unwrap();
+        assert!(
+            sa.prove_membership(&key_b).is_ok(),
+            "A got only-b via incremental wire"
+        );
+        assert!(
+            sb.prove_membership(&key_a).is_ok(),
+            "B got only-a via incremental wire"
+        );
+        (sa.current_root().unwrap(), sb.current_root().unwrap())
+    };
+    assert_eq!(
+        root_a.key_index_root, root_b.key_index_root,
+        "incremental key-index converges"
+    );
+    assert_eq!(
+        root_a.dag_head_root, root_b.dag_head_root,
+        "incremental DAG converges"
+    );
+
+    server_a.shutdown().await;
+    server_b.shutdown().await;
+}

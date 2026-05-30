@@ -1330,3 +1330,175 @@ fn e2e_open_pinned_rejects_full_snapshot_rollback() {
         Ok(_) => panic!("pinned open must reject the stale full-snapshot rollback"),
     }
 }
+
+// --- Phase 2a: §11 INCREMENTAL anti-entropy (manifest + delta) convergence ---
+
+fn inc_peer(
+    seed: u8,
+    cap: &mneme_cap::Capability,
+    operator: &KeyPair,
+) -> (Store, tempfile::TempDir) {
+    let dir = tempdir().expect("dir");
+    let mut s = Store::create(dir.path(), operator.clone()).expect("create");
+    s.trust_mut().authorized_writers.push(cap.subject);
+    let _ = seed;
+    (s, dir)
+}
+
+/// Disjoint keys converge via the manifest+delta path, and each peer fetches ONLY
+/// the object bytes it lacks (not the full snapshot).
+#[test]
+fn e2e_incremental_sync_disjoint_converges_delta_only() {
+    let operator = KeyPair::from_seed([0x6a; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (mut a, _da) = inc_peer(1, &cap, &operator);
+    let (mut b, _db) = inc_peer(2, &cap, &operator);
+    a.remember(semantic_draft("peer", "only-a", b"alpha"), &cap)
+        .unwrap();
+    b.remember(semantic_draft("peer", "only-b", b"beta"), &cap)
+        .unwrap();
+
+    // A pulls B: manifest first, then only the missing object.
+    let manifest_b = b.export_sync_manifest();
+    let missing = a.missing_object_ids(&manifest_b);
+    assert_eq!(
+        missing.len(),
+        1,
+        "A fetches only B's one missing object, not its own"
+    );
+    let delta = b.export_objects(&missing);
+    assert_eq!(delta.len(), 1);
+    a.merge_from_manifest(&manifest_b, delta).unwrap();
+
+    // B pulls A.
+    let manifest_a = a.export_sync_manifest();
+    let missing_a = b.missing_object_ids(&manifest_a);
+    let delta_a = a.export_objects(&missing_a);
+    b.merge_from_manifest(&manifest_a, delta_a).unwrap();
+
+    assert!(a.prove_membership(&theme_key("peer", "only-b")).is_ok());
+    assert!(b.prove_membership(&theme_key("peer", "only-a")).is_ok());
+    let ra = a.current_root().unwrap();
+    let rb = b.current_root().unwrap();
+    assert_eq!(
+        ra.key_index_root, rb.key_index_root,
+        "key-index roots converge"
+    );
+    assert_eq!(ra.dag_head_root, rb.dag_head_root, "DAG roots converge");
+}
+
+/// Re-pulling an already-converged peer fetches nothing and leaves the authenticated
+/// content root unchanged (idempotent).
+#[test]
+fn e2e_incremental_sync_is_idempotent() {
+    let operator = KeyPair::from_seed([0x6b; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (mut a, _da) = inc_peer(1, &cap, &operator);
+    let (mut b, _db) = inc_peer(2, &cap, &operator);
+    b.remember(semantic_draft("peer", "k", b"v"), &cap).unwrap();
+
+    let m = b.export_sync_manifest();
+    a.merge_from_manifest(&m, b.export_objects(&a.missing_object_ids(&m)))
+        .unwrap();
+    let kir = a.current_root().unwrap().key_index_root;
+
+    // Second pull: nothing missing, content root stable.
+    let m2 = b.export_sync_manifest();
+    assert!(
+        a.missing_object_ids(&m2).is_empty(),
+        "converged peer has no delta"
+    );
+    a.merge_from_manifest(&m2, vec![]).unwrap();
+    assert_eq!(
+        a.current_root().unwrap().key_index_root,
+        kir,
+        "idempotent content root"
+    );
+}
+
+/// A conflicting write to the SAME logical key on both peers converges to ONE
+/// deterministic winner regardless of merge direction (CRDT semantics over the wire).
+#[test]
+fn e2e_incremental_sync_conflicting_key_converges() {
+    let operator = KeyPair::from_seed([0x6c; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (mut a, _da) = inc_peer(1, &cap, &operator);
+    let (mut b, _db) = inc_peer(2, &cap, &operator);
+    a.remember(semantic_draft("peer", "shared", b"from-A"), &cap)
+        .unwrap();
+    b.remember(semantic_draft("peer", "shared", b"from-B"), &cap)
+        .unwrap();
+
+    let mb = b.export_sync_manifest();
+    a.merge_from_manifest(&mb, b.export_objects(&a.missing_object_ids(&mb)))
+        .unwrap();
+    let ma = a.export_sync_manifest();
+    b.merge_from_manifest(&ma, a.export_objects(&b.missing_object_ids(&ma)))
+        .unwrap();
+
+    assert!(a.prove_membership(&theme_key("peer", "shared")).is_ok());
+    assert!(b.prove_membership(&theme_key("peer", "shared")).is_ok());
+    assert_eq!(
+        a.current_root().unwrap().key_index_root,
+        b.current_root().unwrap().key_index_root,
+        "conflicting key converges to one winner on both peers"
+    );
+}
+
+/// A-NET: a fetched delta object mutated in transit must NOT be ingested — the
+/// recomputed content hash no longer matches the manifest leaf, so the forged key
+/// never appears (merge does not error; it drops the forged object).
+#[test]
+fn e2e_incremental_sync_rejects_in_transit_tamper() {
+    let operator = KeyPair::from_seed([0x6d; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (mut a, _da) = inc_peer(1, &cap, &operator);
+    let (mut b, _db) = inc_peer(2, &cap, &operator);
+    b.remember(semantic_draft("peer", "only-b", b"beta"), &cap)
+        .unwrap();
+
+    let mb = b.export_sync_manifest();
+    let mut delta = b.export_objects(&a.missing_object_ids(&mb));
+    assert!(!delta.is_empty());
+    let mid = delta[0].len() / 2;
+    delta[0][mid] ^= 0xff; // tamper in transit
+    // A tampered delta object hashes to a different id than the advertised leaf, so
+    // the leaf's object is effectively unfulfilled → fail closed (no half-merge),
+    // identical to an incomplete delta. Stronger than a silent per-object drop.
+    let err = a.merge_from_manifest(&mb, delta).unwrap_err();
+    assert_eq!(
+        err,
+        MnemeError::ProvenanceBroken,
+        "tampered delta must fail closed"
+    );
+    assert!(
+        a.prove_membership(&theme_key("peer", "only-b")).is_err(),
+        "tampered delta object must not be ingested under its claimed key"
+    );
+}
+
+/// Phase 2a fail-closed: an INCOMPLETE delta (peer manifest references an object it
+/// does not serve — truncated/malicious HaveObjects) must be REJECTED, never merged
+/// with a silent divergence. Regression for the adversarial-review convergence blocker.
+#[test]
+fn e2e_incremental_sync_incomplete_delta_fails_closed() {
+    let operator = KeyPair::from_seed([0x6e; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (mut a, _da) = inc_peer(1, &cap, &operator);
+    let (mut b, _db) = inc_peer(2, &cap, &operator);
+    b.remember(semantic_draft("peer", "only-b", b"beta"), &cap)
+        .unwrap();
+
+    let manifest_b = b.export_sync_manifest();
+    let missing = a.missing_object_ids(&manifest_b);
+    assert_eq!(missing.len(), 1);
+    // Malicious/truncated peer: advertises the leaf but serves an EMPTY object delta.
+    let err = a.merge_from_manifest(&manifest_b, vec![]).unwrap_err();
+    assert_eq!(
+        err,
+        MnemeError::ProvenanceBroken,
+        "incomplete delta must fail closed"
+    );
+    // And the unsupplied key must NOT have been merged.
+    assert!(a.prove_membership(&theme_key("peer", "only-b")).is_err());
+}

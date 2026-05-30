@@ -31,6 +31,24 @@ pub struct SyncSnapshot {
     pub objects: Vec<Vec<u8>>,
 }
 
+/// Lightweight §11 anti-entropy manifest: the authenticated *structure* (leaves,
+/// tombstones, logical-key bindings) plus the peer's object-id set — but **no object
+/// bytes**. A peer requests this first, computes which object ids it lacks, and
+/// fetches only that delta (the large ciphertext blobs), instead of pulling the
+/// whole [`SyncSnapshot`]. Metadata is small (~96 B/object); object bytes dominate
+/// size, so transferring only the delta is the real bandwidth win.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct SyncManifest {
+    /// `(key_hash, object_id)` MST leaves.
+    pub leaves: Vec<([u8; 32], [u8; 32])>,
+    /// Tombstoned key hashes.
+    pub tombstones: Vec<[u8; 32]>,
+    /// `(object_id, namespace, name)` logical-key bindings.
+    pub object_keys: Vec<([u8; 32], String, String)>,
+    /// All object ids the peer holds (for delta computation; no bytes).
+    pub object_ids: Vec<[u8; 32]>,
+}
+
 impl SyncSnapshot {
     /// Rebuild the in-memory [`PeerSnapshot`] consumed by `apply_peer_snapshot`.
     /// Objects are keyed by their *recomputed* content hash (INV-1 / A-NET): a blob
@@ -110,6 +128,72 @@ impl Store {
             object_keys,
             objects,
         }
+    }
+
+    /// Export the §11 anti-entropy manifest (structure + object-id set, no bytes).
+    pub fn export_sync_manifest(&self) -> SyncManifest {
+        let snap = self.export_sync_snapshot();
+        SyncManifest {
+            leaves: snap.leaves,
+            tombstones: snap.tombstones,
+            object_keys: snap.object_keys,
+            object_ids: self.objects.keys().copied().collect(),
+        }
+    }
+
+    /// Object ids in `manifest` that this store does NOT already hold — the delta a
+    /// peer must fetch (`WantObjects`). Computed locally; nothing crosses the wire.
+    pub fn missing_object_ids(&self, manifest: &SyncManifest) -> Vec<[u8; 32]> {
+        manifest
+            .object_ids
+            .iter()
+            .filter(|id| !self.objects.contains_key(*id))
+            .copied()
+            .collect()
+    }
+
+    /// Canonical bytes for the requested object ids this store holds (`HaveObjects`
+    /// response). Unknown ids are skipped — the receiver re-hashes on ingest.
+    pub fn export_objects(&self, ids: &[[u8; 32]]) -> Vec<Vec<u8>> {
+        ids.iter()
+            .filter_map(|id| self.objects.get(id).cloned())
+            .collect()
+    }
+
+    /// §11 incremental anti-entropy merge: apply a peer `manifest` given only the
+    /// `fetched_objects` delta (the object ids this store lacked). Objects referenced
+    /// by divergent peer leaves are either in the delta or already local; we supply
+    /// **both** so the verified merge core always finds them — only the delta crossed
+    /// the wire. Convergence/ tamper-rejection are identical to [`Self::merge_from_snapshot`].
+    pub fn merge_from_manifest(
+        &mut self,
+        manifest: &SyncManifest,
+        fetched_objects: Vec<Vec<u8>>,
+    ) -> Result<Root, MnemeError> {
+        let mut objects = fetched_objects;
+        objects.extend(self.objects.values().cloned());
+
+        // FAIL CLOSED on an incomplete delta. `apply_peer_snapshot` silently skips a
+        // divergent leaf whose object is absent — fine as defense-in-depth, but at
+        // THIS layer a peer that advertises a leaf in its manifest yet does not serve
+        // the object (truncated/malicious `HaveObjects`) would otherwise merge with no
+        // error while silently DIVERGING. Require every live leaf's object to be
+        // present (in the delta or already local) before merging; reject otherwise.
+        let present: std::collections::HashSet<[u8; 32]> =
+            objects.iter().map(|b| hash_obj(b)).collect();
+        for (_key_hash, object_id) in &manifest.leaves {
+            if *object_id != mneme_smt::TOMBSTONE && !present.contains(object_id) {
+                return Err(MnemeError::ProvenanceBroken);
+            }
+        }
+
+        let snapshot = SyncSnapshot {
+            leaves: manifest.leaves.clone(),
+            tombstones: manifest.tombstones.clone(),
+            object_keys: manifest.object_keys.clone(),
+            objects,
+        };
+        self.merge_from_snapshot(&snapshot)
     }
 
     /// Shared transactional merge body for both on-disk and wire merges. When
