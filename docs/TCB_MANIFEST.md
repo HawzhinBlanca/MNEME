@@ -33,6 +33,7 @@ is fail-closed (returns a typed `MnemeError`, never panics on attacker input).
 |---|---|
 | `mneme-crypto`: Ed25519 verify, AEAD open, vault | root/cap signature verification; payload AEAD |
 | `mneme-root`: `verify_root_chain`, `check_replay`, `max_signed_checkpoint`, `verify_checkpoint_chain` | succession + A-REPLAY floor + per-checkpoint signature re-verify |
+| `mneme-dag`: `DagIndex::new`, `rebuild_from`, `root` | `verify_store` rebuilds the DAG from on-disk objects and compares its root to `root.dag_head_root` (store.rs) |
 | `mneme-smt`: `verify_membership`, `verify_non_membership`, `hash_up`, `membership_leaf_hash` | Merkle path recomputation |
 | `mneme-index`: `key_index_load::{load_object_keys, load_key_index_tree}` | parses untrusted on-disk sidecars for `verify_store`; **linted by `verify-tcb-guard.sh`** |
 | `mneme-index`: `verify_ads_vo` | semantic ADS verification-object check |

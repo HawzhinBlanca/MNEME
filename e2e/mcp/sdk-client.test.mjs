@@ -17,13 +17,17 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const candidates = [
-  process.env.MNEME_MCP_BIN,
+// Binary resolution must NOT silently mask a broken/mis-targeted CI build:
+// - If MNEME_MCP_BIN is set (CI), that EXACT path must exist — a missing binary is
+//   a hard failure, never a fallback to a stale target/* artifact and never a skip.
+// - Only when MNEME_MCP_BIN is unset (local dev) do we probe conventional paths and
+//   skip gracefully if none exist.
+const explicitBin = process.env.MNEME_MCP_BIN;
+const fallbacks = [
   path.join(repoRoot, "target/release/mneme-mcp"),
-  path.join(repoRoot, "out/ci-targets/e2e-cli/release/mneme-mcp"),
   path.join(repoRoot, "target/debug/mneme-mcp"),
-].filter(Boolean);
-const bin = candidates.find((p) => existsSync(p));
+];
+const bin = explicitBin ?? fallbacks.find((p) => existsSync(p));
 
 const SEED = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
 
@@ -35,8 +39,12 @@ function toolJson(result) {
 }
 
 test("official MCP SDK client gets receipt-verified recall from mneme-mcp", async (t) => {
+  if (explicitBin && !existsSync(explicitBin)) {
+    // CI set the path but the build did not produce it — fail loudly, do not skip.
+    assert.fail(`MNEME_MCP_BIN=${explicitBin} does not exist — the mneme-mcp build did not produce the expected binary`);
+  }
   if (!bin) {
-    t.skip(`mneme-mcp binary not found; build with: cargo build -p mneme-mcp (looked: ${candidates.join(", ")})`);
+    t.skip(`mneme-mcp binary not found (set MNEME_MCP_BIN or run: cargo build -p mneme-mcp); probed: ${fallbacks.join(", ")}`);
     return;
   }
   const storeDir = mkdtempSync(path.join(tmpdir(), "mneme-mcp-sdk-"));
