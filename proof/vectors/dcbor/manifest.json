@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "appendix_b_item": 2,
+  "status": "pass",
+  "scope": "cross-validated: mneme-core dcbor test + mneme-crossref dcbor (canonical + reject cases)",
+  "root_manifest": "../dcbor_manifest.json",
+  "vectors": [
+    {
+      "name": "map_key_order_canonical",
+      "cbor_file": "map_sorted.cbor"
+    },
+    {
+      "name": "map_key_order_rejected",
+      "cbor_file": "map_unsorted.cbor"
+    },
+    {
+      "name": "float_rejected",
+      "cbor_file": "float16.cbor"
+    },
+    {
+      "name": "indefinite_rejected",
+      "cbor_file": "indefinite_break.cbor"
+    },
+    {
+      "name": "empty_map",
+      "cbor_file": "empty_map.cbor"
+    }
+  ]
+}

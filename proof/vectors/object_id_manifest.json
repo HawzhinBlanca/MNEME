@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "vectors": [
+    {
+      "name": "episodic_v1",
+      "kind": 0,
+      "cbor_file": "objects/episodic_v1.cbor",
+      "object_id_hex": "c12d8ad341560fb75866af077fa9ff9d3aa427d752b12420451035d98cf323cd"
+    },
+    {
+      "name": "semantic_v1",
+      "kind": 1,
+      "cbor_file": "objects/semantic_v1.cbor",
+      "object_id_hex": "3ac0ed72d4fc0b9e62b09004f966fc8ab7d3320b8d38f28264243501fcdab4b0"
+    },
+    {
+      "name": "procedural_v1",
+      "kind": 2,
+      "cbor_file": "objects/procedural_v1.cbor",
+      "object_id_hex": "fa9da5285ca2ea42fcf97bddba0148a8eccad66d45d14ee96f06f1ad54fd18d1"
+    },
+    {
+      "name": "working_v1",
+      "kind": 3,
+      "cbor_file": "objects/working_v1.cbor",
+      "object_id_hex": "71b2fe44a85036bc4c6a9ad5972f9e40ce4e9a97d211fb254d4e147a4836ed51"
+    },
+    {
+      "name": "identity_v1",
+      "kind": 4,
+      "cbor_file": "objects/identity_v1.cbor",
+      "object_id_hex": "9155c73fa06fd474e9d6f5be39d597bad69299adbce766498a0670077ebf857f"
+    }
+  ]
+}

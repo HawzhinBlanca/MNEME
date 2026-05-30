@@ -1,0 +1,88 @@
+# Heavy validation lanes — blueprint §18 tamper / merge / determinism / full.
+# Scheduled + manual; PRs use ci.yml `quick` + `crypto` only.
+
+name: Reliability
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: Validation lane (blueprint §18)
+        required: false
+        default: quick
+        type: choice
+        options:
+          - quick
+          - crypto
+          - tamper
+          - merge
+          - determinism
+          - full
+
+concurrency:
+  group: reliability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  RUST_TEST_THREADS: 4
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  validation-lane:
+    name: "${{ github.event.inputs.lane || 'quick' }} lane"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/reliability-${{ github.event.inputs.lane || 'quick' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-reliability-${{ github.event.inputs.lane || 'quick' }}
+
+      - uses: actions/setup-node@v4
+        if: contains(fromJSON('["full"]'), github.event.inputs.lane || 'quick')
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Node devDependencies (full lane e2e)
+        if: contains(fromJSON('["full"]'), github.event.inputs.lane || 'quick')
+        run: |
+          if [[ -f package-lock.json ]]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run validation lane
+        run: bash scripts/ci/validation-lane.sh "${{ github.event.inputs.lane || 'quick' }}"
+
+  sync-e2e:
+    name: mnemed sync e2e (docker-compose)
+    runs-on: ubuntu-latest
+    if: false
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start mnemed peers
+        run: docker compose -f docker-compose.e2e.yml up -d --wait
+
+      - name: Sync anti-entropy smoke
+        run: bash scripts/ci/run-sync-e2e.sh
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.e2e.yml down -v

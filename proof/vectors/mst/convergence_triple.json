@@ -1,0 +1,10 @@
+{
+  "description": "Appendix B (7): MST/SMT merge convergence — order-independent key-index root",
+  "agents": ["A", "B", "C"],
+  "message_orders": [
+    ["B", "A", "C"],
+    ["C", "B", "A"],
+    ["A", "C", "B"]
+  ],
+  "expected_key_index_root": "673af474a4267decc896c763c6852df10b63ef61673b81c3da2e6d01b9c8023e"
+}

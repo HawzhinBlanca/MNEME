@@ -1,0 +1,24 @@
+[package]
+name = "mneme-verify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+mneme-smt.workspace = true
+mneme-dag.workspace = true
+mneme-root.workspace = true
+mneme-index.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+blake3.workspace = true
+mneme-cap.workspace = true
+mneme-crypto.workspace = true
+mneme-core.workspace = true
+mneme-index.workspace = true
+mneme-root.workspace = true

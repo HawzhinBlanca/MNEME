@@ -1,0 +1,17 @@
+[package]
+name = "mneme-crossref"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Independent reference implementation for Appendix B cross-implementation vectors (B5)"
+publish = false
+
+[dependencies]
+blake3 = "1.8"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+serde_json = "1.0"

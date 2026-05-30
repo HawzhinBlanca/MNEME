@@ -1,0 +1,28 @@
+[package]
+name = "mneme-forget"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Crypto-shredding, tombstones, verifiable absence (blueprint §9.5, §13.2)"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+mneme-smt.workspace = true
+mneme-root.workspace = true
+blake3.workspace = true
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints.rust]
+warnings = "deny"
+
+[[test]]
+name = "forget_invariants"
+path = "tests/forget_invariants.rs"
+
+[[test]]
+name = "redact_invariants"
+path = "tests/redact_invariants.rs"

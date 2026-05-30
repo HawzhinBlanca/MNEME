@@ -1,0 +1,47 @@
+[package]
+name = "mneme-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+mneme-smt.workspace = true
+mneme-dag.workspace = true
+mneme-root.workspace = true
+mneme-cap.workspace = true
+mneme-verify.workspace = true
+mneme-index.workspace = true
+mneme-forget.workspace = true
+mneme-crdt.workspace = true
+rand.workspace = true
+blake3.workspace = true
+ciborium.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+rand.workspace = true
+hex.workspace = true
+
+[[test]]
+name = "e2e"
+path = "../../tests/e2e/mod.rs"
+harness = true
+
+[[test]]
+name = "tamper_suite"
+path = "../../tests/tamper_suite.rs"
+harness = true
+
+[[test]]
+name = "bench_recall"
+path = "../../tests/bench_recall.rs"
+harness = true

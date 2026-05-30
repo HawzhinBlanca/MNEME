@@ -1,0 +1,22 @@
+[package]
+name = "mneme-crdt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MST merge + anti-entropy wire (blueprint §8, §9.4, §11)"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-smt.workspace = true
+mneme-root.workspace = true
+mneme-dag.workspace = true
+mneme-crypto.workspace = true
+mneme-forget.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]
+proptest = "1.6"
+tempfile.workspace = true
+mneme-cap.workspace = true
+mneme-index.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "appendix_b_item": 3,
+  "status": "pass",
+  "scope": "cross-validated: mneme-smt smt_invariants + mneme-crossref SMT reference",
+  "generated_by": "cargo run -p mneme-smt --example gen_vectors",
+  "vectors": [
+    "empty_tree.json",
+    "single_member.json",
+    "multi_member.json",
+    "tombstone.json"
+  ]
+}

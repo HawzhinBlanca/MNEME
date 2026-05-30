@@ -1,0 +1,10 @@
+/target/
+/node_modules/
+/e2e/test-results/
+/playwright-report/
+/blob-report/
+package-lock.json
+# Evidence + isolated agent build trees (17G+ logs, 6G+ Cargo targets) — never commit.
+/out/
+/out/agent-targets/
+**/*.incomplete

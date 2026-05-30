@@ -1,0 +1,448 @@
+use crate::Store;
+use mneme_core::{
+    FixedPointEmbedding, Hlc, LogicalKey, MnemeError, NodeId, from_bytes_strict, hash_obj,
+};
+use mneme_dag::DagIndex;
+use mneme_index::KeyIndex;
+use mneme_root::{CheckpointLog, StoredRoot};
+use mneme_smt::SparseMerkleTree;
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::Path;
+
+#[derive(Clone, Debug)]
+pub struct Tombstone {
+    pub logical_key: mneme_core::LogicalKey,
+    pub key_hash: [u8; 32],
+}
+
+pub struct LoadedState {
+    pub key_index: KeyIndex,
+    pub dag: DagIndex,
+    pub hlc: Hlc,
+    pub key_to_object: HashMap<[u8; 32], [u8; 32]>,
+    pub object_keys: HashMap<[u8; 32], LogicalKey>,
+    pub objects: HashMap<[u8; 32], Vec<u8>>,
+    pub embeddings: HashMap<[u8; 32], FixedPointEmbedding>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct ObjectKeysSidecar {
+    entries: HashMap<String, LogicalKeySidecarEntry>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct LogicalKeySidecarEntry {
+    namespace: String,
+    name: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct KeyIndexSidecar {
+    entries: HashMap<String, String>,
+    tombstones: Vec<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum KeyIndexJournalEntry {
+    Upsert { key: String, object: String },
+    Tombstone { key: String },
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct EmbeddingSidecarEntry {
+    dim: u32,
+    scale: i8,
+    components: Vec<i16>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct EmbeddingSidecar {
+    entries: HashMap<String, EmbeddingSidecarEntry>,
+}
+
+pub fn init_store(path: &Path) -> Result<(), MnemeError> {
+    fs::create_dir_all(path.join("objects")).map_err(|e| io_err(path, e))?;
+    fs::create_dir_all(path.join("roots")).map_err(|e| io_err(path, e))?;
+    fs::create_dir_all(path.join("meta")).map_err(|e| io_err(path, e))?;
+    fs::create_dir_all(path.join("meta/redactions")).map_err(|e| io_err(path, e))?;
+    let key_index = path.join("meta/key_index.json");
+    if !key_index.exists() {
+        let data = serde_json::to_string_pretty(&KeyIndexSidecar::default())
+            .map_err(|_| MnemeError::SerializationNonCanonical)?;
+        crate::atomic::atomic_write(&key_index, data.as_bytes())?;
+    }
+    Ok(())
+}
+
+pub fn begin_transaction(path: &Path) -> Result<(), MnemeError> {
+    crate::atomic::begin_incomplete(path)
+}
+
+pub fn commit_transaction(path: &Path) -> Result<(), MnemeError> {
+    crate::atomic::end_incomplete(path)
+}
+
+pub fn abort_transaction(_path: &Path) -> Result<(), MnemeError> {
+    // Keep `.incomplete` on failure — fail-closed until explicit repair (INV-8).
+    Ok(())
+}
+
+pub fn check_incomplete(path: &Path) -> Result<(), MnemeError> {
+    crate::atomic::check_no_incomplete(path)
+}
+
+pub fn write_head(path: &Path, root: &StoredRoot) -> Result<(), MnemeError> {
+    CheckpointLog::write_head(path, root)
+}
+
+pub fn read_head(path: &Path) -> Result<StoredRoot, MnemeError> {
+    let head = head_path(path);
+    let bytes = crate::atomic::read_no_follow(&head)?;
+    StoredRoot::from_bytes(&bytes)
+}
+
+fn head_path(store: &Path) -> std::path::PathBuf {
+    store.join("roots/HEAD")
+}
+
+pub fn append_checkpoint(path: &Path, root: &StoredRoot) -> Result<(), MnemeError> {
+    CheckpointLog::append(path, root)
+}
+
+pub fn write_redaction_record(
+    path: &Path,
+    record: &mneme_forget::RedactionRecord,
+) -> Result<(), MnemeError> {
+    let dir = path.join("meta/redactions");
+    fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
+    let file = dir.join(format!("{}.json", hex_encode(&record.old_object_id)));
+    let data =
+        serde_json::to_string_pretty(record).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    crate::atomic::atomic_write(&file, data.as_bytes())
+}
+
+pub fn write_object(path: &Path, id: &[u8; 32], bytes: &[u8]) -> Result<(), MnemeError> {
+    let hex = hex_encode(id);
+    let obj_path = path.join(format!("objects/{}/{}.cbor", &hex[..2], hex));
+    crate::atomic::atomic_write(&obj_path, bytes)
+}
+
+#[allow(dead_code)]
+pub fn remove_object(path: &Path, id: &[u8; 32]) -> Result<(), MnemeError> {
+    let hex = hex_encode(id);
+    let obj_path = path.join(format!("objects/{}/{}.cbor", &hex[..2], hex));
+    if obj_path.exists() {
+        fs::remove_file(&obj_path).map_err(|e| io_err(&obj_path, e))?;
+    }
+    Ok(())
+}
+
+pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
+    let meta = path.join("meta");
+    fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
+    // Keep `meta/key_index.json` as the deterministic base path, but persist
+    // mutations through an append-only journal so single-key `remember` avoids
+    // rewriting the whole sidecar on every commit.
+    for (k, v) in store.key_to_object_ref() {
+        append_key_index_journal_entry(
+            path,
+            &KeyIndexJournalEntry::Upsert {
+                key: hex_encode(k),
+                object: hex_encode(v),
+            },
+        )?;
+    }
+    for t in store.tombstones_ref() {
+        append_key_index_journal_entry(
+            path,
+            &KeyIndexJournalEntry::Tombstone {
+                key: hex_encode(&t),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+pub fn persist_key_index_upsert(
+    path: &Path,
+    key_hash: &[u8; 32],
+    object_id: &[u8; 32],
+) -> Result<(), MnemeError> {
+    append_key_index_journal_entry(
+        path,
+        &KeyIndexJournalEntry::Upsert {
+            key: hex_encode(key_hash),
+            object: hex_encode(object_id),
+        },
+    )
+}
+
+pub fn persist_key_index_tombstone(path: &Path, key_hash: &[u8; 32]) -> Result<(), MnemeError> {
+    append_key_index_journal_entry(
+        path,
+        &KeyIndexJournalEntry::Tombstone {
+            key: hex_encode(key_hash),
+        },
+    )
+}
+
+pub fn persist_object_keys(path: &Path, store: &Store) -> Result<(), MnemeError> {
+    let meta = path.join("meta");
+    fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
+    let mut sidecar = ObjectKeysSidecar::default();
+    for (id, key) in store.object_keys_ref() {
+        sidecar.entries.insert(
+            hex_encode(id),
+            LogicalKeySidecarEntry {
+                namespace: key.namespace.clone(),
+                name: key.name.clone(),
+            },
+        );
+    }
+    let data = serde_json::to_string_pretty(&sidecar)
+        .map_err(|_| MnemeError::SerializationNonCanonical)?;
+    crate::atomic::atomic_write(&meta.join("object_keys.json"), data.as_bytes())
+}
+
+fn load_object_keys(path: &Path) -> Result<HashMap<[u8; 32], LogicalKey>, MnemeError> {
+    let p = path.join("meta/object_keys.json");
+    if !p.exists() {
+        return Ok(HashMap::new());
+    }
+    let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
+    let sidecar: ObjectKeysSidecar =
+        serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
+    let mut out = HashMap::new();
+    for (id_hex, entry) in sidecar.entries {
+        let id = parse_hex32(&id_hex)?;
+        out.insert(
+            id,
+            LogicalKey {
+                namespace: entry.namespace,
+                name: entry.name,
+            },
+        );
+    }
+    Ok(out)
+}
+
+pub fn load_state(path: &Path) -> Result<LoadedState, MnemeError> {
+    let mut dag = DagIndex::new();
+    let mut max_hlc = Hlc::zero(NodeId::from_bytes([0u8; 16]));
+    let mut objects = HashMap::new();
+
+    let objects_dir = path.join("objects");
+    if objects_dir.exists() {
+        walk_objects(&objects_dir, &mut objects)?;
+    }
+
+    let sidecar = load_key_index(path)?;
+    let (key_to_object, key_index) = apply_sidecar(&sidecar);
+
+    let mut dag_entries = Vec::new();
+    for (id, bytes) in &objects {
+        if let Ok(record) = from_bytes_strict::<mneme_core::ObjectRecord>(bytes) {
+            if record.hlc.wall_ms >= max_hlc.wall_ms {
+                max_hlc.wall_ms = record.hlc.wall_ms;
+                max_hlc.counter = record.hlc.counter;
+            }
+            dag_entries.push((mneme_core::types::ObjectId(*id), record.parent_ids));
+        }
+    }
+    dag.rebuild_from(&dag_entries)?;
+
+    let embeddings = load_embeddings(path)?;
+    let object_keys = load_object_keys(path)?;
+
+    Ok(LoadedState {
+        key_index,
+        dag,
+        hlc: max_hlc,
+        key_to_object,
+        object_keys,
+        objects,
+        embeddings,
+    })
+}
+
+pub fn persist_embeddings(path: &Path, store: &Store) -> Result<(), MnemeError> {
+    let meta = path.join("meta");
+    fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
+    let mut sidecar = EmbeddingSidecar::default();
+    for (id, emb) in store.embeddings_ref() {
+        sidecar.entries.insert(
+            hex_encode(id),
+            EmbeddingSidecarEntry {
+                dim: emb.dim,
+                scale: emb.scale,
+                components: emb.components.clone(),
+            },
+        );
+    }
+    let data = serde_json::to_string_pretty(&sidecar)
+        .map_err(|_| MnemeError::SerializationNonCanonical)?;
+    crate::atomic::atomic_write(&meta.join("embeddings.json"), data.as_bytes())
+}
+
+fn load_embeddings(path: &Path) -> Result<HashMap<[u8; 32], FixedPointEmbedding>, MnemeError> {
+    let p = path.join("meta/embeddings.json");
+    if !p.exists() {
+        return Ok(HashMap::new());
+    }
+    let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
+    let sidecar: EmbeddingSidecar =
+        serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
+    let mut out = HashMap::new();
+    for (id_hex, entry) in sidecar.entries {
+        let id = parse_hex32(&id_hex)?;
+        let emb = FixedPointEmbedding::new(entry.dim, entry.scale, entry.components)
+            .map_err(|_| MnemeError::SchemaDrift)?;
+        out.insert(id, emb);
+    }
+    Ok(out)
+}
+
+/// Overwrite object blob with non-canonical random bytes (legacy; §13.2 keeps ciphertext intact).
+#[allow(dead_code)]
+pub fn shred_object_file(path: &Path, id: &[u8; 32], len: usize) -> Result<(), MnemeError> {
+    let mut noise = vec![0u8; len.max(1)];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut noise);
+    write_object(path, id, &noise)
+}
+
+fn load_key_index(path: &Path) -> Result<KeyIndexSidecar, MnemeError> {
+    let index_path = path.join("meta/key_index.json");
+    let mut sidecar = if index_path.exists() {
+        let data = fs::read_to_string(&index_path).map_err(|e| io_err(&index_path, e))?;
+        serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?
+    } else {
+        KeyIndexSidecar::default()
+    };
+    apply_key_index_journal(path, &mut sidecar)?;
+    Ok(sidecar)
+}
+
+fn append_key_index_journal_entry(
+    path: &Path,
+    entry: &KeyIndexJournalEntry,
+) -> Result<(), MnemeError> {
+    let journal = path.join("meta/key_index.journal");
+    if let Some(parent) = journal.parent() {
+        fs::create_dir_all(parent).map_err(|e| io_err(&journal, e))?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&journal)
+        .map_err(|e| io_err(&journal, e))?;
+    let line = serde_json::to_string(entry).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    file.write_all(line.as_bytes())
+        .map_err(|e| io_err(&journal, e))?;
+    file.write_all(b"\n").map_err(|e| io_err(&journal, e))?;
+    if std::env::var("MNEME_NO_FSYNC").is_err() {
+        file.sync_all().map_err(|e| io_err(&journal, e))?;
+        sync_parent_dir(&journal)?;
+    }
+    Ok(())
+}
+
+fn apply_key_index_journal(path: &Path, sidecar: &mut KeyIndexSidecar) -> Result<(), MnemeError> {
+    let journal = path.join("meta/key_index.journal");
+    if !journal.exists() {
+        return Ok(());
+    }
+    let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+    for line in data.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: KeyIndexJournalEntry =
+            serde_json::from_str(line).map_err(|_| MnemeError::SchemaDrift)?;
+        match entry {
+            KeyIndexJournalEntry::Upsert { key, object } => {
+                parse_hex32(&key)?;
+                parse_hex32(&object)?;
+                sidecar.tombstones.retain(|t| t != &key);
+                sidecar.entries.insert(key, object);
+            }
+            KeyIndexJournalEntry::Tombstone { key } => {
+                parse_hex32(&key)?;
+                sidecar.entries.remove(&key);
+                if !sidecar.tombstones.iter().any(|t| t == &key) {
+                    sidecar.tombstones.push(key);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
+    if let Some(parent) = path.parent() {
+        let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
+        dir.sync_all().map_err(|e| io_err(parent, e))?;
+    }
+    Ok(())
+}
+
+fn apply_sidecar(sidecar: &KeyIndexSidecar) -> (HashMap<[u8; 32], [u8; 32]>, KeyIndex) {
+    let mut key_to_object = HashMap::new();
+    let mut smt = SparseMerkleTree::new();
+    for (k, v) in &sidecar.entries {
+        if let (Ok(kb), Ok(vb)) = (parse_hex32(k), parse_hex32(v)) {
+            key_to_object.insert(kb, vb);
+            smt.upsert(kb, vb);
+        }
+    }
+    for t in &sidecar.tombstones {
+        if let Ok(kb) = parse_hex32(t) {
+            smt.tombstone(kb);
+            key_to_object.remove(&kb);
+        }
+    }
+    (key_to_object, KeyIndex::from_tree(smt))
+}
+
+fn walk_objects(dir: &Path, out: &mut HashMap<[u8; 32], Vec<u8>>) -> Result<(), MnemeError> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir).map_err(|e| io_err(dir, e))? {
+        let entry = entry.map_err(|e| io_err(dir, e))?;
+        let p = entry.path();
+        if p.is_dir() {
+            walk_objects(&p, out)?;
+        } else if p.extension().is_some_and(|e| e == "cbor") {
+            let bytes = fs::read(&p).map_err(|e| io_err(&p, e))?;
+            let id = hash_obj(&bytes);
+            out.insert(id, bytes);
+        }
+    }
+    Ok(())
+}
+
+fn hex_encode(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn parse_hex32(s: &str) -> Result<[u8; 32], MnemeError> {
+    if s.len() != 64 {
+        return Err(MnemeError::SchemaDrift);
+    }
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        out[i] =
+            u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).map_err(|_| MnemeError::SchemaDrift)?;
+    }
+    Ok(out)
+}
+
+fn io_err(path: &Path, e: std::io::Error) -> MnemeError {
+    MnemeError::IoFailed {
+        path: path.display().to_string(),
+        kind: e.to_string(),
+    }
+}

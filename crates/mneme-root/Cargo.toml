@@ -1,0 +1,18 @@
+[package]
+name = "mneme-root"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+ed25519-dalek.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+hex.workspace = true
+
+[[test]]
+name = "root_invariants"
+path = "tests/root_invariants.rs"

@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "appendix_b_item": 6,
+  "status": "pass",
+  "scope": "cross-validated: mneme-cap test + mneme-crossref wire_cap (cap_id, sig-chain, NotAfter caveat)",
+  "generated_by": "cargo test -p mneme-cap --test appendix_b_capabilities dump_capability_fixtures -- --ignored --nocapture",
+  "verified_by": "cargo test -p mneme-cap --test appendix_b_capabilities",
+  "issuer_pubkey_hex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+  "subject_pubkey_hex": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+  "vectors": [
+    {
+      "name": "root_cap_v1",
+      "cbor_file": "root_cap_v1.cbor",
+      "sig_chain_len": 1,
+      "cap_id_hex": "2c378494b3852d4ad49f24b98e8bfb4af39b37f46cef9a7646664cf6087cf3d1",
+      "caveat_eval": "verifies under issuer at hlc=1 (far-future NotAfter)"
+    },
+    {
+      "name": "attenuated_cap_v1",
+      "cbor_file": "attenuated_cap_v1.cbor",
+      "sig_chain_len": 2,
+      "cap_id_hex": "bc1ff004bf83008e87702f7342d3215006136d7af9ae983b34e78d609d07afe0",
+      "caveat_eval": "subject-attenuated NamespacePrefix(tools/); 2-link chain verifies"
+    },
+    {
+      "name": "expiring_cap_v1",
+      "cbor_file": "expiring_cap_v1.cbor",
+      "sig_chain_len": 1,
+      "cap_id_hex": "76b214d91b825d7eed8db6c78ddd0e0c9778d24f0beb3ed36057c96ef187a204",
+      "caveat_eval": "NotAfter(hlc.wall_ms=50): PASS at now=10, CapExpired at now=100"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "appendix_b_item": 7,
+  "status": "pass",
+  "scope": "cross-validated: mneme-crdt test + mneme-crossref mst_merge (order-independent key-index root)",
+  "verified_by": "cargo test -p mneme-crdt appendix_b_mst_convergence_vector_matches_fixture",
+  "vectors": [
+    "convergence_triple.json"
+  ],
+  "expected_key_index_root": "673af474a4267decc896c763c6852df10b63ef61673b81c3da2e6d01b9c8023e"
+}

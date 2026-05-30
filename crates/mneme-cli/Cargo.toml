@@ -1,0 +1,37 @@
+[package]
+name = "mneme-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MNEME fail-closed memory gate (CLI adoption layer)"
+
+[[bin]]
+name = "mneme"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+mneme-cap.workspace = true
+mneme-store.workspace = true
+mneme-verify.workspace = true
+mneme-smt.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+blake3.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.14"
+mneme-cap.workspace = true
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+mneme-store.workspace = true
+mneme-verify.workspace = true
+hex.workspace = true
+walkdir = "2.5"

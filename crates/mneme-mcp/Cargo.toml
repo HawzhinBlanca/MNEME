@@ -1,0 +1,25 @@
+[package]
+name = "mneme-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP server for verified memory tools (Wave 6 adoption — blueprint §14.1)"
+
+[[bin]]
+name = "mneme-mcp"
+path = "src/main.rs"
+
+[dependencies]
+mneme-cap.workspace = true
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+mneme-store.workspace = true
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile.workspace = true

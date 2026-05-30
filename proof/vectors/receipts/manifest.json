@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "appendix_b_item": 5,
+  "status": "pass",
+  "scope": "cross-validated: mneme-verify test + mneme-crossref (object CBOR, key-index root, membership proof)",
+  "generated_by": "cargo test -p mneme-verify --test appendix_b_receipts dump_receipt_fixture -- --ignored --nocapture",
+  "verified_by": "cargo test -p mneme-verify --test appendix_b_receipts",
+  "operator_pubkey_hex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+  "vectors": [
+    {
+      "name": "recall_object_v1",
+      "object_cbor_file": "recall_object_v1.cbor",
+      "object_id_hex": "76f1f4fe73460ba7857008c4b29f3dbc560e109eaadf9531445cda84e02e816a",
+      "logical_key_hex": "de947e7781cc616a01ba1d3545c42aa9913456c84a383d64ac80df534f587a52",
+      "root_bound_hex": "e9a6b237dbbfdfaa40065f52b4cf266a73f7d1fa994c9dc8acbb6627c67f103f",
+      "key_index_root_hex": "16668edb53b2b7c6433cd5b25b0c26c409bd3ba1e220c4cfffc32bc41fd17d32",
+      "leaf_index": 0,
+      "membership_proof_len": 256,
+      "pass": "verify_recall returns the single trusted entry",
+      "fail": "one-byte object tamper -> ObjectTampered"
+    }
+  ],
+  "partial_vectors": [
+    "zk/privacy_fixture.json"
+  ]
+}

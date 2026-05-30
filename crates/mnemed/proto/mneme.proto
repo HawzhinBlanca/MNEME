@@ -1,0 +1,76 @@
+syntax = "proto3";
+package mneme.v1;
+
+service MemoryService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Head(HeadRequest) returns (HeadResponse);
+  rpc Remember(RememberRequest) returns (RememberResponse);
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  rpc Forget(ForgetRequest) returns (ForgetResponse);
+  rpc ProveAbsent(ProveAbsentRequest) returns (ProveAbsentResponse);
+}
+
+message HealthRequest {}
+message HealthResponse {
+  string status = 1;
+  uint64 root_sequence = 2;
+}
+
+message HeadRequest {
+  string capability_b64 = 1;
+}
+
+message HeadResponse {
+  string root_hash_hex = 1;
+  uint64 sequence = 2;
+}
+
+message RememberRequest {
+  string capability_b64 = 1;
+  string namespace = 2;
+  string name = 3;
+  string kind = 4;
+  bytes body = 5;
+}
+
+message RememberResponse {
+  string object_id_hex = 1;
+  string root_hash_hex = 2;
+}
+
+message RecallRequest {
+  string capability_b64 = 1;
+  string namespace = 2;
+  string name = 3;
+  string min_tier = 4;
+}
+
+message RecallResponse {
+  repeated RecallEntry entries = 1;
+}
+
+message RecallEntry {
+  string object_id_hex = 1;
+  bytes body = 2;
+  uint32 trust_tier = 3;
+}
+
+message ForgetRequest {
+  string capability_b64 = 1;
+  string namespace = 2;
+  string name = 3;
+}
+
+message ForgetResponse {
+  string root_hash_hex = 1;
+}
+
+message ProveAbsentRequest {
+  string namespace = 1;
+  string name = 2;
+}
+
+message ProveAbsentResponse {
+  string root_hash_hex = 1;
+  bool absent = 2;
+}

@@ -1,0 +1,58 @@
+[package]
+name = "mneme-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+mneme-cap = { path = "../crates/mneme-cap" }
+mneme-core = { path = "../crates/mneme-core" }
+mneme-index = { path = "../crates/mneme-index" }
+mneme-smt = { path = "../crates/mneme-smt" }
+mneme-crdt = { path = "../crates/mneme-crdt" }
+
+[[bin]]
+name = "dcbor_parse"
+path = "fuzz_targets/dcbor_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "smt_parse"
+path = "fuzz_targets/smt_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cap_parse"
+path = "fuzz_targets/cap_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "receipt_parse"
+path = "fuzz_targets/receipt_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "index_wire"
+path = "fuzz_targets/index_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sync_message_parse"
+path = "fuzz_targets/sync_message_parse.rs"
+test = false
+doc = false
+bench = false

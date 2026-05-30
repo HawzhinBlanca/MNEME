@@ -1,0 +1,15 @@
+[package]
+name = "mneme-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mneme-core.workspace = true
+ed25519-dalek.workspace = true
+chacha20poly1305.workspace = true
+rand.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

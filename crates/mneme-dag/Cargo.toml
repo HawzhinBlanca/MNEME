@@ -1,0 +1,9 @@
+[package]
+name = "mneme-dag"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mneme-core.workspace = true
+mneme-smt.workspace = true

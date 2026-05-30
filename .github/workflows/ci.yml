@@ -1,0 +1,195 @@
+# MNEME PR CI — blueprint §18 `quick` lane (fmt, clippy, TCB, Wave 0/1 tests, kill/resume smoke).
+# Heavy lanes (tamper, merge, determinism, full) run via .github/workflows/reliability.yml.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  CARGO_BUILD_JOBS: 2
+  RUST_TEST_THREADS: 4
+
+jobs:
+  quick-lane:
+    name: validation-lane quick
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/quick
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-quick
+
+      - name: Run quick validation lane (§18)
+        run: bash scripts/ci/validation-lane.sh quick
+
+  crypto-lane:
+    name: validation-lane crypto
+    runs-on: ubuntu-latest
+    needs: quick-lane
+    timeout-minutes: 15
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/crypto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-crypto
+
+      - name: Run crypto validation lane (§18)
+        run: bash scripts/ci/validation-lane.sh crypto
+
+  e2e-cli:
+    name: CLI e2e (Rust + Node)
+    runs-on: ubuntu-latest
+    needs: quick-lane
+    timeout-minutes: 15
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/e2e-cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-e2e-cli
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Node devDependencies
+        run: |
+          if [[ -f package-lock.json ]]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build mneme CLI (release)
+        run: cargo build -p mneme-cli --release
+
+      - name: Rust CLI integration (cli_e2e.rs)
+        run: cargo test -p mneme-cli --test cli_e2e -- --nocapture
+
+      - name: Node CLI smoke (e2e/cli/*.test.mjs)
+        env:
+          MNEME_BIN: ${{ github.workspace }}/out/ci-targets/e2e-cli/release/mneme
+        run: node --test e2e/cli/*.test.mjs
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Playwright UI (skipped until MNEME_UI_BASE_URL)
+        run: npm run test:e2e:ui
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-failure
+          path: |
+            e2e/test-results/
+            playwright-report/
+          if-no-files-found: ignore
+
+  e2e-store:
+    name: store kernel e2e
+    runs-on: ubuntu-latest
+    needs: quick-lane
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/e2e-store
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-e2e-store
+
+      - name: Store integration (tests/e2e/mod.rs)
+        run: cargo test -p mneme-store --test e2e -- --nocapture
+
+  e2e-daemon:
+    name: mnemed API e2e (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    needs: quick-lane
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/e2e-daemon-${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [http, grpc, sync]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-e2e-daemon-${{ matrix.shard }}
+
+      - name: mnemed integration (${{ matrix.shard }})
+        run: |
+          case "${{ matrix.shard }}" in
+            http) FILTER="http_api" ;;
+            grpc) FILTER="grpc_api" ;;
+            sync) FILTER="sync_ws" ;;
+          esac
+          cargo test -p mnemed --test api_integration "$FILTER" -- --nocapture
+
+  ci-gate:
+    name: CI gate
+    runs-on: ubuntu-latest
+    needs:
+      - quick-lane
+      - crypto-lane
+      - e2e-cli
+      - e2e-store
+      - e2e-daemon
+    if: always()
+    steps:
+      - name: Require all jobs green
+        run: |
+          if [[ "${{ needs.quick-lane.result }}" != "success" ]] \
+            || [[ "${{ needs.crypto-lane.result }}" != "success" ]] \
+            || [[ "${{ needs.e2e-cli.result }}" != "success" ]] \
+            || [[ "${{ needs.e2e-store.result }}" != "success" ]] \
+            || [[ "${{ needs.e2e-daemon.result }}" != "success" ]]; then
+            echo "One or more CI jobs failed."
+            exit 1
+          fi

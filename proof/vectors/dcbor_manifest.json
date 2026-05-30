@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "map_key_order_canonical",
+      "cbor_file": "dcbor/map_sorted.cbor",
+      "expect_ok": true,
+      "cbor_hex": "a200000100"
+    },
+    {
+      "name": "map_key_order_rejected",
+      "cbor_file": "dcbor/map_unsorted.cbor",
+      "expect_ok": false,
+      "expect_error": "SerializationNonCanonical",
+      "cbor_hex": "a20100000101"
+    },
+    {
+      "name": "float_rejected",
+      "cbor_file": "dcbor/float16.cbor",
+      "expect_ok": false,
+      "expect_error": "SerializationNonCanonical"
+    },
+    {
+      "name": "indefinite_rejected",
+      "cbor_file": "dcbor/indefinite_break.cbor",
+      "expect_ok": false,
+      "expect_error": "SerializationNonCanonical"
+    },
+    {
+      "name": "empty_map",
+      "cbor_file": "dcbor/empty_map.cbor",
+      "expect_ok": true
+    }
+  ]
+}

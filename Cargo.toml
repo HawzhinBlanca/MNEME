@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mneme-core",
+    "crates/mneme-crypto",
+    "crates/mneme-smt",
+    "crates/mneme-dag",
+    "crates/mneme-index",
+    "crates/mneme-root",
+    "crates/mneme-cap",
+    "crates/mneme-forget",
+    "crates/mneme-crdt",
+    "crates/mneme-verify",
+    "crates/mneme-store",
+    "crates/mneme-mcp",
+    "crates/mneme-cli",
+    "crates/mnemed",
+    "crates/mneme-crossref",
+]
+default-members = ["crates/mneme-store"]
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/mneme/mneme"
+rust-version = "1.86"
+
+[workspace.dependencies]
+mneme-core = { path = "crates/mneme-core" }
+mneme-crypto = { path = "crates/mneme-crypto" }
+mneme-smt = { path = "crates/mneme-smt" }
+mneme-dag = { path = "crates/mneme-dag" }
+mneme-index = { path = "crates/mneme-index" }
+mneme-forget = { path = "crates/mneme-forget" }
+mneme-crdt = { path = "crates/mneme-crdt" }
+mneme-mcp = { path = "crates/mneme-mcp" }
+mneme-root = { path = "crates/mneme-root" }
+mneme-cap = { path = "crates/mneme-cap" }
+mneme-verify = { path = "crates/mneme-verify" }
+mneme-store = { path = "crates/mneme-store" }
+mnemed = { path = "crates/mnemed" }
+
+blake3 = "1.8"
+ciborium = "0.2"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+chacha20poly1305 = "0.10"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.20"
+thiserror = "2.0"
+hex = "0.4"
+tokio = { version = "1.44", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "limit"] }
+tonic = "0.13"
+prost = "0.13"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.test]
+opt-level = 1

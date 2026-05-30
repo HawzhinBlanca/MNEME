@@ -1,0 +1,50 @@
+# Future multi-node sync e2e for mnemed (blueprint §11, Wave 6).
+# Not used in PR CI today — MNEME v0 is local-first with no external DB.
+#
+# Enable in .github/workflows/reliability.yml when:
+#   - crates/mnemed builds
+#   - scripts/ci/run-sync-e2e.sh exists
+#
+# Local smoke:
+#   docker compose -f docker-compose.e2e.yml up -d --wait
+#   bash scripts/ci/run-sync-e2e.sh
+#   docker compose -f docker-compose.e2e.yml down -v
+
+services:
+  mnemed-a:
+    image: mneme/mnemed:local
+    build:
+      context: .
+      dockerfile: docker/mnemed.Dockerfile
+    environment:
+      MNEME_NODE_ID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      MNEME_LISTEN: "0.0.0.0:7443"
+      MNEME_PEER: "mnemed-b:7443"
+    volumes:
+      - mneme-store-a:/data
+    healthcheck:
+      test: ["CMD", "mnemed", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mnemed-b:
+    image: mneme/mnemed:local
+    build:
+      context: .
+      dockerfile: docker/mnemed.Dockerfile
+    environment:
+      MNEME_NODE_ID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      MNEME_LISTEN: "0.0.0.0:7443"
+      MNEME_PEER: "mnemed-a:7443"
+    volumes:
+      - mneme-store-b:/data
+    healthcheck:
+      test: ["CMD", "mnemed", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mneme-store-a:
+  mneme-store-b:

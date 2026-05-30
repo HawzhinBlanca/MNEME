@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "appendix_b_item": 4,
+  "status": "pass",
+  "scope": "cross-validated: mneme-root test + mneme-crossref wire_root (Ed25519 + preimage recompute)",
+  "generated_by": "cargo test -p mneme-root --test appendix_b_roots dump_signed_root_fixture -- --ignored --nocapture",
+  "verified_by": "cargo test -p mneme-root --test appendix_b_roots appendix_b_signed_root_vector_round_trips_and_verifies",
+  "vectors": [
+    {
+      "name": "signed_root_v1",
+      "cbor_file": "signed_root_v1.cbor",
+      "sequence": 1,
+      "preimage_hash_hex": "9194a7f3d98cf4aa8e3f3094bc886e5ab71bee9097b467f42a57bbe52509aa69",
+      "operator_pubkey_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "signature_hex": "a692e2798269449ea4519a6312b9106ea9c6e00172d8858c0abbaaa2810ecd17322e0dd7dc696040dc5b6f64221db4f6cf8ab9dbec88561286c6f37c0cc4650b"
+    }
+  ]
+}

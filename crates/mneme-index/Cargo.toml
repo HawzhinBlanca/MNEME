@@ -1,0 +1,25 @@
+[package]
+name = "mneme-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Key-index + authenticated semantic ANN (blueprint §5.6, §9.2)"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-smt.workspace = true
+blake3 = "1.8"
+thiserror.workspace = true
+fast-hnsw = "1.0.1"
+
+[features]
+default = ["ads"]
+ads = []
+# Tagged BLAKE3 commitment-binding envelope (§9.2). NOT a SNARK; Plonky2 deferred.
+commitment_binding = []
+# Deprecated alias for `commitment_binding`.
+zk = ["commitment_binding"]
+
+[dev-dependencies]
+hex.workspace = true
+serde_json.workspace = true
