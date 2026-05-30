@@ -19,6 +19,8 @@ ads = []
 commitment_binding = []
 # Deprecated alias for `commitment_binding` (name does not imply Plonky2/SNARK).
 zk = ["commitment_binding"]
+# 12-month milestone only (B3): no Plonky2 crate linked; prove/verify fail closed until prover ships.
+plonky2_prover = []
 
 [dev-dependencies]
 hex.workspace = true

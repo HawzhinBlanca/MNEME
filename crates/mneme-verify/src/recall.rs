@@ -24,7 +24,6 @@ pub struct RecallContext<'a> {
     pub previous_root: Option<&'a Root>,
 }
 
-/// Trust gate: returns trusted entries or typed rejection only.
 pub fn verify_recall(
     recall: &RecallInput,
     query: &Query,

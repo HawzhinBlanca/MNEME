@@ -4,7 +4,7 @@ use mneme_cap::agent_cap;
 use mneme_core::{Draft, LogicalKey, MemoryKind, MnemeError, Query, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_store::Store;
-use mneme_verify::{verify_store, verify_store_head};
+use mneme_verify::{verify_signed_head_only, verify_store};
 use tempfile::tempdir;
 
 fn theme_key(ns: &str, name: &str) -> LogicalKey {
@@ -39,7 +39,8 @@ fn b1_verify_store_head_signature_only_full_verify_rejects_tamper() {
 
     store.tamper_object_bytes(id.as_bytes()).unwrap();
 
-    let head = verify_store_head(&root, &trust).expect("head-only checks signature, not objects");
+    let head =
+        verify_signed_head_only(&root, &trust).expect("head-only checks signature, not objects");
     assert_eq!(head.root.sequence, root.sequence);
 
     assert!(

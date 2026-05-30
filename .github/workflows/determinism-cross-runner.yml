@@ -1,0 +1,149 @@
+# Audit B4: foundation-gate digests must match across distinct GitHub-hosted runners.
+# Honest substitute when MNEME_SECOND_HOST SSH peer is not configured.
+# Dual-workspace (same runner) remains in reliability.yml determinism lane.
+
+name: Determinism cross-runner
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * 0"
+
+concurrency:
+  group: determinism-cross-runner-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  MNEME_DETERMINISM_TS: "1970-01-01T00:00:00Z"
+
+jobs:
+  foundation-gate-matrix:
+    name: foundation-gate (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: gh-ubuntu
+          - os: macos-latest
+            label: gh-macos
+    env:
+      MNEME_RUNNER_LABEL: ${{ matrix.label }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/cross-runner-${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-cross-runner-${{ matrix.label }}
+
+      - name: Foundation gate (cross-runner)
+        run: bash scripts/ci/determinism-cross-runner.sh gate --label "${{ matrix.label }}"
+
+      - name: Upload cross-runner report
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-gate-${{ matrix.label }}
+          path: |
+            out/ci-cross-runner/${{ matrix.label }}/foundation.report.json
+            out/ci-cross-runner/${{ matrix.label }}/digest-manifest.json
+          retention-days: 14
+
+  compare-digests:
+    name: compare digests (ubuntu vs macos)
+    runs-on: ubuntu-latest
+    needs: foundation-gate-matrix
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download runner reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: foundation-gate-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Compare foundation-gate digests across runners
+        run: |
+          set -euo pipefail
+          UBUNTU="$(find artifacts -path '*/gh-ubuntu/foundation.report.json' | head -1)"
+          MACOS="$(find artifacts -path '*/gh-macos/foundation.report.json' | head -1)"
+          if [[ -z "$UBUNTU" || -z "$MACOS" ]]; then
+            echo "Missing cross-runner reports (ubuntu=$UBUNTU macos=$MACOS)" >&2
+            find artifacts -type f >&2 || true
+            exit 1
+          fi
+          bash scripts/ci/determinism-cross-runner.sh compare \
+            "$UBUNTU" "$MACOS" gh-ubuntu gh-macos
+
+  determinism-ssh-peer:
+    name: determinism (SSH peer — ops)
+    runs-on: ubuntu-latest
+    if: ${{ secrets.MNEME_SECOND_HOST != '' }}
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/ssh-peer
+      MNEME_DETERMINISM_TS: "1970-01-01T00:00:00Z"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.MNEME_DETERMINISM_SSH_KEY }}
+
+      - name: Trust peer host key
+        run: |
+          mkdir -p ~/.ssh
+          host="${{ secrets.MNEME_SECOND_HOST }}"
+          host="${host#*@}"
+          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts
+
+      - name: Two-machine foundation gate (SSH)
+        env:
+          MNEME_SECOND_HOST: ${{ secrets.MNEME_SECOND_HOST }}
+          MNEME_REMOTE_ROOT: ${{ secrets.MNEME_REMOTE_ROOT }}
+          MNEME_STRICT_CROSS_HOST: "1"
+        run: bash scripts/ci/determinism-two-machine.sh
+
+  b4-gate:
+    name: B4 gate (cross-runner required)
+    runs-on: ubuntu-latest
+    needs:
+      - compare-digests
+      - determinism-ssh-peer
+    if: always()
+    steps:
+      - name: Require cross-runner compare
+        run: |
+          if [[ "${{ needs.compare-digests.result }}" != "success" ]]; then
+            echo "Cross-runner digest compare failed or was skipped."
+            exit 1
+          fi
+          echo "B4 cross-runner proof: PASS (ubuntu-latest vs macos-latest)"
+
+      - name: SSH peer status
+        run: |
+          if [[ "${{ needs.determinism-ssh-peer.result }}" == "success" ]]; then
+            echo "B4 SSH peer proof: PASS"
+          elif [[ "${{ needs.determinism-ssh-peer.result }}" == "skipped" ]]; then
+            echo "B4 SSH peer proof: skipped (MNEME_SECOND_HOST secret unset — cross-runner closes B4)"
+          else
+            echo "B4 SSH peer proof: FAILED (check MNEME_SECOND_HOST / MNEME_DETERMINISM_SSH_KEY)"
+            exit 1
+          fi

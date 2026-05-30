@@ -25,18 +25,13 @@ DEMO_LOG="${MNEME_KILLER_DEMO_LOG:-$ROOT/out/demo/12-killer-demo.log}"
 BYPASS_LOG="${MNEME_KILLER_BYPASS_LOG:-$ROOT/out/demo/14-killer-bypass.log}"
 mkdir -p "$(dirname "$DEMO_LOG")" "$(dirname "$BYPASS_LOG")"
 
-run_demo_tests() {
-  local filter="$1"
-  local log_path="$2"
-  : >"$log_path"
+append_e2e_filter() {
+  local log_path="$1"
+  local filter="$2"
   {
-    echo "==> §21 killer demo (offline store kernel)"
-    echo "    Agent-A: conventional vector-DB (helpers::ConventionalVectorDb)"
-    echo "    Agent-B: MNEME recall_verified fail-closed kernel"
-    echo "    filter: $filter"
-    echo "    started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo
+    echo "--- filter: $filter ---"
     RUST_TEST_THREADS=1 cargo test -p mneme-store --test e2e "$filter" -- --nocapture
+    echo
   } 2>&1 | tee -a "$log_path"
 }
 
@@ -46,14 +41,30 @@ if ! cargo check -p mneme-store --quiet 2>/dev/null; then
   exit 1
 fi
 
-echo "==> §21 narrative (Agent-A vs Agent-B)"
-run_demo_tests "killer_demo_agent_a_vs_agent_b" "$DEMO_LOG"
-run_demo_tests "e2e_killer_demo_storage_tamper_rejected_at_read" "$DEMO_LOG"
-run_demo_tests "e2e_quarantine_entry_blocked_from_trusted_recall" "$DEMO_LOG"
-run_demo_tests "e2e_promote_requires_promote_capability" "$DEMO_LOG"
+echo "==> §21 narrative + store kernel checks"
+{
+  echo "==> §21 killer demo transcript"
+  echo "    Agent-A: conventional vector-DB (helpers::ConventionalVectorDb)"
+  echo "    Agent-B: MNEME recall_verified fail-closed kernel"
+  echo "    started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo
+} >"$DEMO_LOG"
+
+for filter in \
+  killer_demo_agent_a_vs_agent_b \
+  e2e_killer_demo_storage_tamper_rejected_at_read \
+  e2e_quarantine_entry_blocked_from_trusted_recall \
+  e2e_promote_requires_promote_capability; do
+  append_e2e_filter "$DEMO_LOG" "$filter"
+done
 
 echo "==> bypass attempts"
-run_demo_tests "e2e_bypass_" "$BYPASS_LOG"
+{
+  echo "==> §21 bypass attempts"
+  echo "    started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo
+} >"$BYPASS_LOG"
+append_e2e_filter "$BYPASS_LOG" e2e_bypass_
 
 echo
 echo "killer-demo: OK (§21 Agent-A vs Agent-B + A-DB/A-INJ + bypass harness)"

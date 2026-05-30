@@ -17,14 +17,28 @@ pub struct RootReport {
     pub object_count: usize,
 }
 
-/// In-memory root signature only — not a store integrity gate (see [`verify_store`]).
-pub struct SignatureOnlyHead { pub root: Root, }
+pub struct SignatureOnlyHead {
+    pub root: Root,
+}
 
-pub fn verify_store_head(root: &Root, trust: &TrustConfig) -> Result<SignatureOnlyHead, MnemeError> {
+pub fn verify_signed_head_only(
+    root: &Root,
+    trust: &TrustConfig,
+) -> Result<SignatureOnlyHead, MnemeError> {
     verify_root(root, trust, None)?;
     Ok(SignatureOnlyHead { root: root.clone() })
 }
-
+#[deprecated(
+    since = "0.1.0",
+    note = "verify_signed_head_only; use verify_store for boot/CI"
+)]
+#[doc(hidden)]
+pub fn verify_store_head(
+    root: &Root,
+    trust: &TrustConfig,
+) -> Result<SignatureOnlyHead, MnemeError> {
+    verify_signed_head_only(root, trust)
+}
 /// Fail-closed verifier for an on-disk store directory (§7, §10).
 pub fn verify_store(path: &Path, trust: &TrustConfig) -> Result<RootReport, MnemeError> {
     if path.join(".incomplete").exists() {
@@ -146,7 +160,7 @@ fn load_key_index(path: &Path) -> Result<SparseMerkleTree, MnemeError> {
                 KeyIndexJournalEntry::Tombstone { key } => {
                     decode_hex32(&key)?;
                     sidecar.entries.remove(&key);
-                    if !sidecar.tombstones.iter().any(|t| t == &key) {
+                    if !sidecar.tombstones.contains(&key) {
                         sidecar.tombstones.push(key);
                     }
                 }

@@ -100,6 +100,8 @@ case "$LANE" in
     bash scripts/ci/fuzz-meaningful.sh
     bash scripts/ci/check-test-vectors.sh
     bash scripts/ci/check-foundation-digests.sh
+    # B5: agent-session sim over live MCP stdio (not live Claude API — see mcp-agent-sim.sh).
+    bash scripts/ci/mcp-agent-sim.sh
     ;;
 
   *)

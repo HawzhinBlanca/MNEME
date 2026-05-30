@@ -21,6 +21,9 @@ mod wire;
 #[cfg(feature = "commitment_binding")]
 mod commitment_binding;
 
+#[cfg(feature = "plonky2_prover")]
+mod plonky2_prover;
+
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
@@ -35,8 +38,14 @@ pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 
 #[cfg(feature = "commitment_binding")]
 pub use commitment_binding::{
-    BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN, CommitmentBindingReceipt,
-    prove_binding_receipt, verify_binding_receipt,
+    B3_V0_BINDING_STATUS, BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN,
+    CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt,
+};
+
+#[cfg(feature = "plonky2_prover")]
+pub use plonky2_prover::{
+    B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, Plonky2RetrievalProof, prove_plonky2_retrieval,
+    verify_plonky2_retrieval,
 };
 
 /// ADS backend enabled when the `ads` feature is on.
@@ -109,6 +118,29 @@ mod tests {
         if !SEMANTIC_BACKEND_ENABLED {
             panic!("SEMANTIC_BACKEND_ENABLED must be true");
         }
+    }
+
+    #[cfg(feature = "plonky2_prover")]
+    #[test]
+    fn plonky2_prover_fails_closed() {
+        use super::plonky2_prover::{
+            B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, Plonky2RetrievalProof,
+            prove_plonky2_retrieval, verify_plonky2_retrieval,
+        };
+        use mneme_core::MnemeError;
+        assert!(B3_DEFERRAL_STATUS.contains("CLOSED"));
+        assert!(PLONKY2_PROVER_HONESTY.contains("fails closed"));
+        assert_eq!(
+            prove_plonky2_retrieval(b"x"),
+            Err(MnemeError::ZkProofInvalid)
+        );
+        let proof = Plonky2RetrievalProof {
+            proof_bytes: vec![1, 2, 3],
+        };
+        assert_eq!(
+            verify_plonky2_retrieval(&proof, b"x"),
+            Err(MnemeError::ZkProofInvalid)
+        );
     }
 
     #[cfg(feature = "commitment_binding")]

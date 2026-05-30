@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "status": "pass",
+  "scope": "v0 commitment_binding (BLAKE3 envelope); Plonky2 ZK retrieval explicitly 12-month / not in v0",
+  "b3_deferral": "CLOSED",
+  "fixtures": [
+    {
+      "path": "privacy_fixture.json",
+      "tests": "mneme-index commitment_binding::privacy_fixture_roundtrip"
+    },
+    {
+      "path": "forgery_expectations.json",
+      "tests": "mneme-index commitment_binding::forgery_vectors_reject_typed"
+    }
+  ],
+  "plonky2_prover_feature": "fail_closed_stub_only — enable to exercise B3 gate; no prover linked"
+}

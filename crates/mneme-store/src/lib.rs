@@ -335,6 +335,18 @@ impl Store {
         Err(MnemeError::ReceiptRootMismatch)
     }
 
+    /// Benchmark-only: run the untrusted recall assembly (index fetch + membership
+    /// proof build) WITHOUT the `verify_recall` gate, so a caller can isolate the
+    /// §22 hot-path verification overhead (`recall_verified` minus `recall`). Not a
+    /// production API: this path is fail-open and must never be exposed to agents.
+    #[doc(hidden)]
+    pub fn bench_recall_raw(&self, query: &Query, cap: &Capability) -> Result<(), MnemeError> {
+        let proc = mneme_index::default_key_procedure();
+        let recall = self.recall(query, &proc, cap)?;
+        std::hint::black_box(&recall);
+        Ok(())
+    }
+
     /// Fail-closed recall with default key-index procedure (adoption-layer compat).
     pub fn recall_verified_default(
         &self,

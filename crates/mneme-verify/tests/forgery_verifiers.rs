@@ -13,7 +13,7 @@ use mneme_crypto::KeyPair;
 use mneme_smt::{MembershipProof, TREE_DEPTH};
 use mneme_verify::{
     RecallContext, verify_membership_proof, verify_recall, verify_root, verify_semantic_recall,
-    verify_semantic_receipt, verify_store, verify_store_head,
+    verify_semantic_receipt, verify_signed_head_only, verify_store,
 };
 
 #[test]
@@ -96,10 +96,10 @@ fn forgery_store_head_accepts_no_objects_but_rejects_bad_sig() {
     let fixture = build_root_chain_fixture();
     let mut root = fixture.root.clone();
     root.signature[0] ^= 0x01;
-    match verify_store_head(&root, &fixture.trust) {
+    match verify_signed_head_only(&root, &fixture.trust) {
         Err(MnemeError::RootSigInvalid) => {}
         Err(e) => panic!("expected RootSigInvalid, got {e:?}"),
-        Ok(_) => panic!("expected RootSigInvalid, verify_store_head succeeded"),
+        Ok(_) => panic!("expected RootSigInvalid, verify_signed_head_only succeeded"),
     }
 }
 
@@ -117,11 +117,14 @@ fn forgery_store_head_skips_object_integrity_verify_store_fails_closed() {
     bytes[0] ^= 0x01;
     std::fs::write(&obj_path, &bytes).expect("tamper object");
 
-    let head = verify_store_head(&f.input.root, &f.trust).expect("signature-only accepts head");
+    let head =
+        verify_signed_head_only(&f.input.root, &f.trust).expect("signature-only accepts head");
     assert_eq!(head.root.preimage_hash, f.input.root.preimage_hash);
 
     match verify_store(dir.path(), &f.trust) {
-        Err(MnemeError::ObjectTampered) | Err(MnemeError::SchemaDrift) | Err(MnemeError::RootInconsistent) => {}
+        Err(MnemeError::ObjectTampered)
+        | Err(MnemeError::SchemaDrift)
+        | Err(MnemeError::RootInconsistent) => {}
         Err(e) => panic!("verify_store must fail closed on tampered object, got {e:?}"),
         Ok(_) => panic!("verify_store must reject tampered object bytes"),
     }

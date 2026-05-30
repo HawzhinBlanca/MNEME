@@ -118,8 +118,11 @@ def validate_receipts(manifest):
     for entry in manifest.get("vectors", []):
         if require_payload(vector_root / "receipts" / entry.get("object_cbor_file", ""), "receipts"):
             count += 1
-    for name in manifest.get("partial_vectors", []):
-        require_payload(vector_root / "receipts" / name, "receipts partial")
+    for item in manifest.get("partial_vectors", []):
+        if isinstance(item, str):
+            require_payload(vector_root / "receipts" / item, "receipts partial")
+        elif isinstance(item, dict) and item.get("path"):
+            require_payload(vector_root / "receipts" / item["path"], "receipts partial")
     return count
 
 

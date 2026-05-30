@@ -22,8 +22,10 @@
   ],
   "partial_vectors": [
     {
-      "path": "zk/privacy_fixture.json",
-      "scope": "commitment_binding roundtrip only",
+      "path": "zk/",
+      "scope": "v0 commitment_binding (BLAKE3) + forgery expectations; Plonky2 12-month only",
+      "status": "pass",
+      "b3_deferral": "CLOSED",
       "honesty": "Tagged BLAKE3 binding envelope — NOT zero-knowledge, NOT SNARK, NOT Plonky2"
     }
   ]

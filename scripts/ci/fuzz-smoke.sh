@@ -7,9 +7,9 @@ cd "$ROOT"
 
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-fuzz-smoke}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/out/agent-targets/fuzz}"
 mkdir -p "$CARGO_TARGET_DIR"
+mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-fuzz-smoke}"
 
 if [[ ! -d fuzz ]] || ! command -v cargo-fuzz &>/dev/null; then
   echo "fuzz-smoke: fuzz/ targets or cargo-fuzz not present (§17.4) — failing closed." >&2

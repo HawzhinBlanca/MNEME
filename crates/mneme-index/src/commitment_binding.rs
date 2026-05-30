@@ -1,9 +1,9 @@
-//! Commitment-binding receipt envelope (§9.2 privacy path).
+//! Commitment-binding receipt envelope (§9.2 privacy path, v0 scope).
 //!
 //! **Not zero-knowledge.** This module binds `(object_id, embedding_commit)` to a
 //! public semantic-leaf commitment using a tagged BLAKE3 digest envelope. It does
-//! not hide query or index data and is not a SNARK. Full Plonky2 integration is
-//! deferred until CI adopts a nightly toolchain.
+//! not hide query or index data and is not a SNARK. Plonky2/V3DB-style ZK retrieval
+//! is a **12-month milestone only** — see `plonky2_prover` (fail-closed stub, B3 closed).
 
 use crate::commit::hash_sem_leaf;
 use mneme_core::MnemeError;
@@ -16,6 +16,10 @@ pub const BINDING_PROOF_LEN: usize = 32;
 
 /// Honesty boundary for commitment-binding receipts (§3, §9.2).
 pub const BINDING_HONESTY: &str = "Commitment binding proves leaf commitment only; not zero-knowledge, not truth, not exact-NN, not semantic correctness.";
+
+/// v0 binding path status for audit B3 (Plonky2 is out of scope until 12-month).
+pub const B3_V0_BINDING_STATUS: &str =
+    "v0/90-day: commitment_binding (BLAKE3 envelope) PASS; Plonky2 ZK retrieval 12-month only.";
 
 /// Receipt that binds a semantic leaf commitment without claiming ZK privacy.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +107,14 @@ mod tests {
         assert_eq!(fixture_tag, tag);
         assert!(!fixture_tag.contains("PLONKY2"));
         assert!(!fixture_tag.contains("SNARK"));
+        assert_eq!(
+            v["v0_scope"].as_str().expect("v0_scope"),
+            "commitment_binding_blake3_only"
+        );
+        assert_eq!(
+            v["plonky2_milestone"].as_str().expect("plonky2_milestone"),
+            "12-month_not_in_v0"
+        );
         let id_hex = v["object_id"].as_str().expect("object_id");
         let emb_hex = v["embedding_commit"].as_str().expect("embedding_commit");
         let mut object_id = [0u8; 32];
@@ -113,6 +125,73 @@ mod tests {
         let receipt = prove_binding_receipt(&object_id, &embedding_commit, public_commit);
         verify_binding_receipt(&receipt, &object_id, &embedding_commit).expect("verify");
         assert_eq!(receipt.proof_bytes.len(), BINDING_PROOF_LEN);
+        let expected_hex = v["proof_bytes_hex"].as_str().expect("proof_bytes_hex");
+        assert_eq!(hex::encode(&receipt.proof_bytes), expected_hex);
+        let public_hex = v["public_commit_hex"].as_str().expect("public_commit_hex");
+        assert_eq!(hex::encode(public_commit), public_hex);
+    }
+
+    #[test]
+    fn forgery_vectors_reject_typed() {
+        let raw = fs::read_to_string(forgery_vectors_path()).expect("forgery fixture");
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        let cases = v["cases"].as_array().expect("cases");
+        for case in cases {
+            let name = case["name"].as_str().expect("name");
+            let expected = case["expected_error"].as_str().expect("expected_error");
+            assert_eq!(expected, "ZkProofInvalid", "{name}: wrong expected_error");
+            let mut object_id = [0u8; 32];
+            let mut embedding_commit = [0u8; 32];
+            hex::decode_to_slice(
+                case["object_id"].as_str().expect("object_id"),
+                &mut object_id,
+            )
+            .expect("decode id");
+            hex::decode_to_slice(
+                case["embedding_commit"].as_str().expect("embedding_commit"),
+                &mut embedding_commit,
+            )
+            .expect("decode emb");
+            let public_commit = hash_sem_leaf(&object_id, &embedding_commit);
+            let mut receipt = prove_binding_receipt(&object_id, &embedding_commit, public_commit);
+            match name {
+                "wrong_public_commit" => receipt.public_commit = [0xff; 32],
+                "forged_proof_bytes" => receipt.proof_bytes[0] ^= 0x01,
+                "wrong_embedding_commit" => {
+                    let wrong_emb = [0x03; 32];
+                    assert_eq!(
+                        verify_binding_receipt(&receipt, &object_id, &wrong_emb),
+                        Err(MnemeError::ZkProofInvalid)
+                    );
+                    continue;
+                }
+                "truncated_proof_bytes" => {
+                    receipt.proof_bytes = receipt.proof_bytes[..16].to_vec();
+                }
+                other => panic!("unknown forgery case: {other}"),
+            }
+            assert_eq!(
+                verify_binding_receipt(&receipt, &object_id, &embedding_commit),
+                Err(MnemeError::ZkProofInvalid),
+                "{name}"
+            );
+        }
+    }
+
+    fn forgery_vectors_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../proof/vectors/receipts/zk/forgery_expectations.json")
+    }
+
+    #[test]
+    #[ignore = "run with --ignored --nocapture to refresh proof/vectors/receipts/zk/privacy_fixture.json digests"]
+    fn dump_privacy_fixture_digests() {
+        let object_id = [0x01; 32];
+        let embedding_commit = [0x02; 32];
+        let public_commit = hash_sem_leaf(&object_id, &embedding_commit);
+        let receipt = prove_binding_receipt(&object_id, &embedding_commit, public_commit);
+        eprintln!("public_commit_hex={}", hex::encode(public_commit));
+        eprintln!("proof_bytes_hex={}", hex::encode(&receipt.proof_bytes));
     }
 
     #[test]

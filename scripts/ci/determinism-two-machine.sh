@@ -41,6 +41,51 @@ is_localhost_ssh_target() {
   esac
 }
 
+ssh_preflight_remote() {
+  local remote_root="$1"
+  echo "determinism-two-machine: SSH preflight peer=$MNEME_SECOND_HOST remote_root=$remote_root"
+
+  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$MNEME_SECOND_HOST" true; then
+    echo "determinism-two-machine: SSH preflight failed (connection/auth)." >&2
+    echo "  Test: ssh -o BatchMode=yes -o ConnectTimeout=10 $MNEME_SECOND_HOST true" >&2
+    return 1
+  fi
+
+  if ! ssh -o BatchMode=yes "$MNEME_SECOND_HOST" "test -d '$remote_root'"; then
+    echo "determinism-two-machine: remote MNEME_REMOTE_ROOT missing: $remote_root" >&2
+    return 1
+  fi
+
+  if ! ssh -o BatchMode=yes "$MNEME_SECOND_HOST" \
+    "command -v cargo >/dev/null && command -v python3 >/dev/null"; then
+    echo "determinism-two-machine: remote requires cargo and python3 on PATH." >&2
+    return 1
+  fi
+
+  if [[ -d "$ROOT/.git" ]]; then
+    local local_rev remote_rev
+    local_rev="$(git -C "$ROOT" rev-parse HEAD)"
+    remote_rev="$(ssh -o BatchMode=yes "$MNEME_SECOND_HOST" \
+      "git -C '$remote_root' rev-parse HEAD 2>/dev/null" || true)"
+    if [[ -n "$remote_rev" && "$local_rev" != "$remote_rev" ]]; then
+      echo "determinism-two-machine: git HEAD mismatch (local vs remote)." >&2
+      echo "  local:  $local_rev" >&2
+      echo "  remote: $remote_rev" >&2
+      return 1
+    fi
+    echo "determinism-two-machine: git HEAD OK ($local_rev)"
+  fi
+
+  echo "determinism-two-machine: SSH preflight OK"
+}
+
+b4_log() {
+  if [[ -n "${MNEME_B4_EVIDENCE_DIR:-}" ]]; then
+    mkdir -p "$MNEME_B4_EVIDENCE_DIR"
+    echo "$*" >>"$MNEME_B4_EVIDENCE_DIR/preflight.log"
+  fi
+}
+
 compare_run_a_digests() {
   local report_a="$1"
   local report_b="$2"
@@ -89,17 +134,25 @@ run_ssh_remote() {
   local remote_root="${MNEME_REMOTE_ROOT:-$ROOT}"
 
   echo "determinism-two-machine: mode=SSH-REMOTE peer=$MNEME_SECOND_HOST"
+  b4_log "mode=SSH-REMOTE peer=$MNEME_SECOND_HOST remote_root=$remote_root"
+
   if is_localhost_ssh_target "$MNEME_SECOND_HOST"; then
     echo "determinism-two-machine: WARNING — MNEME_SECOND_HOST resolves to localhost." >&2
     echo "  This is LOCAL-ONLY and does not satisfy §17.7 cross-host proof." >&2
+    if [[ "${MNEME_STRICT_CROSS_HOST:-}" == "1" ]]; then
+      echo "determinism-two-machine: MNEME_STRICT_CROSS_HOST=1 — refusing localhost SSH." >&2
+      exit 1
+    fi
   fi
 
-  if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$MNEME_SECOND_HOST" true; then
+  if ! ssh_preflight_remote "$remote_root"; then
     echo "determinism-two-machine: SSH preflight failed for MNEME_SECOND_HOST=$MNEME_SECOND_HOST" >&2
-    echo "  Ensure passwordless SSH (ssh -o BatchMode=yes $MNEME_SECOND_HOST true)." >&2
-    echo "  For CI without a peer, unset MNEME_SECOND_HOST to use dual-workspace mode." >&2
+    echo "  Ensure passwordless SSH, matching git HEAD, MNEME_REMOTE_ROOT, cargo, python3." >&2
+    echo "  For CI without a peer, unset MNEME_SECOND_HOST or use determinism-cross-runner.sh." >&2
+    b4_log "SSH preflight FAILED"
     exit 1
   fi
+  b4_log "SSH preflight OK"
 
   rm -rf "$local_out"
   cargo run -p mneme-cli -- determinism foundation-gate \
@@ -153,7 +206,9 @@ run_dual_workspace() {
     --exclude out/
     --exclude .git/
     --exclude out/agent-targets/
+    --exclude fuzz/corpus/
   )
+  # Corpus trees may contain sparse or deleted seed files; gate does not need them.
   rsync -a "${rsync_excludes[@]}" "$ROOT/" "$ws_a/"
   rsync -a "${rsync_excludes[@]}" "$ROOT/" "$ws_b/"
 
@@ -184,10 +239,20 @@ run_dual_workspace() {
   echo "  isolation_root (retained for inspection): $isolation_root"
 }
 
+if [[ "${1:-}" == "--compare-reports" ]]; then
+  [[ $# -ge 3 ]] || {
+    echo "Usage: determinism-two-machine.sh --compare-reports REPORT_A REPORT_B [LABEL_A LABEL_B]" >&2
+    exit 2
+  }
+  compare_run_a_digests "$2" "$3" "${4:-report-a}" "${5:-report-b}"
+  exit 0
+fi
+
 if [[ -n "${MNEME_SECOND_HOST:-}" ]]; then
   run_ssh_remote
 else
   echo "determinism-two-machine: MNEME_SECOND_HOST unset — using dual-workspace isolation."
   echo "  SSH cross-host proof: docs/MNEME_SECOND_HOST.md"
+  echo "  Cross-runner CI proof: scripts/ci/determinism-cross-runner.sh + determinism-cross-runner.yml"
   run_dual_workspace
 fi

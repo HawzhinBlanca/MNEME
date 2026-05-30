@@ -9,7 +9,7 @@ cd "$ROOT"
 # shellcheck source=lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/out/agent-targets/mcp-ci}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/out/agent-targets/b5-mcp}"
 mneme_ci_init "$ROOT" mcp-smoke
 
 if ! cargo check -p mneme-mcp --quiet 2>/dev/null; then

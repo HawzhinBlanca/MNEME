@@ -69,6 +69,31 @@ jobs:
       - name: Run validation lane
         run: bash scripts/ci/validation-lane.sh "${{ github.event.inputs.lane || 'quick' }}"
 
+  determinism-dual-workspace:
+    name: determinism (dual-workspace)
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'schedule'
+      || (github.event_name == 'workflow_dispatch'
+        && (github.event.inputs.lane == 'determinism' || github.event.inputs.lane == 'full'))
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/reliability-determinism
+      MNEME_DETERMINISM_TS: "1970-01-01T00:00:00Z"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-reliability-determinism
+
+      - name: Two-machine gate (dual-workspace — not cross-host)
+        run: bash scripts/ci/determinism-two-machine.sh
+
   sync-e2e:
     name: mnemed sync e2e (docker-compose)
     runs-on: ubuntu-latest
