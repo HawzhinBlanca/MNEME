@@ -327,7 +327,7 @@ impl Store {
                 &self.trust,
             )?;
             if let Some(peer_path) = peer_vault_path {
-                copy_peer_vault_keys(peer_snapshot, peer_path, &self.objects, &mut self.vault)?;
+                copy_peer_vault_keys(peer_snapshot, peer_path, &self.objects, &mut *self.vault)?;
             }
             // Write only newly-merged object blobs — a merge now costs O(merged)
             // fsynced writes instead of re-fsyncing every object in the store.
@@ -373,7 +373,7 @@ fn copy_peer_vault_keys(
     peer_snapshot: &PeerSnapshot,
     peer_path: &Path,
     local_objects: &std::collections::HashMap<[u8; 32], Vec<u8>>,
-    local_vault: &mut FileKeyVault,
+    local_vault: &mut dyn KeyVault,
 ) -> Result<(), MnemeError> {
     let peer_vault = FileKeyVault::new(peer_path)?;
     for (id, bytes) in &peer_snapshot.objects {

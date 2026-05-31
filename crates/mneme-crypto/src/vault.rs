@@ -8,11 +8,50 @@ use mneme_core::MnemeError;
 use crate::types::{KEY_ID_LEN, KeyId, OBJECT_KEY_LEN, ObjectKey};
 
 /// Per-object key vault (blueprint §5.8 `keys/vault/`).
+///
+/// This is the HSM/KMS pluggability seam (B6): the store kernel holds a
+/// `Box<dyn KeyVault + Send>` and never names a concrete vault, so a future
+/// AWS KMS / GCP KMS / PKCS#11 adapter only has to implement this trait — no
+/// kernel change. The trait lives **outside the verifier TCB**: a vault decides
+/// only whether per-object payload *decryption keys* are available, never whether
+/// a recall verifies against the signed root. See `docs/HSM_KMS_ADAPTER.md`.
 pub trait KeyVault {
+    /// Generate a fresh per-object key and return it with its `KeyId`.
     fn new_key(&mut self) -> Result<(ObjectKey, KeyId), MnemeError>;
+    /// Fetch a live key by id. Returns [`MnemeError::Forgotten`] for a shredded id
+    /// and [`MnemeError::KeyVaultMissing`] for one that was never stored.
     fn get(&self, key_id: &KeyId) -> Result<ObjectKey, MnemeError>;
+    /// Crypto-shred a key (irreversible). Subsequent `get` must return `Forgotten`.
     fn shred(&mut self, key_id: &KeyId) -> Result<(), MnemeError>;
+    /// True iff a live (non-shredded) key with this id is held.
     fn contains(&self, key_id: &KeyId) -> bool;
+
+    /// Import externally-supplied key material (anti-entropy merge / B4 sealed
+    /// bundle). Idempotent. Must reject re-import of a shredded id with
+    /// [`MnemeError::Forgotten`] to stay fail-closed. An adapter whose backend
+    /// cannot accept raw key bytes (e.g. an HSM with non-extractable keys) should
+    /// return an error rather than silently succeed — a silent success would let a
+    /// merge believe a key arrived when it did not.
+    fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError>;
+
+    /// Begin a batched-write window: an implementation MAY buffer `new_key` writes
+    /// until [`Self::flush_batch`] for group-commit durability. The default is a
+    /// no-op for vaults that write eagerly (every `new_key` is already durable).
+    /// Must be idempotent.
+    fn begin_batch(&mut self) -> Result<(), MnemeError> {
+        Ok(())
+    }
+
+    /// Flush all buffered writes durably and end the batch window. Default no-op
+    /// (an eager vault has nothing buffered).
+    fn flush_batch(&mut self) -> Result<(), MnemeError> {
+        Ok(())
+    }
+
+    /// Abort a batch window, discarding buffered (un-flushed) writes. Called on
+    /// transaction rollback so discarded keys belong to objects being thrown away.
+    /// Default no-op.
+    fn cancel_batch(&mut self) {}
 }
 
 /// In-memory vault for tests and ephemeral stores.
@@ -57,6 +96,17 @@ impl KeyVault for MemoryKeyVault {
     fn contains(&self, key_id: &KeyId) -> bool {
         self.keys.contains_key(key_id) && !self.shredded.contains_key(key_id)
     }
+
+    fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
+        if self.shredded.contains_key(key_id) {
+            return Err(MnemeError::Forgotten);
+        }
+        self.keys.entry(*key_id).or_insert(*key);
+        Ok(())
+    }
+
+    // begin_batch / flush_batch / cancel_batch use the trait no-op defaults: an
+    // in-memory vault writes eagerly, so there is nothing to buffer or fsync.
 }
 
 /// File-backed vault rooted at `store/keys/vault/`.
@@ -97,69 +147,6 @@ impl FileKeyVault {
             shredded,
             batch: None,
         })
-    }
-
-    /// Begin a batched-write window: subsequent `new_key`s buffer in memory until
-    /// [`Self::flush_batch`]. Idempotent.
-    pub fn begin_batch(&mut self) {
-        if self.batch.is_none() {
-            self.batch = Some(Vec::new());
-        }
-    }
-
-    /// Abort a batch window: drop buffered (un-journaled) keys from `live` and end
-    /// the batch. Called on transaction rollback — those keys were never durable and
-    /// belong to objects the transaction is discarding. No-op if not batching.
-    pub fn cancel_batch(&mut self) {
-        if let Some(buffered) = self.batch.take() {
-            for (id, _) in buffered {
-                self.live.remove(&id);
-            }
-        }
-    }
-
-    /// Persist all buffered keys to the append-only `vault.journal` with a single
-    /// fsync, then end the batch window. No-op if not batching.
-    pub fn flush_batch(&mut self) -> Result<(), MnemeError> {
-        let Some(buffered) = self.batch.take() else {
-            return Ok(());
-        };
-        if buffered.is_empty() {
-            return Ok(());
-        }
-        let journal = self.root.join("vault.journal");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&journal)
-            .map_err(|e| io_error(journal.display().to_string(), e))?;
-        // Each record is fixed-width KEY_ID_LEN ‖ OBJECT_KEY_LEN so replay needs no
-        // delimiter parsing; a torn final record (crash mid-write) is ignored on load.
-        let mut buf = Vec::with_capacity(buffered.len() * (KEY_ID_LEN + OBJECT_KEY_LEN));
-        for (id, key) in &buffered {
-            buf.extend_from_slice(id);
-            buf.extend_from_slice(key);
-        }
-        file.write_all(&buf)
-            .map_err(|e| io_error(journal.display().to_string(), e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
-            file.sync_all()
-                .map_err(|e| io_error(journal.display().to_string(), e))?;
-        }
-        Ok(())
-    }
-
-    /// Import peer key material for objects accepted by anti-entropy merge.
-    pub fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
-        if self.shredded.contains(key_id) || self.tombstone_path(key_id).exists() {
-            return Err(MnemeError::Forgotten);
-        }
-        let path = self.key_path(key_id);
-        if !path.exists() {
-            write_key_file(&path, key)?;
-        }
-        self.live.insert(*key_id, *key);
-        Ok(())
     }
 
     fn key_path(&self, key_id: &KeyId) -> PathBuf {
@@ -226,6 +213,70 @@ impl KeyVault for FileKeyVault {
 
     fn contains(&self, key_id: &KeyId) -> bool {
         self.live.contains_key(key_id) && !self.shredded.contains(key_id)
+    }
+
+    /// Import peer key material for objects accepted by anti-entropy merge.
+    fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
+        if self.shredded.contains(key_id) || self.tombstone_path(key_id).exists() {
+            return Err(MnemeError::Forgotten);
+        }
+        let path = self.key_path(key_id);
+        if !path.exists() {
+            write_key_file(&path, key)?;
+        }
+        self.live.insert(*key_id, *key);
+        Ok(())
+    }
+
+    /// Begin a batched-write window: subsequent `new_key`s buffer in memory until
+    /// [`Self::flush_batch`]. Idempotent.
+    fn begin_batch(&mut self) -> Result<(), MnemeError> {
+        if self.batch.is_none() {
+            self.batch = Some(Vec::new());
+        }
+        Ok(())
+    }
+
+    /// Persist all buffered keys to the append-only `vault.journal` with a single
+    /// fsync, then end the batch window. No-op if not batching.
+    fn flush_batch(&mut self) -> Result<(), MnemeError> {
+        let Some(buffered) = self.batch.take() else {
+            return Ok(());
+        };
+        if buffered.is_empty() {
+            return Ok(());
+        }
+        let journal = self.root.join("vault.journal");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&journal)
+            .map_err(|e| io_error(journal.display().to_string(), e))?;
+        // Each record is fixed-width KEY_ID_LEN ‖ OBJECT_KEY_LEN so replay needs no
+        // delimiter parsing; a torn final record (crash mid-write) is ignored on load.
+        let mut buf = Vec::with_capacity(buffered.len() * (KEY_ID_LEN + OBJECT_KEY_LEN));
+        for (id, key) in &buffered {
+            buf.extend_from_slice(id);
+            buf.extend_from_slice(key);
+        }
+        file.write_all(&buf)
+            .map_err(|e| io_error(journal.display().to_string(), e))?;
+        if std::env::var("MNEME_NO_FSYNC").is_err() {
+            file.sync_all()
+                .map_err(|e| io_error(journal.display().to_string(), e))?;
+        }
+        Ok(())
+    }
+
+    /// Abort a batch window: drop buffered (un-journaled) keys from `live` and end
+    /// the batch. Called on transaction rollback — those keys were never durable and
+    /// belong to objects the transaction is discarding. No-op if not batching.
+    fn cancel_batch(&mut self) {
+        if let Some(buffered) = self.batch.take() {
+            for (id, _) in buffered {
+                self.live.remove(&id);
+            }
+        }
     }
 }
 

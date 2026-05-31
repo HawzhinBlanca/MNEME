@@ -32,14 +32,16 @@ A second adversarial pass re-ran every gate from scratch after three blockers fr
 
 Within the full ladder: tamper suite ≥150 cases pass; determinism foundation-gate ×2 + dual-workspace reproducibility match; cross-implementation Appendix B vectors match; 6 fuzz targets at 31 s each (0 crashes); `bench_verify_recall_10k` = **32 µs** (strict gate `<1000 µs @ 10k`); foundation digests match pinned values; MCP agent-sim OK.
 
-**Still NOT proven by this single-host pass (honest boundary):** §17.7 *cross-host* two-machine determinism is only validated as same-host dual-workspace here; it remains UNPROVEN until run on a distinct physical host with `MNEME_SECOND_HOST` set. The operational SPOFs in §7 continue to apply.
+**Still NOT proven by this single-host pass (honest boundary):** §17.7 *cross-physical-host* determinism is validated as same-host dual-workspace + Docker `linux/amd64` digest match + cross-runner CI; it remains UNPROVEN on a distinct physical host until `MNEME_SECOND_HOST` is configured. The operational SPOFs in §7 continue to apply (except A-REPLAY cold-open — fixed; see §7).
+
+**B6 (2026-06-01):** `Store` now holds `Box<dyn KeyVault + Send>` with `create_with_vault` / `open_with_vault`; batch semantics on the `KeyVault` trait; `MemoryKeyVault` + parity test; [`docs/HSM_KMS_ADAPTER.md`](docs/HSM_KMS_ADAPTER.md). A concrete AWS/GCP/PKCS#11 adapter remains deferred until a real endpoint exists (see [`docs/REMAINING_ITEMS.md`](docs/REMAINING_ITEMS.md)).
 
 ---
 
 ## 1. Executive Verdict
 
-### **STATUS: DONE (10 / 10 Production Certified)**
-### **Completeness Score: 100% (Fully Verified)**
+### **STATUS: READY — v0 single-host cryptographic kernel (12-month in-repo scope)**
+### **Completeness (in-repo):** All blueprint mechanical gates reproducible from committed tree; input-gated items documented in `docs/REMAINING_ITEMS.md`
 
 Following an exhaustive adversarial audit of the MNEME verifiable memory substrate, we have verified that the codebase is **100% complete, fully working, and production ready**. All exit criteria from `MNEME_BLUEPRINT.md` are completely met, and all security, structural, and performance invariants have been proven and verified under strict hostile settings.
 
@@ -81,6 +83,10 @@ We conducted a line-by-line hunt for fakes, stubs, coverage theater, and silent 
      - `root.rs`: 38 lines
      - `semantic.rs`: 86 lines
      - `store.rs`: 179 lines
+5. **B6 KeyVault pluggability (outside TCB):**
+   - `mneme_store::Store` uses `Box<dyn KeyVault + Send>`; default `FileKeyVault` via `create`/`open`.
+   - Parity: `file_and_memory_vaults_have_identical_behaviour` in `crypto_invariants.rs`.
+   - Adapter contract: [`docs/HSM_KMS_ADAPTER.md`](docs/HSM_KMS_ADAPTER.md).
 
 ---
 
@@ -170,7 +176,7 @@ Despite being functionally complete and certified, we explicitly document the ph
 1. **Operator Key Custody (SPOF):** The Ed25519 operator signing key represents a single point of compromise. If compromised, an out-of-band adversary can sign root preimages containing tampered SMT roots.
 2. **Key-Vault Custody SPOF:** Cryptographic shredding relies on file-based key destruction. If the key vault `/keys/vault/` is corrupted or deleted, all historical payloads are rendered unreadable (involuntary crypto-shredding).
 3. **Chameleon Trapdoor Key Custody:** Accountable redaction relies on chameleon hashes. If the trapdoor key is leaked, an out-of-band attacker can rewrite history silently without leaving trace evidence, bypassing INV-3.
-4. **Replay rollbacks across cold opens:** `Store::open` does not pin or cross-reference historical logical clocks. An attacker can rollback the whole store folder to a previously valid state (pre-checkpoint) and the verifier will accept it as valid, unless the caller manually tracks and enforces `last_seen_hlc` externally.
+4. **A-REPLAY cold-open (mitigated):** `Store::open` and `verify_store` scan signed checkpoints and reject HEAD when a higher-sequence signed root exists on disk (`RootReplayed`); `last_seen_hlc` is pinned for `check_replay`. Residual: deleting the newer checkpoint file yields a byte-indistinguishable older snapshot — requires out-of-band trust pin (no CLI flag yet).
 5. **Exact nearest neighbors limit:** Verification receipt proves that the approximate HNSW search was run faithfully under procedure `P`; it does *not* prove exact mathematical nearest neighbors (ANNProof design, FGCS 2024).
 
 ---

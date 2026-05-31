@@ -40,7 +40,7 @@ impl Store {
                     forget_shred(ShredForgetInput {
                         logical_key: &logical_key,
                         key_index: self.key_index.tree_mut(),
-                        vault: &mut self.vault,
+                        vault: &mut *self.vault,
                         object_bytes: object_bytes.as_deref(),
                     })?;
                     self.key_to_object.remove(&key_hash);

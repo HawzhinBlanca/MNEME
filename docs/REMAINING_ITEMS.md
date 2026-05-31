@@ -1,8 +1,8 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-01. This tracks the items beyond the certified single-host v0 core.
-Each entry states exactly what is in-repo, what is gated, and *why* it cannot simply be
-"marked done" without an external input.
+Last updated: 2026-06-01 (B6 seam refactor committed). This tracks items beyond the
+certified single-host v0 core. Each entry states what is in-repo, what is gated, and
+*why* it cannot be marked done without an external input.
 
 ## Delivered (code, tested, CI-verified)
 
@@ -12,43 +12,35 @@ Each entry states exactly what is in-repo, what is gated, and *why* it cannot si
 - **B4** — AEAD-sealed vault-key transfer over §11 sync: same-trust-domain peers recall each
   other's **plaintext** after WebSocket sync; A-NET / foreign-operator / tampered-bundle all
   fail closed. `feat 19f8ca6`. See `docs/benchmarks/B4_SEALED_VAULT_KEY_SYNC.md`.
+- **B6 (seam)** — `Store` is pluggable over `KeyVault`: `Box<dyn KeyVault + Send>`,
+  `create_with_vault` / `open_with_vault`, batch ops (`begin_batch` / `flush_batch` /
+  `cancel_batch`) on the trait with no-op defaults, `MemoryKeyVault` + parity test
+  (`file_and_memory_vaults_have_identical_behaviour`), contract in
+  [`docs/HSM_KMS_ADAPTER.md`](HSM_KMS_ADAPTER.md). TCB untouched; determinism foundation-gate
+  byte-identical after refactor.
 
 ## Turn-key (in-repo substitute passes; full proof unlocks with one input)
 
 - **A1 — cross-physical-host determinism (§17.7).** The `determinism-cross-runner.yml`
-  workflow already has a `detect-peer` job that reads `secrets.MNEME_SECOND_HOST`, runs the
-  real SSH two-host proof when present, and otherwise runs a Docker same-kernel substitute +
-  the ubuntu-vs-macOS cross-runner comparison and skips the SSH leg with a clear message.
-  **To unlock:** set `MNEME_SECOND_HOST`, `MNEME_DETERMINISM_SSH_KEY`, `MNEME_REMOTE_ROOT`.
-  Nothing to build — the job lights up automatically.
+  workflow has a `detect-peer` job that reads `secrets.MNEME_SECOND_HOST`, runs the real SSH
+  two-host proof when present, and otherwise runs a Docker same-kernel substitute +
+  ubuntu-vs-macOS cross-runner comparison. **To unlock:** set `MNEME_SECOND_HOST`,
+  `MNEME_DETERMINISM_SSH_KEY`, `MNEME_REMOTE_ROOT`. Nothing to build.
 
-- **A2 — live-LLM MCP agent loop.** The deterministic substitute (`scripts/ci/mcp-agent-sim.sh`,
-  a 9-turn simulated agent over real `mneme-mcp` stdio) and the official-SDK-client interop
-  test (`e2e/mcp/sdk-client.test.mjs`) both run in CI. The **live** loop is now wired in
-  `e2e/mcp/live-agent.test.mjs`: it drives a real Anthropic model through the MCP tool-use
-  loop (remember → recall, asserting both tools fire and content round-trips via
-  `recall_verified`). It **skips cleanly** when `ANTHROPIC_API_KEY` is unset (the CI case),
-  before touching any optional dependency, so the standard `node --test e2e/mcp/*.test.mjs`
-  lane stays green. **To unlock:** `npm i @anthropic-ai/sdk`, set `ANTHROPIC_API_KEY` (+
-  `MNEME_MCP_BIN`), run the test.
+- **A2 — live-LLM MCP agent loop.** CI runs `scripts/ci/mcp-agent-sim.sh` and
+  `e2e/mcp/sdk-client.test.mjs`. The live loop is `e2e/mcp/live-agent.test.mjs` (skips
+  cleanly without `ANTHROPIC_API_KEY`). **To unlock:** `npm i @anthropic-ai/sdk`, set
+  `ANTHROPIC_API_KEY` (+ `MNEME_MCP_BIN`).
 
-## Genuinely deferred (needs an external target + a scoped refactor — NOT faked)
+## Genuinely deferred (needs a real KMS/HSM endpoint — NOT stubbed)
 
-- **B6 — HSM/KMS-backed vault.** Honest status of the seam:
-  - `mneme_crypto::KeyVault` is a trait (`new_key`/`get`/`shred`/`contains`) with a
-    `MemoryKeyVault` impl — so the *read/write* seam exists.
-  - **But** `mneme_store::Store` holds a **concrete** `FileKeyVault`, and the durable
-    group-commit path (B3) calls `begin_batch`/`flush_batch`/`cancel_batch`, which are
-    **inherent to `FileKeyVault`, not on the trait**.
-  - A real KMS adapter therefore requires: (1) extending `KeyVault` to cover batch
-    semantics (or a separate batching seam), (2) making `Store` generic/`dyn` over the
-    trait, and (3) a concrete adapter (AWS KMS, PKCS#11/HSM, GCP KMS) validated against a
-    **real KMS endpoint**. Items (1)–(2) are a non-trivial kernel refactor; (3) cannot be
-    proven without a target. This is intentionally left scoped rather than stubbed: a
-    KMS adapter that is never exercised against a real endpoint would be coverage theater.
+- **B6 (cloud/HSM adapter)** — The **kernel seam is delivered** (see above). What remains
+  is a **concrete adapter** (AWS KMS, GCP KMS, PKCS#11/HSM) validated against a **real
+  endpoint**. That cannot be proven without credentials and a target service. Stubbing a
+  KMS client that never talks to hardware would be coverage theater.
 
 ## Honesty boundary (unchanged)
 
-Single-host v0 remains certified per `READINESS.md` §0. The cross-host determinism leg is
-proven as same-kernel/dual-workspace + cross-runner, **not** yet on a distinct physical host
-with `MNEME_SECOND_HOST` — that boundary stands until the secret is configured.
+Single-host v0 remains certified per `READINESS.md` §0. Cross-host determinism is proven
+as same-kernel dual-workspace + Docker linux/amd64 digest match + cross-runner CI — **not**
+yet on a distinct physical host with `MNEME_SECOND_HOST` until that secret is configured.

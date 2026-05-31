@@ -16,7 +16,7 @@ use mneme_core::{
     Draft, Entry, FixedPointEmbedding, LogicalKey, MnemeError, NodeId, ObjectId, ObjectRecord,
     PayloadEnc, Procedure, Query, Root, TrustTier, from_bytes_strict, hash_obj, to_bytes_canonical,
 };
-use mneme_crypto::FileKeyVault;
+use mneme_crypto::{FileKeyVault, KeyVault};
 use mneme_crypto::{KeyPair, TrustConfig, open_payload, seal_payload};
 use mneme_dag::DagIndex;
 use mneme_forget::{payload_aad, prove_absent as forget_prove_absent};
@@ -85,7 +85,12 @@ pub struct Store {
     key_to_object: HashMap<[u8; 32], [u8; 32]>,
     object_keys: HashMap<[u8; 32], LogicalKey>,
     embeddings: HashMap<[u8; 32], FixedPointEmbedding>,
-    vault: FileKeyVault,
+    /// B6: the per-object key vault is abstracted behind the [`KeyVault`] trait so a
+    /// future HSM/KMS adapter is a drop-in (`*_with_vault` constructors) with no
+    /// kernel change. `+ Send` keeps `Store` usable inside `Arc<Mutex<Store>>` across
+    /// `tokio::spawn` (mnemed). The vault is outside the verifier TCB — it gates only
+    /// payload-key availability, never whether a recall verifies against the root.
+    vault: Box<dyn KeyVault + Send>,
     roots: Vec<Root>,
     hlc: mneme_core::Hlc,
     sequence: u64,
@@ -101,6 +106,18 @@ pub struct Recall {
 
 impl Store {
     pub fn create(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
+        let vault = Box::new(FileKeyVault::new(path)?);
+        Self::create_with_vault(path, operator, vault)
+    }
+
+    /// B6 HSM/KMS seam: create a store backed by a caller-supplied [`KeyVault`].
+    /// The default ([`Store::create`]) uses the on-disk [`FileKeyVault`]; a KMS/HSM
+    /// adapter is injected here with no kernel change. See `docs/HSM_KMS_ADAPTER.md`.
+    pub fn create_with_vault(
+        path: &Path,
+        operator: KeyPair,
+        vault: Box<dyn KeyVault + Send>,
+    ) -> Result<Self, MnemeError> {
         layout::init_store(path)?;
         let trust = TrustConfig::new(operator.public_key_bytes());
         let node_id = NodeId::from_bytes([0x01; 16]);
@@ -115,7 +132,7 @@ impl Store {
             key_to_object: HashMap::new(),
             object_keys: HashMap::new(),
             embeddings: HashMap::new(),
-            vault: FileKeyVault::new(path)?,
+            vault,
             roots: Vec::new(),
             hlc: mneme_core::Hlc::zero(node_id),
             sequence: 0,
@@ -142,6 +159,26 @@ impl Store {
         path: &Path,
         operator: KeyPair,
         pinned_root: Option<[u8; 32]>,
+    ) -> Result<Self, MnemeError> {
+        let vault = Box::new(FileKeyVault::new(path)?);
+        Self::open_pinned_with_vault(path, operator, pinned_root, vault)
+    }
+
+    /// B6 HSM/KMS seam: open with a caller-supplied [`KeyVault`]. Same A-REPLAY /
+    /// INV-6 cold-open checks as [`Store::open_pinned`]; only the key backend differs.
+    pub fn open_with_vault(
+        path: &Path,
+        operator: KeyPair,
+        vault: Box<dyn KeyVault + Send>,
+    ) -> Result<Self, MnemeError> {
+        Self::open_pinned_with_vault(path, operator, None, vault)
+    }
+
+    fn open_pinned_with_vault(
+        path: &Path,
+        operator: KeyPair,
+        pinned_root: Option<[u8; 32]>,
+        vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
         layout::check_incomplete(path)?;
         let mut trust = TrustConfig::new(operator.public_key_bytes());
@@ -178,7 +215,7 @@ impl Store {
             key_to_object: state.key_to_object,
             object_keys: state.object_keys,
             embeddings: state.embeddings,
-            vault: FileKeyVault::new(path)?,
+            vault,
             roots: vec![root.clone()],
             hlc: state.hlc,
             sequence: stored.sequence,
@@ -265,10 +302,12 @@ impl Store {
         }
         let tier = cap.default_tier();
         layout::begin_transaction(&self.path)?;
-        // §22 durable group-commit: batch the per-object vault keys into one journal
-        // fsync instead of one fsync per key (the measured ~98% of ingest cost).
-        self.vault.begin_batch();
         let result = (|| -> Result<(), MnemeError> {
+            // §22 durable group-commit: batch the per-object vault keys into one
+            // journal fsync instead of one fsync per key (~98% of ingest cost). Done
+            // inside the closure so a vault that fails to open a batch window aborts
+            // the transaction via the error arm below (no leaked `.incomplete`).
+            self.vault.begin_batch()?;
             let mut ids = Vec::with_capacity(count);
             for i in 0..count {
                 let draft = Draft {
@@ -326,8 +365,8 @@ impl Store {
             }
         }
         layout::begin_transaction(&self.path)?;
-        self.vault.begin_batch();
         let result = (|| -> Result<Root, MnemeError> {
+            self.vault.begin_batch()?;
             pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
             for draft in &drafts {
                 let tier = draft.trust_tier.unwrap_or_else(|| cap.default_tier());
@@ -432,7 +471,7 @@ impl Store {
             namespace: draft.namespace.clone(),
             name: draft.logical_name.clone(),
         };
-        let payload_enc = seal_payload(&mut self.vault, &draft.body, &payload_aad(&key))?;
+        let payload_enc = seal_payload(&mut *self.vault, &draft.body, &payload_aad(&key))?;
 
         let record = ObjectRecord {
             version: mneme_core::object::OBJECT_VERSION,
@@ -759,7 +798,7 @@ impl Store {
                 .get(entry.id.as_bytes())
                 .ok_or(MnemeError::SchemaDrift)?;
             entry.plaintext = open_payload(
-                &self.vault,
+                &*self.vault,
                 &entry.record.payload_enc,
                 &payload_aad(logical_key),
             )?;
