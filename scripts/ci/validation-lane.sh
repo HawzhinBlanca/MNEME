@@ -31,6 +31,7 @@ case "$LANE" in
       -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store \
       --lib --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
+    cargo test -p mneme-verify --test tcb_budget -- --nocapture
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
     bash scripts/ci/kill-resume-smoke.sh
