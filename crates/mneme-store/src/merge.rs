@@ -204,13 +204,10 @@ impl Store {
         peer_snapshot: &PeerSnapshot,
         peer_vault_path: Option<&Path>,
     ) -> Result<Root, MnemeError> {
-        // Snapshot pre-merge state so the durable write/persist below touches only
-        // the newly-merged delta instead of the whole store (§22 K6).
+        // Snapshot pre-merge object set so we durably write only the newly-merged
+        // object blobs, not the whole store (§22 K6).
         let pre_objects: std::collections::HashSet<[u8; 32]> =
             self.objects.keys().copied().collect();
-        let pre_key_to_object = self.key_to_object.clone();
-        let pre_tombstones: std::collections::HashSet<[u8; 32]> =
-            self.tombstones_ref().into_iter().collect();
 
         layout::begin_transaction(&self.path)?;
         let result = (|| -> Result<Root, MnemeError> {
@@ -237,23 +234,16 @@ impl Store {
             pause::checkpoint(pause::AFTER_OBJECT_WRITE)?;
             self.rebuild_semantic_index()?;
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
-            // Persist only changed key-index / object-key mappings and newly merged
-            // tombstones through the append-only journals (no O(n) full rewrite or
-            // full journal re-append). Merge brings no embeddings, so the embedding
-            // sidecar is left untouched.
-            for (key_hash, object_id) in &self.key_to_object {
-                if pre_key_to_object.get(key_hash) != Some(object_id) {
-                    layout::persist_key_index_upsert(&self.path, key_hash, object_id)?;
-                    if let Some(key) = self.object_keys.get(object_id) {
-                        layout::persist_object_keys_upsert(&self.path, object_id, key)?;
-                    }
-                }
-            }
-            for tombstone in self.tombstones_ref() {
-                if !pre_tombstones.contains(&tombstone) {
-                    layout::persist_key_index_tombstone(&self.path, &tombstone)?;
-                }
-            }
+            // §22 B5: one snapshot persist (O(1) fsync) for the key-index and
+            // object-keys sidecars, instead of an O(merged) loop of per-key journal
+            // appends — each append did `sync_all` + `sync_parent_dir` on the shared
+            // `meta/` dir, which serialized hard under concurrent multi-agent merge
+            // (the measured 0.03–0.08 merges/s ceiling, sys≫user). The snapshot
+            // writes the whole sidecar once and truncates the journal; it is
+            // deterministic (BTreeMap) and captures the full merged index + tombstones.
+            self.key_index.tree_mut().rebuild_root_cache();
+            layout::persist_key_index(&self.path, self)?;
+            layout::persist_object_keys(&self.path, self)?;
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.commit_root_inner()?;
             pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
