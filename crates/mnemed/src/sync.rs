@@ -314,7 +314,10 @@ pub fn encode_have_objects_canonical_for_test(
 /// Serialize this node's [`mneme_store::SyncSnapshot`] as a `MSG_SNAPSHOT` frame.
 fn encode_snapshot(state: &AppState) -> Option<Vec<u8>> {
     let store = state.store.lock().ok()?;
-    let snapshot = store.export_sync_snapshot();
+    // B4: serve the sealed snapshot — the vault-key bundle is AEAD-encrypted under the
+    // operator channel key, so a same-operator peer recalls plaintext while an A-NET
+    // observer or a different-operator peer recovers only the ciphertext objects.
+    let snapshot = store.export_sync_snapshot_sealed();
     drop(store);
     let mut body = Vec::new();
     ciborium::into_writer(&snapshot, &mut body).ok()?;

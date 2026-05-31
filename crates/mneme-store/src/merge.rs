@@ -5,20 +5,34 @@ use crate::layout;
 use crate::pause;
 use mneme_core::{LogicalKey, MnemeError, ObjectRecord, Root, from_bytes_strict, hash_obj};
 use mneme_crdt::{PeerSnapshot, apply_peer_snapshot};
-use mneme_crypto::{FileKeyVault, KeyVault};
+use mneme_crypto::{
+    FileKeyVault, KEY_ID_LEN, KeyVault, Nonce24, OBJECT_KEY_LEN, XCHACHA_NONCE_LEN, open,
+    random_nonce, seal,
+};
 use mneme_dag::DagIndex;
 use mneme_smt::SparseMerkleTree;
 use std::path::Path;
 
+/// Domain-separating associated data binding a sealed vault-key bundle to its purpose
+/// (B4). Prevents a sealed bundle from being mistaken for any other AEAD ciphertext.
+const VAULT_SYNC_AAD: &[u8] = b"mneme-vault-sync-v1";
+
 /// Transport-agnostic, serializable peer snapshot for §11 network anti-entropy.
 ///
-/// Carries the authenticated *structure* only — key-index leaves, tombstones, the
-/// object-id → logical-key map, and the **ciphertext** object blobs. It deliberately
-/// does NOT carry vault (payload-decryption) keys: every object is re-hashed on
-/// ingest so a tampering A-NET adversary is rejected, and the signed root converges
-/// over ciphertext, but payload confidentiality is preserved across an untrusted
-/// sync channel. Decrypting a peer's merged entries requires out-of-band key custody
-/// (the operator-key-custody assumption of §2.3), exactly as for on-disk merge.
+/// Carries the authenticated *structure* — key-index leaves, tombstones, the
+/// object-id → logical-key map, and the **ciphertext** object blobs. Every object is
+/// re-hashed on ingest so a tampering A-NET adversary is rejected, and the signed
+/// root converges over ciphertext regardless of whether keys travel.
+///
+/// `encrypted_keys` (B4) optionally carries the per-object payload-decryption keys,
+/// **AEAD-sealed under the operator-derived channel key** ([`KeyPair::vault_channel_key`]).
+/// It is empty for a keyless ([`Store::export_sync_snapshot`]) snapshot. When present
+/// and the recipient shares the operator key (same trust domain), the recipient
+/// decrypts and imports the keys and can recall the peer's merged entries as
+/// **plaintext**. An A-NET adversary or a *different* operator derives a different
+/// channel key and cannot open the bundle — so the keyless confidentiality boundary
+/// is preserved for everyone outside the trust domain, and a tampered bundle simply
+/// fails AEAD and is dropped (recall fails closed; convergence is unaffected).
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SyncSnapshot {
     /// `(key_hash, object_id)` MST leaves.
@@ -29,6 +43,11 @@ pub struct SyncSnapshot {
     pub object_keys: Vec<([u8; 32], String, String)>,
     /// Canonical object record bytes (ciphertext payloads).
     pub objects: Vec<Vec<u8>>,
+    /// B4: optional AEAD-sealed vault-key bundle (`nonce24 ‖ ciphertext` of fixed-width
+    /// `key_id(16) ‖ object_key(32)` records). Empty = keyless snapshot. Sealed under
+    /// the operator channel key; only a same-operator peer can open it.
+    #[serde(default)]
+    pub encrypted_keys: Vec<u8>,
 }
 
 /// Lightweight §11 anti-entropy manifest: the authenticated *structure* (leaves,
@@ -109,7 +128,43 @@ impl Store {
     /// Same verified merge core as [`Self::merge_from_path`]; no vault-key transfer.
     pub fn merge_from_snapshot(&mut self, snapshot: &SyncSnapshot) -> Result<Root, MnemeError> {
         let peer_snapshot = snapshot.to_peer_snapshot();
-        self.commit_merge(&peer_snapshot, None)
+        let root = self.commit_merge(&peer_snapshot, None)?;
+        // B4: if the peer sealed its vault keys under our shared operator channel key,
+        // import them so the merged entries are recall-able as plaintext. Fail-closed:
+        // a foreign/tampered bundle fails AEAD and is dropped — convergence (above) is
+        // already committed over ciphertext, and recall of those entries simply fails
+        // closed (no plaintext leak). Keys are imported AFTER the merge transaction; a
+        // crash in between loses only un-imported keys, which the next sync re-supplies.
+        if !snapshot.encrypted_keys.is_empty() {
+            self.import_sealed_vault_keys(&snapshot.encrypted_keys);
+        }
+        Ok(root)
+    }
+
+    /// Import a §11 sealed vault-key bundle (B4). Best-effort and fail-closed: any
+    /// length/AEAD failure imports nothing (the recipient simply cannot decrypt the
+    /// affected entries). Only keys we do not already hold are imported.
+    fn import_sealed_vault_keys(&mut self, framed: &[u8]) {
+        if framed.len() < XCHACHA_NONCE_LEN {
+            return;
+        }
+        let (nonce_bytes, ciphertext) = framed.split_at(XCHACHA_NONCE_LEN);
+        let mut nonce: Nonce24 = [0u8; XCHACHA_NONCE_LEN];
+        nonce.copy_from_slice(nonce_bytes);
+        let channel = self.operator.vault_channel_key();
+        let Ok(plain) = open(&channel, &nonce, ciphertext, VAULT_SYNC_AAD) else {
+            return; // foreign operator or tampered bundle → no plaintext, fail closed
+        };
+        let rec = KEY_ID_LEN + OBJECT_KEY_LEN;
+        for chunk in plain.chunks_exact(rec) {
+            let mut key_id = [0u8; KEY_ID_LEN];
+            key_id.copy_from_slice(&chunk[..KEY_ID_LEN]);
+            let mut key = [0u8; OBJECT_KEY_LEN];
+            key.copy_from_slice(&chunk[KEY_ID_LEN..]);
+            if !self.vault.contains(&key_id) {
+                let _ = self.vault.import_key(&key_id, &key);
+            }
+        }
     }
 
     /// Export this store's authenticated structure for §11 sync (ciphertext only).
@@ -127,6 +182,53 @@ impl Store {
             tombstones,
             object_keys,
             objects,
+            encrypted_keys: Vec::new(),
+        }
+    }
+
+    /// Export the §11 snapshot **with** the per-object payload keys AEAD-sealed under
+    /// the operator channel key (B4). A same-trust-domain peer (same operator key) can
+    /// decrypt and import the keys on merge and recall the entries as plaintext; anyone
+    /// else recovers only the ciphertext that [`Self::export_sync_snapshot`] carries.
+    pub fn export_sync_snapshot_sealed(&self) -> SyncSnapshot {
+        let mut snapshot = self.export_sync_snapshot();
+        snapshot.encrypted_keys = self.seal_vault_keys();
+        snapshot
+    }
+
+    /// Build the sealed vault-key bundle for every payload key this store holds.
+    /// Plaintext bundle = concat of fixed-width `key_id(16) ‖ object_key(32)` records;
+    /// the returned frame is `nonce24 ‖ XChaCha20-Poly1305(channel_key, bundle)`. Empty
+    /// when there are no encrypted payloads or sealing fails (caller ships keyless).
+    fn seal_vault_keys(&self) -> Vec<u8> {
+        let mut bundle = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for bytes in self.objects.values() {
+            let Ok(record) = from_bytes_strict::<ObjectRecord>(bytes) else {
+                continue;
+            };
+            if let Some(key_id) = record.payload_enc.key_id {
+                if seen.insert(key_id) {
+                    if let Ok(key) = self.vault.get(&key_id) {
+                        bundle.extend_from_slice(&key_id);
+                        bundle.extend_from_slice(&key);
+                    }
+                }
+            }
+        }
+        if bundle.is_empty() {
+            return Vec::new();
+        }
+        let channel = self.operator.vault_channel_key();
+        let nonce = random_nonce();
+        match seal(&channel, &nonce, &bundle, VAULT_SYNC_AAD) {
+            Ok(ciphertext) => {
+                let mut framed = Vec::with_capacity(nonce.len() + ciphertext.len());
+                framed.extend_from_slice(&nonce);
+                framed.extend_from_slice(&ciphertext);
+                framed
+            }
+            Err(_) => Vec::new(),
         }
     }
 
@@ -192,6 +294,9 @@ impl Store {
             tombstones: manifest.tombstones.clone(),
             object_keys: manifest.object_keys.clone(),
             objects,
+            // Incremental (manifest+delta) path converges ciphertext only; sealed
+            // key transfer is the full-snapshot path (B4). Keyless here by design.
+            encrypted_keys: Vec::new(),
         };
         self.merge_from_snapshot(&snapshot)
     }

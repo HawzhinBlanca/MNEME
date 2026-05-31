@@ -191,3 +191,48 @@ fn vault_batch_journal_roundtrips_durably_without_per_key_files() {
         );
     }
 }
+
+#[test]
+fn vault_channel_key_is_deterministic_domain_separated_and_not_the_seed() {
+    let seed = [0x42u8; 32];
+    let a = KeyPair::from_seed(seed);
+    let b = KeyPair::from_seed(seed);
+    let other = KeyPair::from_seed([0x99u8; 32]);
+
+    // Same operator seed → identical channel key (so same-domain peers converge).
+    assert_eq!(
+        a.vault_channel_key(),
+        b.vault_channel_key(),
+        "same operator must derive the same B4 channel key"
+    );
+    // Different operator seed → different channel key (cross-domain cannot decrypt).
+    assert_ne!(
+        a.vault_channel_key(),
+        other.vault_channel_key(),
+        "different operators must derive different channel keys"
+    );
+    // The channel key must NOT equal the raw signing seed (no key reuse).
+    assert_ne!(
+        a.vault_channel_key(),
+        seed,
+        "channel key must be a derived secret, not the signing seed"
+    );
+
+    // The derived channel key actually works as an AEAD key (seal/open round-trip).
+    let key = a.vault_channel_key();
+    let nonce = mneme_crypto::random_nonce();
+    let ct = seal(&key, &nonce, b"bundle", b"mneme-vault-sync-v1").expect("seal");
+    let pt = open(&key, &nonce, &ct, b"mneme-vault-sync-v1").expect("open");
+    assert_eq!(pt, b"bundle");
+    // A foreign operator's key cannot open it.
+    assert!(
+        open(
+            &other.vault_channel_key(),
+            &nonce,
+            &ct,
+            b"mneme-vault-sync-v1"
+        )
+        .is_err(),
+        "foreign channel key must fail AEAD open"
+    );
+}

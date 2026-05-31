@@ -41,6 +41,25 @@ impl KeyPair {
     pub fn signing_key(&self) -> &SigningKey {
         &self.signing
     }
+
+    /// Derive the symmetric channel key used to AEAD-seal vault (payload-decryption)
+    /// keys for transfer to a **same-trust-domain** peer over an untrusted §11 sync
+    /// channel (B4). Domain-separated BLAKE3 over the operator signing seed:
+    /// peers that share the operator key derive the identical key, so the recipient
+    /// can decrypt and import the sender's per-object keys and recall its entries as
+    /// plaintext. An A-NET adversary (no operator key) and a *different* operator
+    /// derive a different key and therefore cannot open the sealed bundle — the
+    /// confidentiality boundary of the keyless snapshot is preserved for everyone
+    /// outside the trust domain. The signing key is never used directly as an
+    /// encryption key (no Ed25519/X-key reuse); this is a one-way derived secret.
+    pub fn vault_channel_key(&self) -> crate::types::ObjectKey {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"mneme-vault-sync-channel-v1");
+        hasher.update(&self.signing.to_bytes());
+        let mut out = [0u8; crate::types::OBJECT_KEY_LEN];
+        out.copy_from_slice(&hasher.finalize().as_bytes()[..crate::types::OBJECT_KEY_LEN]);
+        out
+    }
 }
 
 #[derive(Clone, Debug)]

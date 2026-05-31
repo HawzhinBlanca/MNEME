@@ -1616,3 +1616,121 @@ fn e2e_kill_resume_remember_batch() {
         assert_fail_closed_after_kill(&dir, &operator, base);
     }
 }
+
+// --- B4: sealed vault-key transfer over §11 sync (same-trust-domain plaintext recall) ---
+
+/// Build two stores sharing the SAME operator key (one trust domain, e.g. a user's
+/// two devices) plus a writer cap valid under that operator.
+fn b4_peer_pair(
+    operator: &KeyPair,
+) -> (
+    (Store, tempfile::TempDir),
+    (Store, tempfile::TempDir),
+    mneme_cap::Capability,
+) {
+    let agent = KeyPair::from_seed([0x7c; 32]);
+    let cap = agent_cap(operator, agent.public_key_bytes()).unwrap();
+    let da = tempdir().unwrap();
+    let db = tempdir().unwrap();
+    let mut a = Store::create(da.path(), operator.clone()).unwrap();
+    let mut b = Store::create(db.path(), operator.clone()).unwrap();
+    a.trust_mut().authorized_writers.push(cap.subject);
+    b.trust_mut().authorized_writers.push(cap.subject);
+    ((a, da), (b, db), cap)
+}
+
+/// B4: a same-operator peer that merges a SEALED snapshot decrypts the transferred
+/// vault keys and recalls the sender's entry as PLAINTEXT — the functional gap the
+/// keyless ciphertext-only snapshot left open.
+#[test]
+fn e2e_b4_sealed_snapshot_enables_same_operator_plaintext_recall() {
+    let operator = KeyPair::from_seed([0x42; 32]);
+    let ((mut a, _da), (mut b, _db), cap) = b4_peer_pair(&operator);
+    a.remember(semantic_draft("peer", "secret", b"top-secret-body"), &cap)
+        .unwrap();
+
+    let sealed = a.export_sync_snapshot_sealed();
+    assert!(
+        !sealed.encrypted_keys.is_empty(),
+        "sealed snapshot must carry the AEAD key bundle"
+    );
+    b.merge_from_snapshot(&sealed).unwrap();
+
+    let query = Query {
+        logical_key: theme_key("peer", "secret"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    let entries = b
+        .recall_verified(&query, &default_key_procedure(), &cap)
+        .expect("same-operator peer recalls plaintext after sealed sync");
+    assert_eq!(entries[0].plaintext, b"top-secret-body");
+}
+
+/// B4 A-NET: a sealed bundle whose bytes were mutated in transit fails AEAD — the
+/// keys are NOT imported, so the entry converges over ciphertext (membership holds)
+/// but recall fails closed with NO plaintext leak.
+#[test]
+fn e2e_b4_tampered_sealed_keys_fail_closed_but_still_converge() {
+    let operator = KeyPair::from_seed([0x42; 32]);
+    let ((mut a, _da), (mut b, _db), cap) = b4_peer_pair(&operator);
+    a.remember(semantic_draft("peer", "secret", b"top-secret-body"), &cap)
+        .unwrap();
+
+    let mut sealed = a.export_sync_snapshot_sealed();
+    let mid = sealed.encrypted_keys.len() / 2;
+    sealed.encrypted_keys[mid] ^= 0xff; // A-NET tampering of the key bundle
+    b.merge_from_snapshot(&sealed)
+        .expect("merge converges over ciphertext regardless of key-bundle tampering");
+
+    let key = theme_key("peer", "secret");
+    assert!(
+        b.prove_membership(&key).is_ok(),
+        "ciphertext object still converges (re-hashed independently of the key bundle)"
+    );
+    let query = Query {
+        logical_key: key,
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    assert!(
+        b.recall_verified(&query, &default_key_procedure(), &cap)
+            .is_err(),
+        "tampered key bundle must not yield plaintext — recall fails closed"
+    );
+}
+
+/// B4 confidentiality boundary: a DIFFERENT operator (foreign trust domain) derives a
+/// different channel key and cannot open the sealed bundle, so it never recovers the
+/// peer's plaintext even though it received the sealed snapshot.
+#[test]
+fn e2e_b4_foreign_operator_cannot_open_sealed_keys() {
+    let operator_x = KeyPair::from_seed([0x42; 32]);
+    let operator_y = KeyPair::from_seed([0x99; 32]); // different trust domain
+    let agent = KeyPair::from_seed([0x7c; 32]);
+    let cap_x = agent_cap(&operator_x, agent.public_key_bytes()).unwrap();
+    let cap_y = agent_cap(&operator_y, agent.public_key_bytes()).unwrap();
+
+    let da = tempdir().unwrap();
+    let db = tempdir().unwrap();
+    let mut a = Store::create(da.path(), operator_x.clone()).unwrap();
+    a.trust_mut().authorized_writers.push(cap_x.subject);
+    let mut b = Store::create(db.path(), operator_y.clone()).unwrap();
+    b.trust_mut().authorized_writers.push(cap_y.subject);
+
+    a.remember(semantic_draft("peer", "secret", b"top-secret-body"), &cap_x)
+        .unwrap();
+    let sealed = a.export_sync_snapshot_sealed();
+    b.merge_from_snapshot(&sealed).unwrap();
+
+    let query = Query {
+        logical_key: theme_key("peer", "secret"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    assert!(
+        b.recall_verified(&query, &default_key_procedure(), &cap_y)
+            .is_err(),
+        "foreign operator must not decrypt the sealed keys → no cross-domain plaintext leak"
+    );
+}

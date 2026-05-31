@@ -8,7 +8,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use mneme_cap::{Capability, agent_cap};
-use mneme_core::{Draft, LogicalKey, MemoryKind};
+use mneme_core::{Draft, LogicalKey, MemoryKind, Query, TrustTier};
 use mneme_crypto::KeyPair;
 use mnemed::state::RateLimiter;
 use mnemed::{AppState, RunningServer, ServerConfig, start_with_state};
@@ -133,6 +133,42 @@ async fn two_daemons_converge_over_websocket() {
 
     server_a.shutdown().await;
     server_b.shutdown().await;
+}
+
+/// B4 end-to-end over a REAL WebSocket: the daemon serves a *sealed* snapshot (vault
+/// keys AEAD-encrypted under the operator channel key). A same-operator peer that
+/// pulls and merges it decrypts the keys and recalls the sender's entry as PLAINTEXT
+/// — proving the full §11 path delivers confidential recall, not just ciphertext
+/// convergence.
+#[tokio::test]
+async fn plaintext_recall_after_websocket_sync() {
+    let operator = KeyPair::from_seed([0x42; 32]);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let (state_a, _da) = build_peer(&operator, &cap);
+    let (state_b, _db) = build_peer(&operator, &cap);
+    remember(&state_a, "peer", "only-a", b"alpha-secret", &cap);
+
+    let server_a = serve(state_a.clone()).await;
+    pull_and_merge(&state_b, &server_a).await; // sealed snapshot over the wire
+
+    let query = Query {
+        logical_key: LogicalKey {
+            namespace: "peer".into(),
+            name: "only-a".into(),
+        },
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    let plaintext = {
+        let sb = state_b.store.lock().unwrap();
+        sb.recall_verified_default(&query, &cap)
+            .expect("same-operator peer recalls plaintext after sealed WebSocket sync")[0]
+            .plaintext
+            .clone()
+    };
+    assert_eq!(plaintext, b"alpha-secret");
+
+    server_a.shutdown().await;
 }
 
 /// A-NET: a snapshot whose object bytes were mutated in transit must NOT be
