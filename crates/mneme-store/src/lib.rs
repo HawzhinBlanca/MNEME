@@ -299,6 +299,59 @@ impl Store {
         }
     }
 
+    /// Batch seed for the §22 / F-7 semantic-recall bench only (not production API).
+    /// Like [`Store::bench_populate_semantic_entries`] but attaches a distinct
+    /// [`bench_embedding`] to every entry so they land in the HNSW semantic index
+    /// and the semantic (ANN) `recall_verified` path is exercisable under load.
+    /// One transaction / one root commit; no per-entry fsync.
+    #[doc(hidden)]
+    pub fn bench_populate_embedded_entries(
+        &mut self,
+        namespace: &str,
+        count: usize,
+        dim: u32,
+        cap: &Capability,
+    ) -> Result<(), MnemeError> {
+        self.verify_cap(cap)?;
+        if !cap.permits_write(namespace, mneme_core::MemoryKind::Semantic) {
+            return Err(MnemeError::CapDenied);
+        }
+        let tier = cap.default_tier();
+        layout::begin_transaction(&self.path)?;
+        let result = (|| -> Result<(), MnemeError> {
+            let mut ids = Vec::with_capacity(count);
+            for i in 0..count {
+                let draft = Draft {
+                    namespace: namespace.into(),
+                    logical_name: format!("key-{i:05}"),
+                    kind: mneme_core::MemoryKind::Semantic,
+                    body: b"x".to_vec(),
+                    parent_ids: vec![],
+                    session: [0x42; 16],
+                    trust_tier: None,
+                    embedding: Some(bench_embedding(i, dim)?),
+                };
+                let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
+                ids.push(id);
+            }
+            self.dag.seed_independent_heads(&ids)?;
+            self.key_index.tree_mut().rebuild_root_cache();
+            layout::persist_key_index(&self.path, self)?;
+            layout::persist_object_keys(&self.path, self)?;
+            layout::persist_embeddings(&self.path, self)?;
+            self.commit_root_inner()?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => layout::commit_transaction(&self.path),
+            Err(MnemeError::IncompleteTransaction) => Err(MnemeError::IncompleteTransaction),
+            Err(e) => {
+                let _ = layout::abort_transaction(&self.path);
+                Err(e)
+            }
+        }
+    }
+
     fn apply_remember_draft(
         &mut self,
         draft: &Draft,
@@ -697,6 +750,28 @@ impl Store {
     fn verify_cap(&self, cap: &Capability) -> Result<(), MnemeError> {
         cap.verify(&self.operator, &self.hlc)
     }
+}
+
+/// Deterministic, well-spread embedding for the §22 / F-7 semantic bench: a
+/// `dim`-wide fixed-point vector whose components are a reproducible hash spread of
+/// `i` across `[-1024, 1024)`. Spreading across all dims (rather than a near-collinear
+/// vector) keeps the HNSW index non-degenerate so populate stays ~linear, while
+/// determinism means a query reusing entry `m`'s vector resolves to `m` as the exact
+/// nearest neighbour. `dim >= 1`.
+#[doc(hidden)]
+pub fn bench_embedding(i: usize, dim: u32) -> Result<FixedPointEmbedding, MnemeError> {
+    if dim == 0 {
+        return Err(MnemeError::SchemaDrift);
+    }
+    let mut components = vec![0i16; dim as usize];
+    for (d, slot) in components.iter_mut().enumerate() {
+        // Knuth-style multiplicative mix per (i, dim) — deterministic, no RNG state.
+        let mixed = (i as u64)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add((d as u64).wrapping_mul(0x632B_E593_7F4A_1C97));
+        *slot = ((mixed >> 17) % 2048) as i16 - 1024;
+    }
+    FixedPointEmbedding::new(dim, 0, components)
 }
 
 fn provenance_objects_for_bytes(

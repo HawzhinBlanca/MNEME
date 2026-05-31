@@ -469,6 +469,7 @@ dependencies = [
  "curve25519-dalek-derive",
  "digest",
  "fiat-crypto",
+ "rand_core 0.6.4",
  "rustc_version",
  "subtle",
  "zeroize",
@@ -1327,10 +1328,12 @@ name = "mneme-index"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "curve25519-dalek",
  "fast-hnsw",
  "hex",
  "mneme-core",
  "mneme-smt",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "thiserror",

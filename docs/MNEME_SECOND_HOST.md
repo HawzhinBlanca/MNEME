@@ -58,6 +58,33 @@ bash scripts/ci/determinism-cross-runner.sh compare \
   /tmp/mneme-a/foundation.report.json /tmp/mneme-b/foundation.report.json
 ```
 
+## Docker simulation (no second host, no secrets)
+
+When no SSH peer is available, the Docker mode approximates cross-host independence on a single machine. It builds **one** pinned image and runs **two fully isolated containers**, then compares their `run_a` digests and checks the pinned golden.
+
+```bash
+bash scripts/ci/determinism-two-machine.sh --docker
+# equivalent: MNEME_DOCKER_SIM=1 bash scripts/ci/determinism-two-machine.sh
+```
+
+Isolation properties (why it approximates a second host):
+
+- **No shared filesystem** — containers run with no `-v`/`--mount`; each writes `/work/out` inside its own private writable layer.
+- **Independent entropy / identity** — distinct `--hostname` (`mneme-alpha` / `mneme-bravo`), separate PID namespaces, and per-container `/dev/urandom`.
+- **`--network none`** at runtime — no network can leak shared state into the gate.
+- **Pinned build** — `scripts/ci/determinism.Dockerfile` uses `rust:1.86.0-bookworm` and `cargo build -p mneme-cli --locked`; the build context is a clean rsync of the working tree (`target/`, `out/`, `.git/`, `fuzz/corpus/` excluded).
+
+Honesty boundary: containers **share the host kernel and CPU architecture**, so this is a same-kernel *simulation* — a strong proxy for §17.7 cross-host independence, **not** a two-physical-machine proof. The authoritative cross-host proofs remain cross-runner CI (Linux + macOS) and the optional `MNEME_SECOND_HOST` SSH peer.
+
+Outputs (under `out/ci-two-machine-docker/`):
+
+- `container-alpha.report.json`, `container-bravo.report.json` — the two `foundation.report.json` files (byte-identical on success).
+- `docker-sim-manifest.json` — provenance: image tag, source revision, fixture timestamp, container hostnames, and the recorded digests.
+
+Useful env overrides: `MNEME_DOCKER_IMAGE` (image tag), `MNEME_DOCKER_OUT` (output dir), `MNEME_DETERMINISM_TS` (fixture timestamp).
+
+CI: the `determinism-docker-sim` job in `.github/workflows/determinism-cross-runner.yml` runs this on every push/PR (no secrets) and is required by `b4-gate`.
+
 ## Local smoke — same checkout, two outputs
 
 ```bash

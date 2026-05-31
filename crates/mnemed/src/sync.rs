@@ -1,4 +1,19 @@
 //! Sync protocol WebSocket surface (blueprint §11 wire format).
+//!
+//! Two anti-entropy dialects share this endpoint:
+//!
+//! * The **canonical §11 [`SyncMessage`] protocol** (blueprint tags `0x03 DiffReq`,
+//!   `0x04 DiffResp`, `0x05 WantObjects`, `0x06 HaveObjects`), framed by the shared
+//!   `mneme-crdt` codec ([`encode_sync_message`]/[`decode_sync_message`]). This is the
+//!   cross-host object-transfer protocol: a requester diffs MST roots, fetches only the
+//!   object delta it lacks, re-hashes every received object (INV-1 / A-NET) and merges
+//!   through the verified CRDT path. Implemented by [`handle_diff_req`] /
+//!   [`handle_want_objects`] (server) and the `encode_diff_request` / `decode_diff_response`
+//!   / `encode_want_objects_canonical` / `decode_have_objects_canonical` client helpers.
+//! * A pre-existing snapshot/manifest dialect (tags `0x10`–`0x15`) kept for back-compat.
+//!
+//! Neither dialect can cause a write that bypasses the kernel's verified merge: every
+//! ingested object is re-hashed and its writer re-authorized inside `apply_peer_snapshot`.
 
 use crate::state::AppState;
 use axum::{
@@ -10,12 +25,19 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use mneme_core::{MnemeError, SyncMessage, hash_obj};
+use mneme_crdt::{decode_sync_message, encode_sync_message};
+use mneme_smt::TOMBSTONE;
+use mneme_store::SyncSnapshot;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 const MSG_HELLO: u8 = 0x01;
 const MSG_ROOT_PROOF: u8 = 0x02;
-/// Explicit "send me your signed root proof" request (replaces the old catch-all).
-pub const MSG_ROOT_PROOF_REQ: u8 = 0x03;
+/// §11 canonical: MST-diff request (peer announces its local key-index root).
+const MSG_DIFF_REQ: u8 = SyncMessage::DIFF_REQ;
+/// §11 canonical: object-delta request (`WantObjects { ids }`).
+const MSG_WANT_OBJECTS_V11: u8 = SyncMessage::WANT_OBJECTS;
 const MSG_BYE: u8 = 0x07;
 /// §11 anti-entropy: peer requests this node's authenticated structure snapshot.
 pub const MSG_SNAPSHOT_REQ: u8 = 0x10;
@@ -63,7 +85,9 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
                 }
                 let response = match data[0] {
                     MSG_HELLO => handle_hello(&state, &data[1..]).await,
-                    MSG_ROOT_PROOF_REQ => encode_root_proof(&state),
+                    // Canonical §11 object-transfer protocol (mneme-crdt codec).
+                    MSG_DIFF_REQ => handle_diff_req(&state, &data),
+                    MSG_WANT_OBJECTS_V11 => handle_want_objects(&state, &data),
                     MSG_SNAPSHOT_REQ => encode_snapshot(&state),
                     MSG_MANIFEST_REQ => encode_manifest(&state),
                     MSG_WANT_OBJECTS => encode_have_objects(&state, &data[1..]),
@@ -105,19 +129,186 @@ async fn handle_hello(state: &AppState, payload: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn encode_root_proof(state: &AppState) -> Option<Vec<u8>> {
+// --- §11 canonical object-transfer protocol (DiffReq/DiffResp/WantObjects/HaveObjects) ---
+
+/// Self-describing leaf bundle carried inside `HaveObjects { objects }`.
+///
+/// The frozen [`SyncMessage::HaveObjects`] field is `objects: Vec<Vec<u8>>` of opaque
+/// CBOR blobs; the canonical object record alone cannot reconstruct the MST leaf
+/// (`key_hash → object_id`) or the logical-key binding (those live outside the object,
+/// for payload confidentiality). Each `HaveObjects` blob is therefore the dCBOR of this
+/// bundle: the peer's *claimed* `(key_hash, object_id)` leaf, its logical key, and the
+/// ciphertext `object` record. The receiver re-hashes `object` and rejects it unless
+/// `hash_obj(object) == object_id` (INV-1 / A-NET), so a blob mutated in transit fails
+/// closed before it can reach the verified merge.
+#[derive(Serialize, Deserialize)]
+struct LeafBundle {
+    key_hash: [u8; 32],
+    object_id: [u8; 32],
+    namespace: String,
+    name: String,
+    object: Vec<u8>,
+}
+
+/// Answer `DiffReq { mst_root_local }` with `DiffResp { divergent_subtree_summaries }`.
+///
+/// Coarse (single-level) MST diff: when the requester's key-index root already equals
+/// ours the summary set is empty (converged fast-path); otherwise we return the object
+/// ids backing our live leaves so the requester can subtract what it already holds and
+/// fetch only the delta. `depth_hint` is accepted and reserved for future recursive
+/// subtree narrowing.
+fn handle_diff_req(state: &AppState, frame: &[u8]) -> Option<Vec<u8>> {
+    let mst_root_local = match decode_sync_message(frame).ok()? {
+        SyncMessage::DiffReq { mst_root_local, .. } => mst_root_local,
+        _ => return None,
+    };
     let store = state.store.lock().ok()?;
     let root = store.current_root().ok()?;
-    let proof = RootProof {
-        root_hash: root.preimage_hash,
-        sequence: root.sequence,
+    let snapshot = store.export_sync_snapshot();
+    drop(store);
+    let summaries: Vec<[u8; 32]> = if mst_root_local == root.key_index_root {
+        Vec::new()
+    } else {
+        let mut seen = HashSet::new();
+        snapshot
+            .leaves
+            .iter()
+            .map(|(_key_hash, object_id)| *object_id)
+            .filter(|object_id| *object_id != TOMBSTONE && seen.insert(*object_id))
+            .collect()
     };
-    let mut body = Vec::new();
-    ciborium::into_writer(&proof, &mut body).ok()?;
-    let mut out = Vec::with_capacity(1 + body.len());
-    out.push(MSG_ROOT_PROOF);
-    out.extend(body);
-    Some(out)
+    encode_sync_message(&SyncMessage::DiffResp {
+        divergent_subtree_summaries: summaries,
+    })
+    .ok()
+}
+
+/// Answer `WantObjects { ids }` with `HaveObjects { objects }`: for each requested id
+/// that is a live leaf here, emit a [`LeafBundle`] (leaf binding + logical key +
+/// ciphertext). Unknown/forgotten ids are skipped — the receiver re-hashes on ingest.
+fn handle_want_objects(state: &AppState, frame: &[u8]) -> Option<Vec<u8>> {
+    let ids = match decode_sync_message(frame).ok()? {
+        SyncMessage::WantObjects { ids } => ids,
+        _ => return None,
+    };
+    let store = state.store.lock().ok()?;
+    let snapshot = store.export_sync_snapshot();
+    drop(store);
+
+    let want: HashSet<[u8; 32]> = ids.into_iter().collect();
+    let object_bytes: HashMap<[u8; 32], &Vec<u8>> =
+        snapshot.objects.iter().map(|b| (hash_obj(b), b)).collect();
+    let logical_keys: HashMap<[u8; 32], (&str, &str)> = snapshot
+        .object_keys
+        .iter()
+        .map(|(id, ns, name)| (*id, (ns.as_str(), name.as_str())))
+        .collect();
+
+    let mut bundles: Vec<Vec<u8>> = Vec::new();
+    for (key_hash, object_id) in &snapshot.leaves {
+        if *object_id == TOMBSTONE || !want.contains(object_id) {
+            continue;
+        }
+        let (Some(object), Some((namespace, name))) = (
+            object_bytes.get(object_id),
+            logical_keys.get(object_id).copied(),
+        ) else {
+            continue;
+        };
+        let bundle = LeafBundle {
+            key_hash: *key_hash,
+            object_id: *object_id,
+            namespace: namespace.to_string(),
+            name: name.to_string(),
+            object: (*object).clone(),
+        };
+        let mut blob = Vec::new();
+        ciborium::into_writer(&bundle, &mut blob).ok()?;
+        bundles.push(blob);
+    }
+    encode_sync_message(&SyncMessage::HaveObjects { objects: bundles }).ok()
+}
+
+/// Build a canonical §11 `DiffReq` frame announcing the local key-index root.
+pub fn encode_diff_request(mst_root_local: [u8; 32]) -> Option<Vec<u8>> {
+    encode_sync_message(&SyncMessage::DiffReq {
+        mst_root_local,
+        depth_hint: 0,
+    })
+    .ok()
+}
+
+/// Decode a `DiffResp` frame into the peer's divergent leaf-object summaries.
+pub fn decode_diff_response(frame: &[u8]) -> Option<Vec<[u8; 32]>> {
+    match decode_sync_message(frame).ok()? {
+        SyncMessage::DiffResp {
+            divergent_subtree_summaries,
+        } => Some(divergent_subtree_summaries),
+        _ => None,
+    }
+}
+
+/// Build a canonical §11 `WantObjects` frame requesting the given object ids.
+pub fn encode_want_objects_canonical(ids: &[[u8; 32]]) -> Option<Vec<u8>> {
+    encode_sync_message(&SyncMessage::WantObjects { ids: ids.to_vec() }).ok()
+}
+
+/// Decode a canonical §11 `HaveObjects` frame into a verified [`SyncSnapshot`].
+///
+/// **Fail-closed (A-NET):** every bundle's object is re-hashed; a blob whose recomputed
+/// content hash does not match its claimed `object_id` is rejected with a typed
+/// [`MnemeError::ObjectTampered`] rather than silently dropped. The returned snapshot is
+/// safe to feed to `Store::merge_from_snapshot`, which re-verifies independently.
+pub fn decode_have_objects_canonical(frame: &[u8]) -> Result<SyncSnapshot, MnemeError> {
+    let objects = match decode_sync_message(frame)? {
+        SyncMessage::HaveObjects { objects } => objects,
+        _ => return Err(MnemeError::SchemaDrift),
+    };
+    let mut snapshot = SyncSnapshot::default();
+    for blob in objects {
+        let bundle: LeafBundle =
+            ciborium::from_reader(blob.as_slice()).map_err(|_| MnemeError::SchemaDrift)?;
+        if hash_obj(&bundle.object) != bundle.object_id {
+            return Err(MnemeError::ObjectTampered);
+        }
+        snapshot.leaves.push((bundle.key_hash, bundle.object_id));
+        snapshot
+            .object_keys
+            .push((bundle.object_id, bundle.namespace, bundle.name));
+        snapshot.objects.push(bundle.object);
+    }
+    Ok(snapshot)
+}
+
+/// Test-support (A-NET): encode a canonical `HaveObjects` frame from explicit leaf parts.
+///
+/// `LeafBundle` is private, so adversarial tests cannot otherwise construct a *structurally
+/// valid* bundle whose `object` bytes disagree with the claimed `object_id`. This builds one
+/// deterministically so the re-hash rejection gate in [`decode_have_objects_canonical`] is
+/// exercised directly (rather than via fragile raw-byte surgery on ciphertext, where a flip
+/// usually corrupts the inner CBOR integer-array first and trips `SchemaDrift`). It performs
+/// no verification and is never invoked on a production path.
+#[doc(hidden)]
+pub fn encode_have_objects_canonical_for_test(
+    key_hash: [u8; 32],
+    object_id: [u8; 32],
+    namespace: &str,
+    name: &str,
+    object: &[u8],
+) -> Option<Vec<u8>> {
+    let bundle = LeafBundle {
+        key_hash,
+        object_id,
+        namespace: namespace.to_string(),
+        name: name.to_string(),
+        object: object.to_vec(),
+    };
+    let mut blob = Vec::new();
+    ciborium::into_writer(&bundle, &mut blob).ok()?;
+    encode_sync_message(&SyncMessage::HaveObjects {
+        objects: vec![blob],
+    })
+    .ok()
 }
 
 /// Serialize this node's [`mneme_store::SyncSnapshot`] as a `MSG_SNAPSHOT` frame.

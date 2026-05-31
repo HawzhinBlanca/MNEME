@@ -461,6 +461,14 @@ fn persist_recall_fixture_store(
         &operator,
     )
     .expect("head stored");
+    // A real commit appends `roots/<seq>.root.cbor` before writing HEAD; mirror
+    // that here so the store passes the F-3 head-checkpoint-existence gate and the
+    // intended downstream tamper (key_index / tombstone) is what fails closed.
+    std::fs::write(
+        path.join(format!("roots/{}.root.cbor", stored.sequence)),
+        stored.to_bytes().expect("head checkpoint bytes"),
+    )
+    .expect("head checkpoint");
     std::fs::write(
         path.join("roots/HEAD"),
         stored.to_bytes().expect("head bytes"),
@@ -823,6 +831,58 @@ fn tamper_verify_store_intermediate_checkpoint_fails_closed() {
             "tampered intermediate checkpoint must fail closed, got {err:?}"
         ),
         Ok(_) => panic!("tampered intermediate checkpoint must fail closed (F-3 gap)"),
+    }
+}
+
+/// F-3: deleting the checkpoint file at HEAD's own sequence (`roots/<HEAD-seq>.root.cbor`)
+/// must fail closed. HEAD is signature-gated, but a legitimate commit always appends the
+/// current checkpoint before writing HEAD, so a missing current checkpoint is a truncated
+/// / tampered append-only log — previously `verify_store` returned `Ok` (HEAD authoritative).
+#[test]
+fn tamper_verify_store_missing_head_checkpoint_fails_closed() {
+    use mneme_cap::agent_cap;
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x41; 32]);
+    let agent = KeyPair::from_seed([0x42; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let trust = store.trust().clone();
+    store
+        .remember(
+            mneme_core::Draft {
+                namespace: "head".into(),
+                logical_name: "k".into(),
+                kind: mneme_core::MemoryKind::Semantic,
+                body: b"head-body".to_vec(),
+                parent_ids: vec![],
+                session: [0x43; 16],
+                trust_tier: None,
+                embedding: None,
+            },
+            &cap,
+        )
+        .expect("remember");
+    let head_seq = store.current_root().expect("root").sequence;
+    drop(store);
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+    let head_checkpoint = dir.path().join(format!("roots/{head_seq}.root.cbor"));
+    assert!(
+        head_checkpoint.exists(),
+        "current checkpoint present pre-attack"
+    );
+    std::fs::remove_file(&head_checkpoint).expect("delete current checkpoint");
+    match verify_store(dir.path(), &trust) {
+        Err(MnemeError::RootInconsistent) => {}
+        Err(other) => {
+            panic!("missing current checkpoint: expected RootInconsistent, got {other:?}")
+        }
+        Ok(_) => panic!("missing current checkpoint must fail closed (F-3 gap)"),
     }
 }
 

@@ -6,7 +6,8 @@ use e2e::helpers::{agent_store, semantic_draft};
 use mneme_cap::agent_cap;
 use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
 use mneme_crypto::KeyPair;
-use mneme_store::Store;
+use mneme_index::default_semantic_procedure;
+use mneme_store::{Store, bench_embedding};
 use std::time::Instant;
 
 const BENCH_ENTRY_COUNT: usize = 10_000;
@@ -62,6 +63,88 @@ fn bench_verify_recall_10k_entries() {
         "verify_recall took {:?}; exceeds blueprint <1ms gate at {BENCH_ENTRY_COUNT} entries",
         recall_elapsed
     );
+}
+
+const SEMANTIC_BENCH_DIM: u32 = 8;
+
+#[test]
+// F-7: §19's <1 ms figure is the *key-index* path; the semantic/ANN
+// `recall_verified` path had no latency gate. This populates a semantic store,
+// measures p50/p99 over the ANN path, prints a `BENCH ...` line, and asserts a
+// generous defense-in-depth ceiling (NOT the §19 key-index <1 ms gate, since the
+// receipt build is O(indexed) not the O(256) key-index fold). Override scale via
+// `MNEME_BENCH_SEMANTIC_SCALE` / sample count via `MNEME_BENCH_SEMANTIC_SAMPLES`.
+#[ignore = "perf budget benchmark; run via scripts/ci/bench-recall-optional.sh"]
+fn bench_verify_semantic_recall_latency() {
+    // The receipt-bearing semantic path (`SemanticIndex::search_deterministic`) is a
+    // FULL deterministic scan over the committed set plus a Merkle verification object
+    // covering every leaf, re-verified by the gate — empirically SUPER-LINEAR in the
+    // index size (M4 Max class: p99 ≈ 12.6 ms @ 256, 70.9 ms @ 512, 429 ms @ 1000).
+    // It is therefore NOT subject to the §19 key-index <1 ms gate. The default scale
+    // is kept small so the lane stays fast; override `MNEME_BENCH_SEMANTIC_SCALE` to
+    // profile the curve at larger sizes (the hard ceiling below only gates the default
+    // scale, since a fixed bound is meaningless against a super-linear curve).
+    let scale_override = std::env::var("MNEME_BENCH_SEMANTIC_SCALE").is_ok();
+    let scale = env_usize("MNEME_BENCH_SEMANTIC_SCALE", 256);
+    let samples = env_usize("MNEME_BENCH_SEMANTIC_SAMPLES", 100);
+    let (mut store, cap, _dir) = agent_store();
+
+    let populate_start = Instant::now();
+    store
+        .bench_populate_embedded_entries("bench", scale, SEMANTIC_BENCH_DIM, &cap)
+        .expect("bench populate embedded");
+    eprintln!(
+        "bench_semantic_recall: populated {scale} embedded entries in {:?}",
+        populate_start.elapsed()
+    );
+
+    let proc = default_semantic_procedure();
+    let make_query = |idx: usize| Query {
+        logical_key: LogicalKey {
+            namespace: "bench".into(),
+            name: format!("key-{:05}", idx % scale),
+        },
+        min_tier: TrustTier::Working,
+        embedding: Some(bench_embedding(idx % scale, SEMANTIC_BENCH_DIM).expect("query embedding")),
+    };
+
+    // Warmup (not measured): prime OS/object caches and the semantic backend.
+    for w in 0..16 {
+        let _ = store.recall_verified(&make_query(w * 97 + 1), &proc, &cap);
+    }
+
+    let mut ns = Vec::with_capacity(samples);
+    for i in 0..samples {
+        let q = make_query(i * 7 + 11);
+        let t = Instant::now();
+        let entries = store
+            .recall_verified(&q, &proc, &cap)
+            .expect("semantic recall_verified");
+        ns.push(t.elapsed().as_nanos());
+        std::hint::black_box(&entries);
+    }
+    report("recall_verified_semantic", scale, ns.clone());
+
+    // Defense-in-depth regression gate at the DEFAULT scale only. Measured p99 at
+    // scale 256 is ~12.6 ms and very tight (CPU-bound); 60 ms is ~4.7× headroom so a
+    // cross-runner slowdown does not flake, while a gross algorithmic regression (or
+    // an accidental extra O(n) factor) still trips it. When the scale is overridden
+    // for profiling the bound is skipped (the curve is super-linear) and the measured
+    // `BENCH op=recall_verified_semantic ...` line above is the documented result.
+    ns.sort_unstable();
+    let p99_ms = percentile(&ns, 99.0) as f64 / 1_000_000.0;
+    if scale_override {
+        eprintln!(
+            "bench_semantic_recall: scale overridden to {scale} (profiling); p99 {p99_ms:.3} ms — latency assertion skipped (super-linear path)"
+        );
+    } else {
+        const SEMANTIC_P99_CEILING_MS: f64 = 60.0;
+        assert!(
+            p99_ms < SEMANTIC_P99_CEILING_MS,
+            "semantic recall_verified p99 {p99_ms:.3} ms exceeds defense-in-depth ceiling \
+             {SEMANTIC_P99_CEILING_MS} ms at default scale {scale} — possible perf regression"
+        );
+    }
 }
 
 #[test]

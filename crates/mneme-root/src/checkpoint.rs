@@ -139,6 +139,15 @@ pub fn verify_checkpoint_chain(
         }
         by_seq.insert(seq, stored);
     }
+    // F-3: the checkpoint file at HEAD's own sequence MUST be present. Every
+    // legitimate commit (`CheckpointLog::commit`) appends `roots/<seq>.root.cbor`
+    // *before* it writes HEAD, so a HEAD that points at a sequence with no
+    // matching on-disk checkpoint is a truncated / tampered log (the current
+    // checkpoint was emptied or deleted) — fail closed rather than trust HEAD
+    // alone. When present it is additionally held byte-identical to HEAD below.
+    if !by_seq.contains_key(&head.sequence) {
+        return Err(MnemeError::RootInconsistent);
+    }
     for (&seq, stored) in &by_seq {
         match seq.checked_sub(1) {
             Some(0) | None => {

@@ -46,8 +46,8 @@ pub use commitment_binding::{
 
 #[cfg(feature = "plonky2_prover")]
 pub use plonky2_prover::{
-    B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, Plonky2RetrievalProof, prove_plonky2_retrieval,
-    verify_plonky2_retrieval,
+    B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, PUBLIC_COMMIT_LEN, Plonky2RetrievalProof,
+    RetrievalWitness, ZK_BACKEND, prove_plonky2_retrieval, verify_plonky2_retrieval,
 };
 
 /// ADS backend enabled when the `ads` feature is on.
@@ -124,23 +124,36 @@ mod tests {
 
     #[cfg(feature = "plonky2_prover")]
     #[test]
-    fn plonky2_prover_fails_closed() {
+    fn plonky2_prover_real_proof_verifies_and_forgeries_reject() {
         use super::plonky2_prover::{
-            B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, Plonky2RetrievalProof,
+            B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, RetrievalWitness, ZK_BACKEND,
             prove_plonky2_retrieval, verify_plonky2_retrieval,
         };
         use mneme_core::MnemeError;
-        assert!(B3_DEFERRAL_STATUS.contains("CLOSED"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("fails closed"));
+        assert!(B3_DEFERRAL_STATUS.contains("IMPLEMENTED"));
+        assert!(PLONKY2_PROVER_HONESTY.contains("zero-knowledge"));
+        assert!(PLONKY2_PROVER_HONESTY.contains("NOT Plonky2"));
+        assert!(ZK_BACKEND.contains("no trusted setup"));
+
+        let entry = [9u8; 32];
+        let proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        assert!(!proof.proof_bytes.is_empty());
+        verify_plonky2_retrieval(&proof, &proof.public_commit).expect("verify");
+
+        // Forgery: tampering the public commitment must reject.
+        let mut wrong = proof.public_commit;
+        wrong[0] ^= 0x01;
         assert_eq!(
-            prove_plonky2_retrieval(b"x"),
+            verify_plonky2_retrieval(&proof, &wrong),
             Err(MnemeError::ZkProofInvalid)
         );
-        let proof = Plonky2RetrievalProof {
-            proof_bytes: vec![1, 2, 3],
-        };
+
+        // Unsatisfiable witness (query != entry) cannot produce a proof.
+        let mut q = entry;
+        q[0] ^= 0x01;
+        let bad = RetrievalWitness { entry, query: q };
         assert_eq!(
-            verify_plonky2_retrieval(&proof, b"x"),
+            prove_plonky2_retrieval(&bad),
             Err(MnemeError::ZkProofInvalid)
         );
     }

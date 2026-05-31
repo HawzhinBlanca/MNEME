@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Two-machine determinism gate (blueprint §17.7, audit B4).
 #
-# Mode A — dual-workspace (default when MNEME_SECOND_HOST unset):
+# "Determinism" here means: foundation-gate root/receipt digests are a pure
+# function of the DECLARED inputs (source revision, fixture timestamp, operator
+# seed, fixture data) and exclude every ambient input — wall-clock, PID, hostname,
+# host entropy, and absolute filesystem paths (INV-10). Same inputs => same roots.
+# It is NOT a claim that roots ignore their inputs; change the fixture timestamp or
+# seed and the roots change. The cross-environment modes below prove that two
+# environments with DIFFERENT ambient state produce IDENTICAL roots.
+#
+# Mode A — dual-workspace (default when no peer/mode requested):
 #   rsync two isolated trees, independent CARGO_TARGET_DIR per workspace.
 #   Closes CI digest reproducibility; does NOT prove cross-host §17.7.
 #
@@ -9,8 +17,15 @@
 #   Optional MNEME_REMOTE_ROOT when remote checkout path differs from driver ROOT.
 #   Localhost SSH is LOCAL-ONLY and must not be reported as cross-host proof.
 #
+# Mode C — Docker simulation (--docker or MNEME_DOCKER_SIM=1; no peer needed):
+#   Build one pinned image, run TWO isolated containers (--network none, distinct
+#   hostnames, no shared volumes => independent entropy/PID/clock/FS), compare
+#   run_a digests, check pinned golden. Same-kernel SIMULATION — a strong proxy
+#   for cross-host independence, NOT a two-physical-machine proof.
+#
 # Usage:
-#   scripts/ci/determinism-two-machine.sh
+#   scripts/ci/determinism-two-machine.sh                       # dual-workspace
+#   scripts/ci/determinism-two-machine.sh --docker              # docker simulation
 #   MNEME_SECOND_HOST=user@peer.example scripts/ci/determinism-two-machine.sh
 set -euo pipefail
 
@@ -21,9 +36,14 @@ cd "$ROOT"
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-determinism-two-machine}"
 
-if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
-  echo "determinism-two-machine: mneme-cli foundation-gate not available — failing closed." >&2
-  exit 1
+# Docker mode is self-contained: the gate binary is built and existence-checked
+# inside the image, so it does NOT require cargo/foundation-gate on the host. Skip
+# the host-side preflight compile when --docker / MNEME_DOCKER_SIM is requested.
+if [[ "${1:-}" != "--docker" && "${MNEME_DOCKER_SIM:-}" != "1" ]]; then
+  if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+    echo "determinism-two-machine: mneme-cli foundation-gate not available — failing closed." >&2
+    exit 1
+  fi
 fi
 
 TS="${MNEME_DETERMINISM_TS:-1970-01-01T00:00:00Z}"
@@ -187,6 +207,144 @@ EOF
   echo "  scope: §17.7 cross-host (when peer is a distinct physical host)"
 }
 
+run_docker_sim() {
+  local image dockerfile rev out_dir ctx report_a report_b manifest suffix
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "determinism-two-machine: docker not on PATH — cannot run --docker mode." >&2
+    echo "  Install Docker, or use dual-workspace / MNEME_SECOND_HOST instead." >&2
+    exit 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    echo "determinism-two-machine: docker daemon unreachable — start Docker and retry." >&2
+    exit 1
+  fi
+
+  image="${MNEME_DOCKER_IMAGE:-mneme-determinism:local}"
+  dockerfile="$ROOT/scripts/ci/determinism.Dockerfile"
+  rev="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  out_dir="${MNEME_DOCKER_OUT:-$ROOT/out/ci-two-machine-docker}"
+  report_a="$out_dir/container-alpha.report.json"
+  report_b="$out_dir/container-bravo.report.json"
+  manifest="$out_dir/docker-sim-manifest.json"
+  suffix="$$"
+
+  echo "determinism-two-machine: mode=DOCKER-SIM image=$image rev=$rev"
+  echo "  scope: same-kernel container isolation approximating §17.7 cross-host"
+  echo "  HONESTY: containers share the host kernel + CPU arch — this is a strong"
+  echo "           proxy for cross-host independence, NOT a two-physical-machine proof."
+  b4_log "mode=DOCKER-SIM image=$image rev=$rev"
+  if [[ "${MNEME_STRICT_CROSS_HOST:-}" == "1" ]]; then
+    echo "determinism-two-machine: NOTE — MNEME_STRICT_CROSS_HOST=1 set, but docker-sim" >&2
+    echo "  remains a same-kernel approximation. Use MNEME_SECOND_HOST for a true peer." >&2
+  fi
+
+  rm -rf "$out_dir"
+  mkdir -p "$out_dir"
+
+  # Build context = clean rsync of the working tree (same excludes as
+  # dual-workspace) so the image reflects exactly what is checked out, minus
+  # build/output artifacts. No .git => smaller, deterministic context.
+  ctx="$(mktemp -d "${TMPDIR:-/tmp}/mneme-docker-ctx.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$ctx'" RETURN
+  rsync -a \
+    --exclude target/ \
+    --exclude out/ \
+    --exclude .git/ \
+    --exclude fuzz/corpus/ \
+    "$ROOT/" "$ctx/"
+
+  echo "==> building determinism image ($image)"
+  docker build --file "$dockerfile" --tag "$image" "$ctx"
+
+  run_one_container() {
+    local name="$1" host="$2" dest="$3"
+    echo "==> container $name (hostname=$host, --network none, no shared volumes)"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    # --network none: no network at runtime. Distinct --hostname: distinct
+    # identity/entropy surface. No -v/--mount: container FS is fully private, so
+    # there is NO shared filesystem between the two runs (each writes /work/out
+    # inside its own writable layer).
+    docker run \
+      --name "$name" \
+      --network none \
+      --hostname "$host" \
+      "$image" \
+      /mneme/target/debug/mneme determinism foundation-gate \
+      --out /work/out \
+      --timestamp "$TS"
+    docker cp "$name:/work/out/foundation.report.json" "$dest"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+  }
+
+  run_one_container "mneme-det-alpha-$suffix" "mneme-alpha" "$report_a"
+  run_one_container "mneme-det-bravo-$suffix" "mneme-bravo" "$report_b"
+
+  compare_run_a_digests "$report_a" "$report_b" "container-alpha" "container-bravo"
+  bash "$ROOT/scripts/ci/check-foundation-digests.sh" "$report_a"
+
+  MNEME_DOCKER_IMAGE_RESOLVED="$image" \
+    MNEME_DOCKER_REV="$rev" \
+    python3 - "$report_a" "$report_b" "$manifest" "$TS" <<'PY'
+import json, os, sys
+from datetime import datetime, timezone
+
+report_a, report_b, manifest_path, ts = sys.argv[1:5]
+keys = [
+    "head_bytes_hex",
+    "root_preimage_hex",
+    "receipt_digest_hex",
+    "absent_proof_digest_hex",
+    "semantic_digest_hex",
+]
+
+
+def load_run(path):
+    with open(path) as f:
+        return json.load(f)["run_a"]
+
+
+a = load_run(report_a)
+b = load_run(report_b)
+identical = all(a.get(k) == b.get(k) for k in keys)
+manifest = {
+    "mode": "docker-sim",
+    "scope": "same-kernel container isolation approximating §17.7 cross-host",
+    "honesty": (
+        "Containers share the host kernel and CPU architecture. This is a strong "
+        "proxy for cross-host independence (isolated entropy/PID/clock/hostname/FS), "
+        "NOT a two-physical-machine proof. True cross-host proofs: cross-runner CI "
+        "matrix and MNEME_SECOND_HOST SSH peer."
+    ),
+    "image": os.environ.get("MNEME_DOCKER_IMAGE_RESOLVED", ""),
+    "source_revision": os.environ.get("MNEME_DOCKER_REV", "unknown"),
+    "timestamp_fixture": ts,
+    "containers": [
+        {"label": "container-alpha", "hostname": "mneme-alpha", "network": "none"},
+        {"label": "container-bravo", "hostname": "mneme-bravo", "network": "none"},
+    ],
+    "byte_identical_across_containers": identical,
+    "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
+    "digests": {k: a[k] for k in keys},
+}
+with open(manifest_path, "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+print(f"determinism-two-machine: docker-sim manifest -> {manifest_path}")
+PY
+
+  echo "determinism-two-machine: docker-sim mode complete"
+  echo "  container-alpha report: $report_a"
+  echo "  container-bravo report: $report_b"
+  echo "  manifest: $manifest"
+  echo "  ┌────────────────────────────────────────────────────────────────────┐"
+  echo "  │ DOCKER-SIM: two isolated containers produced BYTE-IDENTICAL roots.   │"
+  echo "  │ Same-kernel approximation of §17.7. For the cross-host milestone use  │"
+  echo "  │ cross-runner CI (Linux+macOS) or MNEME_SECOND_HOST=user@peer.        │"
+  echo "  └────────────────────────────────────────────────────────────────────┘"
+}
+
 run_dual_workspace() {
   local isolation_root ws_a ws_b out_a out_b report_a report_b
   isolation_root="$(mktemp -d "${TMPDIR:-/tmp}/mneme-dual-ws.XXXXXX")"
@@ -255,6 +413,7 @@ run_dual_workspace() {
   echo "  └────────────────────────────────────────────────────────────────────┘"
 }
 
+DOCKER_REQUESTED=0
 if [[ "${1:-}" == "--compare-reports" ]]; then
   [[ $# -ge 3 ]] || {
     echo "Usage: determinism-two-machine.sh --compare-reports REPORT_A REPORT_B [LABEL_A LABEL_B]" >&2
@@ -264,10 +423,22 @@ if [[ "${1:-}" == "--compare-reports" ]]; then
   exit 0
 fi
 
-if [[ -n "${MNEME_SECOND_HOST:-}" ]]; then
+if [[ "${1:-}" == "--docker" || "${MNEME_DOCKER_SIM:-}" == "1" ]]; then
+  DOCKER_REQUESTED=1
+fi
+
+if [[ "$DOCKER_REQUESTED" == "1" ]]; then
+  if [[ -n "${MNEME_SECOND_HOST:-}" ]]; then
+    echo "determinism-two-machine: both --docker and MNEME_SECOND_HOST set." >&2
+    echo "  These are distinct modes; unset one. Refusing to guess. Failing closed." >&2
+    exit 2
+  fi
+  run_docker_sim
+elif [[ -n "${MNEME_SECOND_HOST:-}" ]]; then
   run_ssh_remote
 else
-  echo "determinism-two-machine: MNEME_SECOND_HOST unset — using dual-workspace isolation."
+  echo "determinism-two-machine: no peer/mode requested — using dual-workspace isolation."
+  echo "  Docker simulation (no peer needed): scripts/ci/determinism-two-machine.sh --docker"
   echo "  SSH cross-host proof: docs/MNEME_SECOND_HOST.md"
   echo "  Cross-runner CI proof: scripts/ci/determinism-cross-runner.sh + determinism-cross-runner.yml"
   run_dual_workspace

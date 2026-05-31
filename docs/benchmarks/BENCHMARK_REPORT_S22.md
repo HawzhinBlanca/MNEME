@@ -465,3 +465,117 @@ fsync) and were **not** claimed fixed.
 (s22-after-20260530T150620Z), same M4 Max host under heavier concurrent load.
 Every value traces to a `BENCH ...` line in the cited raw logs. No metric is
 interpolated or fabricated.*
+
+---
+
+## 13. ACCEPTED LIMITATION — concurrent-merge fsync serialization ceiling
+
+**Status: ACCEPTED, bounded, signed-off (not ambient risk).** The §8 concurrent
+multi-agent merge throughput is a **known, measured performance ceiling with a
+known root cause and a designed remediation**. It is recorded here as an explicit
+accepted limitation rather than left as a green-looking number that hides a
+yellow. It is a **throughput** limit only: correctness, convergence, durability,
+and fail-closed semantics are unaffected (every concurrent merge converges, exit
+0, no corruption — §8 and the run below).
+
+### 13.1 Measured ceiling (fresh, this host)
+
+Re-measured 2026-05-31 on Apple M4 Max (14 cores, APFS, macOS 26.5, rustc 1.86.0),
+`bench_concurrent_merge_contention`, 14 worker threads. Raw logs:
+`out/benchmarks/contention-resolution-20260531T122203Z/`
+(`SUMMARY.md`, `contention_fsync_on_peer500.log`,
+`contention_fsync_off_peer500.log`, `contention_peer100_both.log`, `hardware.txt`).
+
+| config (14 threads) | merges/s | per-merge p50 | per-merge p99 | real | user | sys |
+|---|---:|---:|---:|---:|---:|---:|
+| base=1000 peer=500 | **0.03** | **135.84 s** | 136.85 s | 488.52 s | 12.80 s | **140.52 s** |
+| base=500  peer=100 | 0.12 | 23.65 s | 24.02 s | 120.71 s | 3.09 s | 40.89 s |
+
+The `peer=500` row reproduces the audit finding (0.03 merges/s, ~117–136 s/merge).
+In every run **`sys` is 11–13× `user`** — wall time is spent in kernel I/O
+barriers, not computation.
+
+### 13.2 Root cause (proven, not assumed)
+
+`merge` commits inside one `.incomplete`-guarded transaction (INV-8) but issues
+**O(merged-set)** individual `F_FULLFSYNC` device barriers — **≈ 7 per merged
+object** plus O(1) fixed:
+
+| source | barriers / merged object | file |
+|---|---:|---|
+| object blob `atomic_write` (data `sync_all` + parent-dir `sync_all`) | 2 | `crates/mneme-store/src/atomic.rs` |
+| vault key `write_key_file` (`sync_all`) | 1 | `crates/mneme-crypto/src/vault.rs` |
+| key-index journal append (`sync_all` + parent-dir) | 2 | `crates/mneme-store/src/layout.rs` |
+| object-keys journal append (`sync_all` + parent-dir) | 2 | `crates/mneme-store/src/layout.rs` |
+| `commit_root_inner`: checkpoint append + HEAD write | 2 (fixed/merge) | `crates/mneme-root/src/atomic.rs` |
+
+peer=500 ⇒ ≈ 3504 barriers; peer=100 ⇒ ≈ 704. At ≈ 30 ms per `F_FULLFSYNC` under
+14-way contention this predicts 105 s and 21 s of pure barrier time — matching the
+measured fsync portions (131 s, 21 s) below.
+
+**Isolation experiment.** Re-running the *identical* config with the existing
+crash-unsafe `MNEME_NO_FSYNC=1` knob removes the O(merged-set) barriers and exposes
+the CPU/syscall floor:
+
+| config | per-merge p50, fsync ON | per-merge p50, fsync OFF | fsync share | barrier-collapse headroom |
+|---|---:|---:|---:|---:|
+| peer=500 | 135.84 s | 4.54 s | **~96.7 %** | **≈ 30×** |
+| peer=100 | 23.65 s  | 2.60 s | ~89 %        | ≈ 9× |
+
+So at the audited scale **~97 % of a merge is fsync-barrier serialization**, and a
+commit that paid **O(1)** barriers instead of O(merged-set) has ≈ 30× headroom
+(crash-unsafe ceiling; a crash-safe single-barrier commit that re-adds one real
+barrier realistically lands ≈ 14–27×).
+
+### 13.3 When it bites (and when it does not)
+
+Triggers **only** when *all three* hold simultaneously:
+
+1. **Many** independent writers (≈ cores) committing **at the same time**, each
+2. running a **`merge`** (or any O(merged-set) durable write), of a
+3. **large** peer/merged set (hundreds+ objects).
+
+It does **not** affect: single-writer interactive `remember` (flat ~44–70 ms,
+§12.3) or `recall_verified` (flat ~150–180 µs p99, §12.2); small merges; or
+read-only multi-agent fan-out. The system's primary interactive paths are
+unaffected. This is a *batch reconciliation under write-storm* ceiling.
+
+### 13.4 Bounded, not ambient — the explicit sign-off
+
+- **Correctness is independent of this limit.** All 14 concurrent merges in every
+  run returned `Ok` and converged with no corruption; the deterministic-MST-merge
+  property and the `.incomplete` fail-closed gate hold under contention (§8).
+- **No silent failure mode.** The cost is latency/throughput only; there is no
+  data-loss, no weakened durability, no verification bypass. Under a real crash the
+  `.incomplete` marker still rejects a partial merge on cold open (INV-8).
+- **The number is now owned.** Operators running N concurrent large-peer merges on
+  one host should expect throughput ≈ `1 / (7 · peer_objects · fsync_ms)` per
+  writer and schedule batch reconciliation accordingly, rather than treating §8 as
+  a passing green metric.
+
+### 13.5 Planned remediation (designed)
+
+Collapse the O(merged-set) barriers in the merge transaction to **O(1)** via
+durable group-commit: stage object/journal/vault writes without per-write
+`F_FULLFSYNC`, then issue a **single** device barrier immediately before clearing
+`.incomplete`. The byte layout on disk is unchanged (determinism fixtures
+unaffected — this differs from the broader vault-journal layout change), and the
+`.incomplete` atomicity gate is preserved, so fail-closed crash semantics are
+identical. Tracked in `docs/benchmarks/DURABILITY_GROUP_COMMIT_DESIGN.md` (see the
+"Concurrent-merge fsync serialization" lever in §"Lower-priority levers").
+
+**Why this is documented rather than shipped now.** It is a change to the
+durability TCB of a fail-closed substrate. The repository's kill/resume harness
+(`scripts/ci/kill-resume-smoke.sh`, the §17.3 pause boundaries) validates the
+**logical** `.incomplete` atomicity gate — it does **not** physically validate the
+crash-durability of a batched single-barrier scheme (no power-loss/crash-injection
+rig exists in this environment). Per the project's own change discipline
+(`DURABILITY_GROUP_COMMIT_DESIGN.md`: "Do not merge without adversarial review +
+kill/resume re-validation"), shipping and *claiming* "durability proven" here would
+be unverifiable. The honest action taken is therefore: reproduce the ceiling,
+prove the root cause and quantify the headroom (above), and convert the finding
+into this bounded, signed-off limitation with a concrete remediation path.
+
+*Measured 2026-05-31 (contention-resolution-20260531T122203Z), Apple M4 Max,
+APFS, fsync default on. Every value traces to a `BENCH ...` line in the cited raw
+logs. No production code was changed for this section.*

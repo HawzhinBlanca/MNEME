@@ -92,7 +92,7 @@ The `mneme-crossref` crate is an independent reimplementation of the Appendix B 
 
 1. **Authenticated ≠ true.** Signed entries verify even when content is false. MNEME proves integrity, provenance, authorization — not truth.
 2. **Verifiable retrieval proves procedure-faithfulness, not exact nearest neighbors.**
-3. The `commitment_binding` feature (`zk` alias) is a **tagged BLAKE3 envelope only** — not zero-knowledge, not a SNARK. The `plonky2_prover` feature is a **fail-closed stub** (12-month milestone only).
+3. The `commitment_binding` feature (`zk` alias) is a **tagged BLAKE3 envelope only** — not zero-knowledge, not a SNARK. The `plonky2_prover` feature (12-month milestone B3, off by default) is a **real transparent zero-knowledge proof**: Pedersen commitments + a Schnorr equality-of-openings NIZK over Ristretto (Fiat–Shamir, no trusted setup). It proves *faithful execution of a committed retrieval-match with witness privacy* — it is **not** Plonky2 and **not** a FRI/PLONK SNARK (Plonky2 1.x is nightly-only; the repo pins stable 1.86.0), and it still does **not** prove semantic truth or exact nearest neighbors.
 
 These limits appear in `MnemeError` messages, MCP tool descriptions, and verifier exports. Never weaken or remove them.
 
