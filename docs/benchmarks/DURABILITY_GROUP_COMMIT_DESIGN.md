@@ -1,6 +1,18 @@
-# Durable Group-Commit — Design (the §22 write-path optimization)
+# Durable Group-Commit — Design + Implementation (the §22 write-path optimization)
 
-**Status:** designed, **not yet implemented** — deliberately scoped as a reviewed change, not rushed, because it alters on-disk durability and the determinism golden fixtures (see Blast radius). **Do not merge without** adversarial review + kill/resume re-validation + determinism-fixture refresh.
+**Status: IMPLEMENTED** (commits `71c7ac3` B3, `2bf1fbb` B5), adversarial-reviewed GO (0 blockers), CI green.
+
+**Outcome vs the design's prediction.** The blast-radius worry below (that the vault layout would rewrite the determinism golden fixtures) turned out to be **wrong**: the foundation-gate digests the signed root / receipt / absent / semantic values, none of which include vault key-file bytes — so the journal vault is invisible to determinism (verified: foundation-gate HEAD byte-identical ×2). No fixture refresh was needed. Two O(n)-fsync bottlenecks were removed:
+
+1. **Batched vault-key journal** (`FileKeyVault::{begin_batch,flush_batch,cancel_batch}`, `vault.journal`) — N per-key fsyncs → 1.
+2. **Snapshot key-index persist** (`persist_key_index` now one `atomic_write` + journal truncate, not N fsync'd journal appends) — applied to both `bench_populate`/`remember_batch` (B3) and `commit_merge` (B5).
+
+New API: `Store::remember_batch(drafts, cap)`. **Measured (M4 Max, fsync ON):** durable 10k ingest **105.9s → 1.17s (~90×)**, ingest ~93/s → ~8,500/s; concurrent merge 0.08 → 0.12 merges/s (~1.5×, residual ceiling = per-object content fsyncs). recall_verified unchanged.
+
+---
+*Original design (retained for the rationale + the parts not yet built):*
+
+**Original status:** designed, not yet implemented — scoped as a reviewed change because it was thought to alter the determinism fixtures (it did not — see above).
 
 ## Why (measured)
 
