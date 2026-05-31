@@ -70,9 +70,16 @@ for target in "${FUZZ_TARGETS[@]}"; do
     log="$(mktemp)"
   fi
   set +e
+  # Catch a REAL single unbounded allocation (`-malloc_limit_mb`, the bounded-alloc
+  # guarantee) but do NOT abort on benign cumulative process RSS (`-rss_limit_mb=0`):
+  # over a long run libFuzzer's own coverage maps + corpus grow past the default
+  # 2048 MB and would otherwise dump a false-positive `oom-` artifact for whatever
+  # input was in flight (confirmed harmless on replay). Both are env-overridable.
   cargo "+${FUZZ_TOOLCHAIN}" fuzz run "$target" -- \
     -max_total_time="$FUZZ_SECS" \
     -print_final_stats=1 \
+    -malloc_limit_mb="${MNEME_FUZZ_MALLOC_LIMIT_MB:-2048}" \
+    -rss_limit_mb="${MNEME_FUZZ_RSS_LIMIT_MB:-0}" \
     2>&1 | tee "$log"
   status=$?
   set -e
