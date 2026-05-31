@@ -265,6 +265,9 @@ impl Store {
         }
         let tier = cap.default_tier();
         layout::begin_transaction(&self.path)?;
+        // §22 durable group-commit: batch the per-object vault keys into one journal
+        // fsync instead of one fsync per key (the measured ~98% of ingest cost).
+        self.vault.begin_batch();
         let result = (|| -> Result<(), MnemeError> {
             let mut ids = Vec::with_capacity(count);
             for i in 0..count {
@@ -281,6 +284,7 @@ impl Store {
                 let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
                 ids.push(id);
             }
+            self.vault.flush_batch()?;
             self.dag.seed_independent_heads(&ids)?;
             self.key_index.tree_mut().rebuild_root_cache();
             layout::persist_key_index(&self.path, self)?;
@@ -291,8 +295,66 @@ impl Store {
         })();
         match result {
             Ok(()) => layout::commit_transaction(&self.path),
-            Err(MnemeError::IncompleteTransaction) => Err(MnemeError::IncompleteTransaction),
+            Err(MnemeError::IncompleteTransaction) => {
+                self.vault.cancel_batch();
+                Err(MnemeError::IncompleteTransaction)
+            }
             Err(e) => {
+                self.vault.cancel_batch();
+                let _ = layout::abort_transaction(&self.path);
+                Err(e)
+            }
+        }
+    }
+
+    /// Durable batch ingest (§22 group-commit): apply many drafts in ONE atomic
+    /// `.incomplete`-guarded transaction with a single vault-key journal fsync and a
+    /// single root commit, instead of one full transaction (≈5 fsyncs) per entry.
+    /// Crash-safe: a crash before commit leaves `.incomplete` → cold open rejects and
+    /// the whole batch rolls back. Objects are durably written (per-object content
+    /// fsync) so committed entries survive; the win is amortizing the per-key,
+    /// checkpoint, HEAD, and sidecar fsyncs across the batch. Returns the new root.
+    pub fn remember_batch(
+        &mut self,
+        drafts: Vec<Draft>,
+        cap: &Capability,
+    ) -> Result<Root, MnemeError> {
+        self.verify_cap(cap)?;
+        for d in &drafts {
+            if !cap.permits_write(&d.namespace, d.kind) {
+                return Err(MnemeError::CapDenied);
+            }
+        }
+        layout::begin_transaction(&self.path)?;
+        self.vault.begin_batch();
+        let result = (|| -> Result<Root, MnemeError> {
+            pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
+            for draft in &drafts {
+                let tier = draft.trust_tier.unwrap_or_else(|| cap.default_tier());
+                self.apply_remember_draft(draft, cap, tier, true, true)?;
+            }
+            self.vault.flush_batch()?;
+            // One full sidecar persist for the whole batch (not per entry).
+            self.key_index.tree_mut().rebuild_root_cache();
+            layout::persist_key_index(&self.path, self)?;
+            layout::persist_object_keys(&self.path, self)?;
+            layout::persist_embeddings(&self.path, self)?;
+            pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
+            self.commit_root_inner()?;
+            pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
+            self.current_root()
+        })();
+        match result {
+            Ok(root) => {
+                layout::commit_transaction(&self.path)?;
+                Ok(root)
+            }
+            Err(MnemeError::IncompleteTransaction) => {
+                self.vault.cancel_batch();
+                Err(MnemeError::IncompleteTransaction)
+            }
+            Err(e) => {
+                self.vault.cancel_batch();
                 let _ = layout::abort_transaction(&self.path);
                 Err(e)
             }

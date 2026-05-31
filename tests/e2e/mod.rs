@@ -1502,3 +1502,117 @@ fn e2e_incremental_sync_incomplete_delta_fails_closed() {
     // And the unsupplied key must NOT have been merged.
     assert!(a.prove_membership(&theme_key("peer", "only-b")).is_err());
 }
+
+// --- B3: durable group-commit `remember_batch` ---
+
+fn batch_store() -> (Store, mneme_cap::Capability, KeyPair, tempfile::TempDir) {
+    test_clear_pause();
+    let dir = tempdir().unwrap();
+    let operator = KeyPair::from_seed([0x5b; 32]);
+    let agent = KeyPair::from_seed([0x5c; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).unwrap();
+    let mut store = Store::create(dir.path(), operator.clone()).unwrap();
+    store.trust_mut().authorized_writers.push(cap.subject);
+    (store, cap, operator, dir)
+}
+
+/// remember_batch commits the whole batch in ONE root, and every entry is durably
+/// recallable — including after reopen, which replays the batched vault-key journal.
+#[test]
+fn e2e_remember_batch_durable_and_recallable() {
+    let (mut store, cap, operator, dir) = batch_store();
+    let drafts: Vec<_> = (0..200)
+        .map(|i| semantic_draft("batch", &format!("k{i:04}"), format!("v{i}").as_bytes()))
+        .collect();
+    let root = store.remember_batch(drafts, &cap).unwrap();
+    assert_eq!(
+        root.sequence, 2,
+        "one signed root for the whole batch (create=1, batch=2)"
+    );
+    let proc = default_key_procedure();
+    for i in [0usize, 99, 199] {
+        let q = Query {
+            logical_key: theme_key("batch", &format!("k{i:04}")),
+            min_tier: TrustTier::Working,
+            embedding: None,
+        };
+        assert_eq!(
+            store.recall_verified(&q, &proc, &cap).unwrap()[0].plaintext,
+            format!("v{i}").as_bytes()
+        );
+    }
+    // Reopen: keys must replay from vault.journal and decrypt (durability proof).
+    drop(store);
+    let mut re = Store::open(dir.path(), operator).unwrap();
+    re.trust_mut().authorized_writers.push(cap.subject);
+    let q = Query {
+        logical_key: theme_key("batch", "k0150"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    assert_eq!(
+        re.recall_verified(&q, &proc, &cap).unwrap()[0].plaintext,
+        b"v150",
+        "batched key survived reopen via the journal"
+    );
+}
+
+/// Batch and N individual `remember`s of identical content yield the SAME set of
+/// logical keys (both fully recallable). The signed roots legitimately differ —
+/// each object embeds a random AEAD nonce + key id (semantic security), so object
+/// ids and thus the key-index root are not byte-equal across independent stores;
+/// the durability optimization changes fsync count, never the logical content.
+#[test]
+fn e2e_remember_batch_matches_individual_logical_keys() {
+    let mk = |i: usize| semantic_draft("eq", &format!("k{i:03}"), format!("v{i}").as_bytes());
+    let (mut a, capa, _opa, _da) = batch_store();
+    a.remember_batch((0..50).map(mk).collect(), &capa).unwrap();
+    let (mut b, capb, _opb, _db) = batch_store();
+    for i in 0..50 {
+        b.remember(mk(i), &capb).unwrap();
+    }
+    let proc = default_key_procedure();
+    for i in 0..50 {
+        let k = theme_key("eq", &format!("k{i:03}"));
+        assert!(
+            a.prove_membership(&k).is_ok(),
+            "batch store missing key {i}"
+        );
+        assert!(
+            b.prove_membership(&k).is_ok(),
+            "individual store missing key {i}"
+        );
+        let q = Query {
+            logical_key: k,
+            min_tier: TrustTier::Working,
+            embedding: None,
+        };
+        assert_eq!(
+            a.recall_verified(&q, &proc, &capa).unwrap()[0].plaintext,
+            b.recall_verified(&q, &proc, &capb).unwrap()[0].plaintext,
+            "batch and individual recall the same plaintext for key {i}"
+        );
+    }
+}
+
+/// Kill/resume: a crash at any `remember_batch` write boundary leaves the store
+/// prior-valid or detectably `.incomplete` — never a partially-committed batch.
+#[test]
+fn e2e_kill_resume_remember_batch() {
+    for boundary in [
+        AFTER_BEGIN_INCOMPLETE,
+        AFTER_PERSIST_INDEX,
+        BEFORE_COMMIT_INCOMPLETE,
+    ] {
+        let (mut store, cap, operator, dir) = batch_store();
+        let base = store.current_root().unwrap().sequence;
+        test_set_pause_at(boundary);
+        let drafts: Vec<_> = (0..10)
+            .map(|i| semantic_draft("kr", &format!("k{i}"), b"v"))
+            .collect();
+        let _ = store.remember_batch(drafts, &cap); // interrupted at `boundary`
+        test_clear_pause();
+        drop(store);
+        assert_fail_closed_after_kill(&dir, &operator, base);
+    }
+}

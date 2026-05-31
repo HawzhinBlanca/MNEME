@@ -74,6 +74,16 @@ pub struct FileKeyVault {
     root: PathBuf,
     live: HashMap<KeyId, ObjectKey>,
     shredded: HashSet<KeyId>,
+    /// When `Some`, `new_key` buffers `(id, key)` records here instead of writing +
+    /// fsyncing one file each. `flush_batch` appends them all to `vault.journal` with
+    /// a SINGLE fsync — the §22 durable group-commit win (per-key fsync was ~98% of
+    /// ingest cost). Buffered keys are still inserted into `live` immediately so
+    /// `get` works mid-batch; durability arrives at `flush_batch`, which the store
+    /// calls inside the same `.incomplete`-guarded transaction (crash before flush →
+    /// transaction aborts → the buffered keys were never committed, so losing them
+    /// is harmless). Vault layout is invisible to the signed root, so this changes
+    /// no determinism digest.
+    batch: Option<Vec<(KeyId, ObjectKey)>>,
 }
 
 impl FileKeyVault {
@@ -85,7 +95,58 @@ impl FileKeyVault {
             root,
             live,
             shredded,
+            batch: None,
         })
+    }
+
+    /// Begin a batched-write window: subsequent `new_key`s buffer in memory until
+    /// [`Self::flush_batch`]. Idempotent.
+    pub fn begin_batch(&mut self) {
+        if self.batch.is_none() {
+            self.batch = Some(Vec::new());
+        }
+    }
+
+    /// Abort a batch window: drop buffered (un-journaled) keys from `live` and end
+    /// the batch. Called on transaction rollback — those keys were never durable and
+    /// belong to objects the transaction is discarding. No-op if not batching.
+    pub fn cancel_batch(&mut self) {
+        if let Some(buffered) = self.batch.take() {
+            for (id, _) in buffered {
+                self.live.remove(&id);
+            }
+        }
+    }
+
+    /// Persist all buffered keys to the append-only `vault.journal` with a single
+    /// fsync, then end the batch window. No-op if not batching.
+    pub fn flush_batch(&mut self) -> Result<(), MnemeError> {
+        let Some(buffered) = self.batch.take() else {
+            return Ok(());
+        };
+        if buffered.is_empty() {
+            return Ok(());
+        }
+        let journal = self.root.join("vault.journal");
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&journal)
+            .map_err(|e| io_error(journal.display().to_string(), e))?;
+        // Each record is fixed-width KEY_ID_LEN ‖ OBJECT_KEY_LEN so replay needs no
+        // delimiter parsing; a torn final record (crash mid-write) is ignored on load.
+        let mut buf = Vec::with_capacity(buffered.len() * (KEY_ID_LEN + OBJECT_KEY_LEN));
+        for (id, key) in &buffered {
+            buf.extend_from_slice(id);
+            buf.extend_from_slice(key);
+        }
+        file.write_all(&buf)
+            .map_err(|e| io_error(journal.display().to_string(), e))?;
+        if std::env::var("MNEME_NO_FSYNC").is_err() {
+            file.sync_all()
+                .map_err(|e| io_error(journal.display().to_string(), e))?;
+        }
+        Ok(())
     }
 
     /// Import peer key material for objects accepted by anti-entropy merge.
@@ -122,8 +183,15 @@ impl KeyVault for FileKeyVault {
             if path.exists() || self.tombstone_path(&key_id).exists() {
                 continue;
             }
-            write_key_file(&path, &key)?;
-            self.live.insert(key_id, key);
+            if let Some(buf) = self.batch.as_mut() {
+                // Batched: buffer for the single journal fsync at flush_batch; insert
+                // into `live` now so mid-batch `get`/recall works.
+                buf.push((key_id, key));
+                self.live.insert(key_id, key);
+            } else {
+                write_key_file(&path, &key)?;
+                self.live.insert(key_id, key);
+            }
             return Ok((key, key_id));
         }
     }
@@ -174,12 +242,30 @@ fn load_vault_dir(root: &Path) -> Result<(HashMap<KeyId, ObjectKey>, HashSet<Key
         let entry = entry.map_err(|e| io_error(root.display().to_string(), e))?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
+        if name == "vault.journal" {
+            continue; // replayed below, after per-file keys
+        }
         if let Some(stem) = name.strip_suffix(".shred") {
             if let Some(key_id) = hex::decode_key_id(stem) {
                 shredded.insert(key_id);
             }
         } else if let Some(key_id) = hex::decode_key_id(name) {
             let key = read_key_file(&entry.path())?;
+            live.insert(key_id, key);
+        }
+    }
+    // Replay the batched-key journal (fixed-width KEY_ID_LEN ‖ OBJECT_KEY_LEN records).
+    // A torn trailing record from a crash mid-append is silently ignored — those keys
+    // belong to an aborted (`.incomplete`) transaction and were never committed.
+    let journal = root.join("vault.journal");
+    if journal.exists() {
+        let data = fs::read(&journal).map_err(|e| io_error(journal.display().to_string(), e))?;
+        let rec = KEY_ID_LEN + OBJECT_KEY_LEN;
+        for chunk in data.chunks_exact(rec) {
+            let mut key_id = [0u8; KEY_ID_LEN];
+            key_id.copy_from_slice(&chunk[..KEY_ID_LEN]);
+            let mut key = [0u8; OBJECT_KEY_LEN];
+            key.copy_from_slice(&chunk[KEY_ID_LEN..]);
             live.insert(key_id, key);
         }
     }

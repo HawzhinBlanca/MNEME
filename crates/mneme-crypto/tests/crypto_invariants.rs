@@ -150,3 +150,44 @@ fn file_vault_persists_and_shreds_keys() {
     let err = vault.get(&key_id).unwrap_err();
     assert_eq!(err, MnemeError::Forgotten);
 }
+
+#[test]
+fn vault_batch_journal_roundtrips_durably_without_per_key_files() {
+    use mneme_crypto::FileKeyVault;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut ids = Vec::new();
+    {
+        let mut vault = FileKeyVault::new(dir.path()).expect("vault");
+        vault.begin_batch();
+        for _ in 0..50 {
+            let (_key, id) = vault.new_key().expect("new_key");
+            ids.push(id);
+            // mid-batch get works (key is live in memory before flush)
+            assert!(vault.get(&id).is_ok());
+        }
+        // Before flush: no per-key files written (batched in memory).
+        let vault_dir = dir.path().join("keys/vault");
+        let files = std::fs::read_dir(&vault_dir)
+            .map(|rd| rd.count())
+            .unwrap_or(0);
+        assert_eq!(
+            files, 0,
+            "batched keys must not write per-key files before flush"
+        );
+        vault.flush_batch().expect("flush");
+        // After flush: exactly one journal file, no per-key files.
+        let names: Vec<_> = std::fs::read_dir(&vault_dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(names, vec!["vault.journal".to_string()]);
+    }
+    // Reopen from disk: every batched key replays from the journal and decrypts.
+    let reopened = mneme_crypto::FileKeyVault::new(dir.path()).expect("reopen");
+    for id in &ids {
+        assert!(
+            reopened.get(id).is_ok(),
+            "journal key {id:?} must survive reopen"
+        );
+    }
+}

@@ -164,30 +164,26 @@ pub fn remove_object(path: &Path, id: &[u8; 32]) -> Result<(), MnemeError> {
     Ok(())
 }
 
+/// Full snapshot rewrite of `meta/key_index.json`, resetting the append-only journal
+/// (the batch path: bench seed, `remember_batch`, merge, promote). Writes the whole
+/// sidecar in ONE `atomic_write` (one fsync) instead of appending one fsync'd journal
+/// line per key — that per-entry append was O(n) fsyncs and dominated batch ingest
+/// (§22). Single-key `remember` still uses the O(1) `persist_key_index_upsert` journal
+/// append. Deterministic: `BTreeMap` entries + sorted tombstones.
 pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
     fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
-    // Keep `meta/key_index.json` as the deterministic base path, but persist
-    // mutations through an append-only journal so single-key `remember` avoids
-    // rewriting the whole sidecar on every commit.
+    let mut sidecar = KeyIndexSidecar::default();
     for (k, v) in store.key_to_object_ref() {
-        append_key_index_journal_entry(
-            path,
-            &KeyIndexJournalEntry::Upsert {
-                key: hex_encode(k),
-                object: hex_encode(v),
-            },
-        )?;
+        sidecar.entries.insert(hex_encode(k), hex_encode(v));
     }
-    for t in store.tombstones_ref() {
-        append_key_index_journal_entry(
-            path,
-            &KeyIndexJournalEntry::Tombstone {
-                key: hex_encode(&t),
-            },
-        )?;
-    }
-    Ok(())
+    let mut tombstones: Vec<String> = store.tombstones_ref().iter().map(hex_encode).collect();
+    tombstones.sort();
+    sidecar.tombstones = tombstones;
+    let data = serde_json::to_string_pretty(&sidecar)
+        .map_err(|_| MnemeError::SerializationNonCanonical)?;
+    crate::atomic::atomic_write(&meta.join("key_index.json"), data.as_bytes())?;
+    truncate_journal(path, "key_index.journal")
 }
 
 pub fn persist_key_index_upsert(
