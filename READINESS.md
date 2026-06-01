@@ -7,7 +7,23 @@
 
 ---
 
-## 0. Re-Verification Addendum (2026-05-31)
+## 0. Re-Verification Addendum (2026-06-01 — 10/10 hardening pass)
+
+Post-B6 commit `b96f0d0`: `Store` pluggable over `KeyVault`; docs reconciled in [`docs/REMAINING_ITEMS.md`](docs/REMAINING_ITEMS.md) and [`docs/HSM_KMS_ADAPTER.md`](docs/HSM_KMS_ADAPTER.md).
+
+**Hardening evidence (coordinator + agents):**
+- Forgery rejection: 19 + 9 + 5 ZK tests — exact `MnemeError` variants (`out/audit/forgery-rejection-20260531T121953Z/`)
+- Sustained fuzz: **211.4M** executions, 0 crashes (`out/fuzz/sustained-20260531T115002Z/`)
+- Cross-arch determinism: arm64 host ≡ Docker `linux/amd64` ≡ pinned golden (`out/audit/cross-arch-determinism-20260531T121907Z/`)
+- Foundation-gate ×5 on host: identical `c2b9dbfd…` (`out/audit/hardening-determinism-20260601/`)
+- Bench recall @10k: **42.958 µs** (gate `<1000 µs`)
+- Integration: `validation-lane.sh full` ×3 — see `out/readiness/hardening-integration-20260601/`
+
+**Input-gated (not unfinished code):** `MNEME_SECOND_HOST` (A1), `ANTHROPIC_API_KEY` (A2), real KMS endpoint (B6 adapter).
+
+---
+
+## 0b. Re-Verification Addendum (2026-05-31)
 
 A second adversarial pass re-ran every gate from scratch after three blockers from a prior reality check were fixed. Evidence for this pass lives under `out/audit/fix-and-reverify-20260531T142654Z/`.
 
@@ -124,7 +140,7 @@ For EVERY verifier, a hand-crafted forgery was generated to verify that the veri
 - **Log Path:** `out/readiness/final-ready-20260530/10-kill-resume-e2e.log`
 
 ### Workspace Fuzzing
-- **Status:** **100% PASS** (~27.7M executions, 0 crashes/panics).
+- **Status:** **100% PASS** (sustained campaign **211.4M** executions, 0 crashes/panics; smoke lane 6×31s in validation-lane full).
 - **Targets audited:** `dcbor_parse`, `smt_parse`, `cap_parse`, `receipt_parse`, `index_wire`, and `sync_message_parse`.
 - **Log Path:** `out/readiness/final-ready-20260530/17-fuzz-smoke.log`
 
