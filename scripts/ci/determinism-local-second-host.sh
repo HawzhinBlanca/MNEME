@@ -21,7 +21,7 @@ if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; t
   exit 1
 fi
 
-rm -rf "$OUT_A" "$OUT_B"
+mneme_ci_clean_foundation_gate_dirs "$ROOT"
 cargo run -p mneme-cli -- determinism foundation-gate --out "$OUT_A" --timestamp "$TS"
 cargo run -p mneme-cli -- determinism foundation-gate --out "$OUT_B" --timestamp "$TS"
 

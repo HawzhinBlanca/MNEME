@@ -66,8 +66,8 @@ case "$LANE" in
 
   determinism)
     if cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+      mneme_ci_clean_foundation_gate_dirs "$ROOT"
       out="$ROOT/out/ci-foundation-gate"
-      rm -rf "$out" "${out}-2"
       for run in 1 2; do
         dest="$out"
         [[ "$run" -eq 2 ]] && dest="${out}-2"
@@ -87,6 +87,7 @@ case "$LANE" in
     # One target dir for the whole full ladder (sub-lanes inherit CARGO_TARGET_DIR).
     mneme_ci_ensure_target_dir "$ROOT" full
     export MNEME_CI_LANE=full
+    mneme_ci_clean_foundation_gate_dirs "$ROOT"
     bash "$0" quick
     bash "$0" crypto
     bash "$0" tamper
