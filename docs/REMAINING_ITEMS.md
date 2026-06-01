@@ -18,14 +18,14 @@ certified single-host v0 core. Each entry states what is in-repo, what is gated,
   (`file_and_memory_vaults_have_identical_behaviour`), contract in
   [`docs/HSM_KMS_ADAPTER.md`](HSM_KMS_ADAPTER.md). TCB untouched; determinism foundation-gate
   byte-identical after refactor.
+- **A1 — cross-physical-host determinism (§17.7) — PROVEN.** Foundation-gate `RunDigest`
+  byte-identical across **macOS/arm64 ↔ Windows/x86_64** (two hosts, two OSes, two arches),
+  commit `df5997a`, 5/5 fields. See [`docs/benchmarks/XHOST_DETERMINISM_PROOF.md`](benchmarks/XHOST_DETERMINISM_PROOF.md)
+  + `scripts/ci/xhost-determinism-compare.sh`. Also fixed a real Windows durability bug
+  (`atomic.rs::sync_parent_dir` now `#[cfg(unix)]`; Windows keeps file-level `sync_all`).
+  The SSH-automated `MNEME_SECOND_HOST` CI leg remains for continuous re-verification.
 
 ## Turn-key (in-repo substitute passes; full proof unlocks with one input)
-
-- **A1 — cross-physical-host determinism (§17.7).** The `determinism-cross-runner.yml`
-  workflow has a `detect-peer` job that reads `secrets.MNEME_SECOND_HOST`, runs the real SSH
-  two-host proof when present, and otherwise runs a Docker same-kernel substitute +
-  ubuntu-vs-macOS cross-runner comparison. **To unlock:** set `MNEME_SECOND_HOST`,
-  `MNEME_DETERMINISM_SSH_KEY`, `MNEME_REMOTE_ROOT`. Nothing to build.
 
 - **A2 — live-LLM MCP agent loop.** CI runs `scripts/ci/mcp-agent-sim.sh` and
   `e2e/mcp/sdk-client.test.mjs`. The live loop is `e2e/mcp/live-agent.test.mjs` (skips
