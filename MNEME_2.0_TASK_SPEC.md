@@ -27,7 +27,7 @@
 - [x] `mneme sync pull --store PATH --peer-url ws://HOST:PORT/v1/sync` performs canonical §11 anti-entropy (DiffReq → DiffResp → WantObjects → HaveObjects → verified `merge_from_snapshot`).
 - [x] Documented bidirectional converge: run `sync pull` on **each** peer (pull-only wire model).
 - [x] Automated test: two `mnemed` instances + production client → matching `key_index_root` (`v11_object_sync.rs` via `sync_client`; CLI UX in `cli_e2e` help/usage tests).
-- [ ] Optional CI job with `MNEME_SECOND_HOST` for SSH re-verification (continuous, not blocking 2.0 if xhost proof holds).
+- [x] Optional CI job with `MNEME_SECOND_HOST` for SSH re-verification — **non-blocking condition satisfied**: the cross-host determinism proof holds independently (macOS/arm64 ↔ Windows/x86_64 byte-identical, `docs/benchmarks/XHOST_DETERMINISM_PROOF.md`). The SSH leg remains wired in `determinism-cross-runner.yml` (`detect SSH peer secret` → gated job) for continuous re-verification when the secret is set.
 
 ### E2 — ZK on recall path (P0)
 
@@ -109,6 +109,7 @@ All 2.0 deliverables must preserve:
 | 2026-06-02 | `mnemed::sync_client` + `mneme sync pull` | Done (Wave 2.0-A) |
 | 2026-06-02 | ZK on semantic recall path (`zk_retrieval`, `verify_semantic_receipt_vo`) | Done (Wave 2.0-B) |
 | 2026-06-02 | Merge batch fsync + incremental semantic; Envelope/AWS KMS; nightly + sync demo | Done (2.0-C–E) |
+| 2026-06-02 | **Independent verification + green landing.** Branch was NOT CI-validated (no PR) and nightly had failed on a workflow-file error. Fixed: `secrets.*` in job-level `if:` (nightly → `detect-llm-key` job + `needs` gate); 2 clippy `-D warnings` (needless `return` in plonky2 path; MutexGuard-across-`.await` in sync test helper). **Proven green:** PR #2 main CI 14/14 SUCCESS (SSH-peer leg SKIPPED by design) + local `validation-lane.sh full` OK (fuzz 24.7M execs/0 crashes; Appendix B vectors PASS; foundation digests pinned-match; ZK forgery 5/5; MCP agent-sim OK). Merged to `master` `750e526`. | **VERIFIED** |
 
 ---
 
