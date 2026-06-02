@@ -70,6 +70,13 @@ async fn serve(state: AppState) -> RunningServer {
     start_with_state(config, state).await.expect("start")
 }
 
+// The production client (`sync_client::pull_canonical`, CLI `mneme sync pull`) owns the
+// `Store` directly and holds no lock across `.await`. This single-task test wraps the
+// store in `AppState`'s `std::sync::Mutex`, so the guard is held across the WebSocket
+// round-trip — safe here (no other task contends the lock during the pull), but it trips
+// `clippy::await_holding_lock`. Allowed with justification rather than forcing an async
+// mutex into `AppState` for a property only this test needs.
+#[allow(clippy::await_holding_lock)]
 async fn pull_canonical(local: &AppState, peer: &RunningServer) -> usize {
     let url = format!("ws://{}/v1/sync", peer.http_addr);
     let mut store = local.store.lock().expect("lock");

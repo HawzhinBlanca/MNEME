@@ -175,7 +175,7 @@ impl SemanticIndex {
         {
             let mut receipt = SemanticRecallReceipt::new(root_bound, self.semantic_commit(), vo);
             crate::semantic_zk::try_attach_zk_retrieval(&mut receipt, query);
-            return Ok(receipt);
+            Ok(receipt)
         }
         #[cfg(not(feature = "plonky2_prover"))]
         {

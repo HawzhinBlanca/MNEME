@@ -47,11 +47,28 @@ jobs:
       - name: Envelope vault invariants
         run: cargo test -p mneme-crypto -- envelope -- --nocapture
 
+  # `secrets.*` is NOT allowed in a job-level `if:` (GitHub rejects the whole workflow
+  # file — "this run likely failed because of a workflow file issue"). Detect the secret
+  # in a step that CAN read it, surface a boolean output, and gate the live job on that.
+  detect-llm-key:
+    name: detect ANTHROPIC_API_KEY secret
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.probe.outputs.has_key }}
+    steps:
+      - id: probe
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [[ -n "$KEY" ]]; then echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else echo "has_key=false" >> "$GITHUB_OUTPUT"; fi
+
   live-mcp:
     name: Live LLM MCP loop (credential-gated)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    needs: detect-llm-key
+    if: ${{ needs.detect-llm-key.outputs.has_key == 'true' }}
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-live-mcp
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
