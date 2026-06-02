@@ -2,6 +2,7 @@
 
 use crate::commit::{SemanticMerkleTree, hash_sem_leaf};
 use crate::procedure::replay_from_candidates;
+use crate::receipt::SemanticRecallReceipt;
 use mneme_core::{MnemeError, ObjectId, Procedure, VerificationObject};
 
 /// Verify ADS backend VO: Merkle paths + deterministic procedure replay.
@@ -34,6 +35,26 @@ pub fn verify_ads_vo(
         return Err(MnemeError::ProcedureMismatch);
     }
 
+    Ok(())
+}
+
+/// Verify ADS VO plus optional ZK retrieval attachment on a semantic recall receipt.
+pub fn verify_semantic_receipt_vo(
+    receipt: &SemanticRecallReceipt,
+    proc: &Procedure,
+) -> Result<(), MnemeError> {
+    verify_ads_vo(&receipt.verification_object, &receipt.semantic_commit, proc)?;
+    if let Some(zk) = &receipt.zk_retrieval {
+        #[cfg(feature = "plonky2_prover")]
+        {
+            crate::semantic_zk::verify_zk_retrieval_attachment(zk, &receipt.verification_object)?;
+        }
+        #[cfg(not(feature = "plonky2_prover"))]
+        {
+            let _ = zk;
+            return Err(MnemeError::ZkProofInvalid);
+        }
+    }
     Ok(())
 }
 

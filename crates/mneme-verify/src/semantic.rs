@@ -7,7 +7,7 @@ use mneme_core::{
     object::OBJECT_VERSION,
 };
 use mneme_crypto::TrustConfig;
-use mneme_index::{HONESTY_NOT_EXACT_NN, SemanticRecallReceipt, verify_ads_vo};
+use mneme_index::{HONESTY_NOT_EXACT_NN, SemanticRecallReceipt, verify_semantic_receipt_vo};
 
 pub const HONESTY_PROCEDURE: &str = HONESTY_NOT_EXACT_NN;
 
@@ -29,7 +29,7 @@ pub fn verify_semantic_receipt(
     {
         return Err(MnemeError::ReceiptRootMismatch);
     }
-    verify_ads_vo(&receipt.verification_object, &root.semantic_commit, proc)
+    verify_semantic_receipt_vo(receipt, proc)
 }
 
 pub fn verify_semantic_recall(

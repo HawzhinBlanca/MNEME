@@ -1,8 +1,8 @@
 use mneme_core::MnemeError;
 use mneme_crypto::{
-    KeyPair, KeyVault, MemoryKeyVault, PAYLOAD_ALG_XCHACHA20_POLY1305, open, open_payload,
-    public_key_from_bytes, seal, seal_payload, shred_payload_key, sign_message, verify_signature,
-    verify_signature_bytes,
+    EnvelopeKeyVault, KeyPair, KeyVault, MemoryKeyVault, PAYLOAD_ALG_XCHACHA20_POLY1305, open,
+    open_payload, public_key_from_bytes, seal, seal_payload, shred_payload_key, sign_message,
+    verify_signature, verify_signature_bytes,
 };
 
 const TEST_AAD: &[u8] = b"mneme-payload-v1";
@@ -245,6 +245,34 @@ fn run_vault_parity_scenario(vault: &mut dyn KeyVault) -> Vec<String> {
     log.push(format!("flush_batch={:?}", vault.flush_batch()));
     vault.cancel_batch();
     log
+}
+
+#[test]
+fn envelope_vault_roundtrip_and_shred() {
+    let master = [0xcd; 32];
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = EnvelopeKeyVault::from_master(dir.path(), master).expect("envelope");
+    let (key, id) = vault.new_key().expect("new");
+    assert_eq!(vault.get(&id).expect("get"), key);
+    vault.shred(&id).expect("shred");
+    assert_eq!(vault.get(&id), Err(MnemeError::Forgotten));
+    // Re-open from disk: shred tombstone survives.
+    let reopened = EnvelopeKeyVault::from_master(dir.path(), master).expect("reopen");
+    assert_eq!(reopened.get(&id), Err(MnemeError::Forgotten));
+}
+
+#[test]
+fn envelope_and_memory_vaults_have_identical_behaviour() {
+    let master = [0xee; 32];
+    let mut memory = MemoryKeyVault::new();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut envelope = EnvelopeKeyVault::from_master(dir.path(), master).expect("envelope");
+    let memory_log = run_vault_parity_scenario(&mut memory);
+    let envelope_log = run_vault_parity_scenario(&mut envelope);
+    assert_eq!(
+        memory_log, envelope_log,
+        "EnvelopeKeyVault must match MemoryKeyVault observable behaviour"
+    );
 }
 
 #[test]

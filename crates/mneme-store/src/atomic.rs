@@ -1,11 +1,21 @@
 //! Chronicle-style atomic I/O: temp + fsync + rename + `.incomplete` marker (§5.8, INV-8).
 
 use mneme_core::MnemeError;
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
+    atomic_write_inner(path, data, true)
+}
+
+/// Like [`atomic_write`] but defers directory fsync until [`flush_parent_dirs`].
+pub fn atomic_write_deferred(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
+    atomic_write_inner(path, data, false)
+}
+
+fn atomic_write_inner(path: &Path, data: &[u8], sync_dir: bool) -> Result<(), MnemeError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(path, e))?;
     }
@@ -18,8 +28,30 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
         }
     }
     fs::rename(&tmp, path).map_err(|e| io_err(path, e))?;
-    if std::env::var("MNEME_NO_FSYNC").is_err() {
+    if sync_dir && std::env::var("MNEME_NO_FSYNC").is_err() {
         sync_parent_dir(path)?;
+    }
+    Ok(())
+}
+
+/// Fsync each parent directory once after a batch of [`atomic_write_deferred`] calls.
+pub fn flush_parent_dirs(
+    paths: impl IntoIterator<Item = impl AsRef<Path>>,
+) -> Result<(), MnemeError> {
+    if std::env::var("MNEME_NO_FSYNC").is_ok() {
+        return Ok(());
+    }
+    let mut seen = HashSet::new();
+    for path in paths {
+        if let Some(parent) = path.as_ref().parent() {
+            if parent.as_os_str().is_empty() {
+                continue;
+            }
+            let key = parent.to_path_buf();
+            if seen.insert(key.clone()) {
+                sync_parent_dir(&key)?;
+            }
+        }
     }
     Ok(())
 }

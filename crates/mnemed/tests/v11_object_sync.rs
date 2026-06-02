@@ -12,13 +12,23 @@ use mneme_core::{Draft, LogicalKey, MemoryKind, MnemeError};
 use mneme_crypto::KeyPair;
 use mnemed::state::RateLimiter;
 use mnemed::{AppState, RunningServer, ServerConfig, start_with_state};
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-const BYE: u8 = 0x07;
+async fn recv_binary(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> Vec<u8> {
+    loop {
+        match ws.next().await.expect("frame").expect("ok") {
+            Message::Binary(data) => return data.to_vec(),
+            _ => continue,
+        }
+    }
+}
 
 fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capability) {
     let mut store = state.store.lock().expect("lock");
@@ -60,83 +70,19 @@ async fn serve(state: AppState) -> RunningServer {
     start_with_state(config, state).await.expect("start")
 }
 
-async fn recv_binary(
-    ws: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-) -> Vec<u8> {
-    loop {
-        match ws.next().await.expect("frame").expect("ok") {
-            Message::Binary(data) => return data.to_vec(),
-            _ => continue,
-        }
-    }
-}
-
-/// Drive a full canonical §11 anti-entropy pull from `peer` into `local`:
-/// DiffReq → DiffResp → (compute local delta) → WantObjects → HaveObjects → verified merge.
-/// Returns the number of objects actually fetched over the wire.
+// The production client (`sync_client::pull_canonical`, CLI `mneme sync pull`) owns the
+// `Store` directly and holds no lock across `.await`. This single-task test wraps the
+// store in `AppState`'s `std::sync::Mutex`, so the guard is held across the WebSocket
+// round-trip — safe here (no other task contends the lock during the pull), but it trips
+// `clippy::await_holding_lock`. Allowed with justification rather than forcing an async
+// mutex into `AppState` for a property only this test needs.
+#[allow(clippy::await_holding_lock)]
 async fn pull_canonical(local: &AppState, peer: &RunningServer) -> usize {
     let url = format!("ws://{}/v1/sync", peer.http_addr);
-    let (mut ws, _) = connect_async(&url).await.expect("ws connect");
-
-    // 1) DiffReq: announce our local key-index root.
-    let local_root = {
-        let store = local.store.lock().expect("lock");
-        store.current_root().expect("root").key_index_root
-    };
-    ws.send(Message::Binary(
-        mnemed::sync::encode_diff_request(local_root)
-            .expect("diff req")
-            .into(),
-    ))
-    .await
-    .expect("send diff req");
-
-    // 2) DiffResp: the peer's divergent leaf-object summaries.
-    let diff_frame = recv_binary(&mut ws).await;
-    let summaries = mnemed::sync::decode_diff_response(&diff_frame).expect("decode diff resp");
-
-    // 3) Compute the missing delta locally — nothing else crosses the wire.
-    let local_ids: HashSet<[u8; 32]> = {
-        let store = local.store.lock().expect("lock");
-        store
-            .export_sync_manifest()
-            .object_ids
-            .into_iter()
-            .collect()
-    };
-    let want: Vec<[u8; 32]> = summaries
-        .into_iter()
-        .filter(|id| !local_ids.contains(id))
-        .collect();
-    if want.is_empty() {
-        ws.send(Message::Binary(vec![BYE].into())).await.ok();
-        return 0;
-    }
-
-    // 4) WantObjects → HaveObjects (each blob re-hashed on receipt).
-    ws.send(Message::Binary(
-        mnemed::sync::encode_want_objects_canonical(&want)
-            .expect("want")
-            .into(),
-    ))
-    .await
-    .expect("send want");
-    let have_frame = recv_binary(&mut ws).await;
-    let snapshot =
-        mnemed::sync::decode_have_objects_canonical(&have_frame).expect("decode have objects");
-    let fetched = snapshot.objects.len();
-
-    // 5) Verified CRDT merge (re-hash + writer authorization inside).
-    {
-        let mut store = local.store.lock().expect("lock");
-        store
-            .merge_from_snapshot(&snapshot)
-            .expect("merge snapshot");
-    }
-    ws.send(Message::Binary(vec![BYE].into())).await.ok();
-    fetched
+    let mut store = local.store.lock().expect("lock");
+    mnemed::sync_client::pull_canonical(&mut store, &url)
+        .await
+        .expect("pull")
 }
 
 #[tokio::test]

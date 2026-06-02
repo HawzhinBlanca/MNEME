@@ -29,7 +29,17 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("merge"))
         .stdout(predicate::str::contains("audit"))
         .stdout(predicate::str::contains("attest"))
-        .stdout(predicate::str::contains("init"));
+        .stdout(predicate::str::contains("init"))
+        .stdout(predicate::str::contains("sync"));
+}
+
+#[test]
+fn sync_pull_help_documents_peer_url() {
+    mneme()
+        .args(["sync", "pull", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("peer-url"));
 }
 
 #[test]
@@ -401,6 +411,32 @@ fn f2_replay_rollback_to_signed_snapshot_rejected_through_public_paths() {
         .assert()
         .success()
         .stdout(predicate::str::contains("VALUE-2"));
+}
+
+#[test]
+fn sync_pull_requires_peer_url() {
+    let dir = tempdir().unwrap();
+    mneme()
+        .args(["sync", "pull", dir.path().to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(2);
+}
+
+#[test]
+fn sync_pull_rejects_non_websocket_peer_url() {
+    let dir = tempdir().unwrap();
+    mneme()
+        .args([
+            "sync",
+            "pull",
+            dir.path().to_str().unwrap(),
+            "--peer-url",
+            "http://127.0.0.1:7845/v1/sync",
+        ])
+        .assert()
+        .failure()
+        .code(2);
 }
 
 #[test]

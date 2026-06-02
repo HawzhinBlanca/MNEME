@@ -340,13 +340,13 @@ fn generate_unique_key_id(
     }
 }
 
-fn random_object_key() -> ObjectKey {
+pub(crate) fn random_object_key() -> ObjectKey {
     let mut key = [0u8; OBJECT_KEY_LEN];
     crate::deterministic::fill_random("vault-object-key", &mut key);
     key
 }
 
-fn random_key_id() -> KeyId {
+pub(crate) fn random_key_id() -> KeyId {
     let mut id = [0u8; KEY_ID_LEN];
     crate::deterministic::fill_random("vault-key-id", &mut id);
     id
@@ -401,14 +401,14 @@ fn secure_delete(path: &Path) -> Result<(), MnemeError> {
     Ok(())
 }
 
-fn io_error(path: String, err: std::io::Error) -> MnemeError {
+pub(crate) fn io_error(path: String, err: std::io::Error) -> MnemeError {
     MnemeError::IoFailed {
         path,
         kind: format!("{:?}", err.kind()),
     }
 }
 
-mod hex {
+pub(crate) mod hex {
     use crate::types::{KEY_ID_LEN, KeyId};
 
     pub fn encode(bytes: &[u8]) -> String {

@@ -25,7 +25,15 @@ and exposes injection constructors alongside the default file-backed ones:
 An adapter implements `KeyVault`, then the operator wires it in:
 
 ```rust
-let vault: Box<dyn mneme_crypto::KeyVault + Send> = Box::new(MyKmsVault::connect(cfg)?);
+// Envelope (32-byte master from env — offline / CI-friendly)
+let vault: Box<dyn mneme_crypto::KeyVault + Send> =
+    Box::new(mneme_crypto::EnvelopeKeyVault::from_env(&path)?);
+
+// AWS KMS (operator bridge — repo pins Rust 1.86; AWS SDK needs ≥1.91 in-tree)
+//   eval "$(scripts/kms/dek-from-aws.sh)"   # sets MNEME_KMS_MASTER_KEY_HEX
+let vault: Box<dyn mneme_crypto::KeyVault + Send> =
+    Box::new(mneme_crypto::EnvelopeKeyVault::from_env(&path)?);
+
 let store = Store::open_with_vault(path, operator, vault)?;
 ```
 

@@ -4,6 +4,7 @@ pub mod grpc;
 pub mod http;
 pub mod state;
 pub mod sync;
+pub mod sync_client;
 pub mod unix;
 
 pub use grpc::pb;

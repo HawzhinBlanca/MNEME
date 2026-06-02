@@ -84,6 +84,11 @@ enum Commands {
     },
     /// Deterministic MST merge of two stores
     Merge { store_a: PathBuf, store_b: PathBuf },
+    /// Network anti-entropy over canonical §11 WebSocket sync (blueprint §11)
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommands,
+    },
     /// Emit a Sigstore-signable attestation over a root (§15.2)
     Attest { root: PathBuf },
     /// Initialize a new store at PATH
@@ -92,6 +97,17 @@ enum Commands {
     Determinism {
         #[command(subcommand)]
         command: DeterminismCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncCommands {
+    /// Pull peer object delta into STORE via ws://HOST/v1/sync (DiffReq/WantObjects protocol)
+    Pull {
+        store: PathBuf,
+        /// WebSocket URL of peer mnemed sync endpoint (e.g. ws://127.0.0.1:7845/v1/sync)
+        #[arg(long = "peer-url")]
+        peer_url: String,
     },
 }
 
@@ -298,6 +314,36 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("forgot key {key}");
             Ok(())
         }
+        Commands::Sync { command } => match command {
+            SyncCommands::Pull { store, peer_url } => {
+                if peer_url.trim().is_empty() {
+                    eprintln!("mneme: sync pull requires --peer-url");
+                    return Err(CliErrorKind::Usage);
+                }
+                if !peer_url.starts_with("ws://") && !peer_url.starts_with("wss://") {
+                    eprintln!("mneme: --peer-url must be a WebSocket URL (ws:// or wss://)");
+                    return Err(CliErrorKind::Usage);
+                }
+                require_store_dir(&store)?;
+                let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+                let mut mneme_store =
+                    Store::open(&store, operator).map_err(CliErrorKind::Kernel)?;
+                let rt = tokio::runtime::Runtime::new().map_err(|_| CliErrorKind::Usage)?;
+                let fetched = rt
+                    .block_on(mnemed::sync_client::pull_canonical(
+                        &mut mneme_store,
+                        &peer_url,
+                    ))
+                    .map_err(CliErrorKind::Kernel)?;
+                let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
+                println!(
+                    "sync pull ok: fetched {} object(s); key_index_root={}",
+                    fetched,
+                    hex::encode(root.key_index_root)
+                );
+                Ok(())
+            }
+        },
         Commands::Merge { store_a, store_b } => {
             require_store_dir(&store_a)?;
             require_store_dir(&store_b)?;

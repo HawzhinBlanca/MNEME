@@ -75,6 +75,57 @@ impl SemanticIndex {
         self.merkle = SemanticMerkleTree::from_entries(&pairs);
     }
 
+    /// Remove one indexed object (merge tombstone / forget path).
+    pub fn remove(&mut self, object_id: &ObjectId) -> Result<(), IndexError> {
+        if self.entries.remove(object_id.as_bytes()).is_none() {
+            return Err(IndexError::ObjectNotIndexed);
+        }
+        self.rebuild_hnsw_from_entries()?;
+        self.rebuild_merkle();
+        Ok(())
+    }
+
+    /// Incremental merge update: insert new embeddings; full rebuild only when removals occur.
+    pub fn apply_merge_delta(
+        &mut self,
+        added: &[(ObjectId, FixedPointEmbedding)],
+        removed: &[[u8; 32]],
+    ) -> Result<(), IndexError> {
+        if removed.is_empty() {
+            for (id, emb) in added {
+                if self.entries.contains_key(id.as_bytes()) {
+                    continue;
+                }
+                self.insert(*id, emb.clone())?;
+            }
+            return Ok(());
+        }
+        for id in removed {
+            self.entries.remove(id);
+        }
+        self.rebuild_hnsw_from_entries()?;
+        self.rebuild_merkle();
+        for (id, emb) in added {
+            if !self.entries.contains_key(id.as_bytes()) {
+                self.insert(*id, emb.clone())?;
+            }
+        }
+        Ok(())
+    }
+
+    fn rebuild_hnsw_from_entries(&mut self) -> Result<(), IndexError> {
+        let cap = self.entries.len().max(16);
+        let mut hnsw = HnswBackend::new(cap);
+        let mut ids: Vec<ObjectId> = self.entries.values().map(|e| e.object_id).collect();
+        ids.sort();
+        for id in ids {
+            let emb = &self.entries[id.as_bytes()].embedding;
+            hnsw.insert(id, emb)?;
+        }
+        self.hnsw = hnsw;
+        Ok(())
+    }
+
     fn sorted_entries(&self) -> Vec<IndexedEntry> {
         self.entries.values().cloned().collect()
     }
@@ -120,11 +171,20 @@ impl SemanticIndex {
         root_bound: [u8; 32],
     ) -> Result<SemanticRecallReceipt, IndexError> {
         let (_, vo) = self.search_deterministic(proc, query)?;
-        Ok(SemanticRecallReceipt::new(
-            root_bound,
-            self.semantic_commit(),
-            vo,
-        ))
+        #[cfg(feature = "plonky2_prover")]
+        {
+            let mut receipt = SemanticRecallReceipt::new(root_bound, self.semantic_commit(), vo);
+            crate::semantic_zk::try_attach_zk_retrieval(&mut receipt, query);
+            Ok(receipt)
+        }
+        #[cfg(not(feature = "plonky2_prover"))]
+        {
+            Ok(SemanticRecallReceipt::new(
+                root_bound,
+                self.semantic_commit(),
+                vo,
+            ))
+        }
     }
 
     /// Wrapped ANN approximate search (not receipt-bearing — §3 honesty boundary).
@@ -227,6 +287,28 @@ mod tests {
             .unwrap();
         let err = verify_ads_vo(&receipt.verification_object, &[0xff; 32], &proc()).unwrap_err();
         assert_eq!(err, MnemeError::IndexPathInvalid);
+    }
+
+    #[test]
+    fn apply_merge_delta_inserts_incrementally() {
+        let mut index = SemanticIndex::new();
+        let emb_a = FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap();
+        index.insert(oid(0x01), emb_a.clone()).unwrap();
+        let emb_b = FixedPointEmbedding::new(2, 0, vec![2, 0]).unwrap();
+        index.apply_merge_delta(&[(oid(0x02), emb_b)], &[]).unwrap();
+        assert_eq!(index.len(), 2);
+        let commit_before = index.semantic_commit();
+        index
+            .apply_merge_delta(
+                &[(
+                    oid(0x03),
+                    FixedPointEmbedding::new(2, 0, vec![3, 0]).unwrap(),
+                )],
+                &[],
+            )
+            .unwrap();
+        assert_eq!(index.len(), 3);
+        assert_ne!(index.semantic_commit(), commit_before);
     }
 
     #[test]
