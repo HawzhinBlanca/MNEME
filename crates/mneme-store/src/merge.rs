@@ -329,15 +329,17 @@ impl Store {
             if let Some(peer_path) = peer_vault_path {
                 copy_peer_vault_keys(peer_snapshot, peer_path, &self.objects, &mut *self.vault)?;
             }
-            // Write only newly-merged object blobs — a merge now costs O(merged)
-            // fsynced writes instead of re-fsyncing every object in the store.
-            for (id, bytes) in &self.objects {
-                if !pre_objects.contains(id) {
-                    layout::write_object(&self.path, id, bytes)?;
-                }
-            }
+            // Write only newly-merged object blobs with one directory fsync per shard
+            // (§22 merge-transaction barrier — avoids O(merged) parent-dir fsyncs).
+            let new_objects: Vec<([u8; 32], &[u8])> = self
+                .objects
+                .iter()
+                .filter(|(id, _)| !pre_objects.contains(*id))
+                .map(|(id, bytes)| (*id, bytes.as_slice()))
+                .collect();
+            layout::write_objects_batch(&self.path, &new_objects)?;
             pause::checkpoint(pause::AFTER_OBJECT_WRITE)?;
-            self.rebuild_semantic_index()?;
+            self.apply_semantic_merge_delta(&pre_objects)?;
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
             // §22 B5: one snapshot persist (O(1) fsync) for the key-index and
             // object-keys sidecars, instead of an O(merged) loop of per-key journal

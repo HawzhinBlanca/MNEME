@@ -32,12 +32,19 @@ certified single-host v0 core. Each entry states what is in-repo, what is gated,
   cleanly without `ANTHROPIC_API_KEY`). **To unlock:** `npm i @anthropic-ai/sdk`, set
   `ANTHROPIC_API_KEY` (+ `MNEME_MCP_BIN`).
 
-## Genuinely deferred (needs a real KMS/HSM endpoint — NOT stubbed)
+## Delivered (2.0 waves C–E, 2026-06-02)
 
-- **B6 (cloud/HSM adapter)** — The **kernel seam is delivered** (see above). What remains
-  is a **concrete adapter** (AWS KMS, GCP KMS, PKCS#11/HSM) validated against a **real
-  endpoint**. That cannot be proven without credentials and a target service. Stubbing a
-  KMS client that never talks to hardware would be coverage theater.
+- **2.0-C** — Merge object batch writes (`write_objects_batch`: one parent-dir fsync per
+  shard); incremental semantic index (`apply_merge_delta` on merge).
+- **2.0-D** — `EnvelopeKeyVault` + `scripts/kms/dek-from-aws.sh` (AWS KMS DEK → env master).
+  In-process `aws-sdk-kms` deferred until toolchain ≥1.91 (repo pins 1.86.0).
+- **2.0-E** — `scripts/demo/sync-two-peer-demo.sh`; `.github/workflows/mneme-2-nightly.yml`
+  (ZK semantic, envelope, optional live MCP when `ANTHROPIC_API_KEY` secret set).
+
+## Genuinely deferred (needs a real KMS/HSM endpoint for proof, not stubs)
+
+- **B6 (cloud/HSM proof)** — Adapters ship; **continuous proof** against a live
+  `AWS_KMS_KEY_ID` remains operator-gated (nightly job compiles only). GCP/PKCS#11 still open.
 
 ## Honesty boundary (unchanged)
 

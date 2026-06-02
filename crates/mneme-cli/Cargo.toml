@@ -17,6 +17,8 @@ mneme-cap.workspace = true
 mneme-store.workspace = true
 mneme-verify.workspace = true
 mneme-smt.workspace = true
+mnemed = { path = "../mnemed" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 hex.workspace = true
 rand.workspace = true
 serde.workspace = true

@@ -2,7 +2,15 @@
 
 Verifiable memory substrate for AI agents — fail-closed reads, content-addressed storage, signed roots, and typed verification receipts.
 
-See [MNEME_BLUEPRINT.md](MNEME_BLUEPRINT.md) for the full build specification.
+See [MNEME_BLUEPRINT.md](MNEME_BLUEPRINT.md) for the full build specification. The **2.0 multi-agent upgrade** task list is in [MNEME_2.0_TASK_SPEC.md](MNEME_2.0_TASK_SPEC.md).
+
+**Network sync (2.0-A):** pull a peer’s object delta over canonical §11 WebSocket sync:
+
+```bash
+mneme sync pull ./my-store --peer-url ws://127.0.0.1:7845/v1/sync
+```
+
+Run `sync pull` on **each** peer for bidirectional converge (pull-only wire model).
 
 ## Honesty boundary (§3 — not footnotes)
 
@@ -16,7 +24,7 @@ These limits appear in `MnemeError` messages (e.g. `ProcedureMismatch`, `BelowTi
 
 The opt-in `commitment_binding` feature (`zk` alias) ships a **tagged BLAKE3 binding envelope only** — it binds `(object_id, embedding_commit)` to a semantic-leaf commitment and rejects forgeries via `ZkProofInvalid`. It is **not** zero-knowledge, **not** a SNARK, and **not** Plonky2.
 
-**Plonky2/V3DB-style ZK retrieval is explicitly out of v0/90-day scope** (12-month milestone only). The `plonky2_prover` feature is a fail-closed stub: enabling it does not link a prover; `prove_plonky2_retrieval` / `verify_plonky2_retrieval` always reject. Audit deferral **B3 is closed** with zero blueprint drift on this boundary.
+**Transparent ZK retrieval** (`plonky2_prover` feature, off by default) is the **12-month / MNEME 2.0-B** path: Pedersen + Schnorr over Ristretto on stable Rust — **not** Plonky2/FRI. When enabled, semantic `recall_receipt` may attach a real zero-knowledge proof and `verify_semantic_recall` verifies it via `mneme-index` (verifier TCB unchanged). v0/90-day default remains ADS + optional BLAKE3 `commitment_binding` only.
 
 Design and API docs must never imply semantic truth, exact-NN guarantees, or SNARK/Plonky2 verification for the v0 binding path.
 

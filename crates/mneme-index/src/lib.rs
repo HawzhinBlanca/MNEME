@@ -25,6 +25,9 @@ mod commitment_binding;
 #[cfg(feature = "plonky2_prover")]
 mod plonky2_prover;
 
+#[cfg(feature = "plonky2_prover")]
+mod semantic_zk;
+
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
@@ -34,8 +37,9 @@ pub use procedure::{
     execute_procedure_p, is_key_index_procedure, procedure_id, replay_from_candidates,
 };
 pub use receipt::SemanticRecallReceipt;
+pub use receipt::ZkRetrievalAttachment;
 pub use semantic::SemanticIndex;
-pub use verify::{HONESTY_NOT_EXACT_NN, verify_ads_vo};
+pub use verify::{HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_vo};
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 
 #[cfg(feature = "commitment_binding")]

@@ -1,0 +1,85 @@
+# MNEME 2.0 heavy gates: ZK semantic path, envelope vault, optional live MCP.
+name: MNEME 2.0 nightly
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  zk-semantic:
+    name: plonky2_prover + semantic ZK recall
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-zk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme2-zk
+      - name: ZK forgery + semantic receipt tests
+        run: |
+          cargo test -p mneme-index --features plonky2_prover --test forgery_zk_audit -- --nocapture
+          cargo test -p mneme-index --features plonky2_prover --test semantic_zk_recall -- --nocapture
+
+  envelope-vault:
+    name: Envelope KeyVault (B6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-envelope
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme2-envelope
+      - name: Envelope vault invariants
+        run: cargo test -p mneme-crypto -- envelope -- --nocapture
+
+  live-mcp:
+    name: Live LLM MCP loop (credential-gated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-live-mcp
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme2-live-mcp
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: cargo build -p mneme-mcp --release
+      - name: Live agent recall over MCP (A2)
+        env:
+          MNEME_MCP_BIN: ${{ github.workspace }}/out/ci-targets/mneme2-live-mcp/release/mneme-mcp
+        run: node --test e2e/mcp/live-agent.test.mjs
+
+  kms-bridge-script:
+    name: AWS KMS CLI bridge (syntax)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: dek-from-aws.sh is executable and bash-clean
+        run: bash -n scripts/kms/dek-from-aws.sh

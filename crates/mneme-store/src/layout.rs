@@ -9,7 +9,7 @@ use mneme_smt::SparseMerkleTree;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Tombstone {
@@ -149,9 +149,28 @@ pub fn write_redaction_record(
 }
 
 pub fn write_object(path: &Path, id: &[u8; 32], bytes: &[u8]) -> Result<(), MnemeError> {
-    let hex = hex_encode(id);
-    let obj_path = path.join(format!("objects/{}/{}.cbor", &hex[..2], hex));
+    let obj_path = object_path(path, id);
     crate::atomic::atomic_write(&obj_path, bytes)
+}
+
+fn object_path(store: &Path, id: &[u8; 32]) -> PathBuf {
+    let hex = hex_encode(id);
+    store.join(format!("objects/{}/{}.cbor", &hex[..2], hex))
+}
+
+/// §22 merge barrier: write many new object blobs with one fsync per shard directory
+/// (not one `sync_parent_dir` per object — the concurrent-merge ceiling).
+pub fn write_objects_batch(store: &Path, objects: &[([u8; 32], &[u8])]) -> Result<(), MnemeError> {
+    if objects.is_empty() {
+        return Ok(());
+    }
+    let mut paths = Vec::with_capacity(objects.len());
+    for (id, bytes) in objects {
+        let obj_path = object_path(store, id);
+        crate::atomic::atomic_write_deferred(&obj_path, bytes)?;
+        paths.push(obj_path);
+    }
+    crate::atomic::flush_parent_dirs(paths)
 }
 
 #[allow(dead_code)]

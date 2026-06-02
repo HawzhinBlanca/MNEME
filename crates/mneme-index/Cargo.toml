@@ -35,6 +35,11 @@ zk = ["commitment_binding"]
 # (blueprint §3). Backend is Pedersen/Schnorr, NOT Plonky2/FRI (Plonky2 1.x is nightly-only).
 plonky2_prover = ["dep:curve25519-dalek", "dep:rand"]
 
+[[test]]
+name = "semantic_zk_recall"
+path = "tests/semantic_zk_recall.rs"
+required-features = ["plonky2_prover"]
+
 [dev-dependencies]
 hex.workspace = true
 serde_json.workspace = true

@@ -819,6 +819,28 @@ impl Store {
         Ok(())
     }
 
+    /// §22 incremental semantic rebuild on merge: O(added) inserts when no tombstones removed.
+    pub(crate) fn apply_semantic_merge_delta(
+        &mut self,
+        pre_objects: &std::collections::HashSet<[u8; 32]>,
+    ) -> Result<(), MnemeError> {
+        let mut removed = Vec::new();
+        for id in pre_objects {
+            if !self.objects.contains_key(id) {
+                removed.push(*id);
+            }
+        }
+        let mut added = Vec::new();
+        for (id, emb) in &self.embeddings {
+            if self.objects.contains_key(id) && !pre_objects.contains(id) {
+                added.push((ObjectId(*id), emb.clone()));
+            }
+        }
+        self.semantic
+            .apply_merge_delta(&added, &removed)
+            .map_err(index_err)
+    }
+
     pub(crate) fn commit_root_inner(&mut self) -> Result<(), MnemeError> {
         let prev = self
             .roots
