@@ -12,6 +12,7 @@ mod distance;
 mod error;
 mod hnsw_backend;
 mod key_index;
+mod key_index_load;
 mod procedure;
 mod receipt;
 mod semantic;
@@ -21,9 +22,13 @@ mod wire;
 #[cfg(feature = "commitment_binding")]
 mod commitment_binding;
 
+#[cfg(feature = "plonky2_prover")]
+mod plonky2_prover;
+
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
+pub use key_index_load::{load_key_index_tree, load_object_keys};
 pub use procedure::{
     IndexedEntry, PROC_DOMAIN, default_key_procedure, default_semantic_procedure,
     execute_procedure_p, is_key_index_procedure, procedure_id, replay_from_candidates,
@@ -35,11 +40,18 @@ pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 
 #[cfg(feature = "commitment_binding")]
 pub use commitment_binding::{
-    BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN, CommitmentBindingReceipt,
-    prove_binding_receipt, verify_binding_receipt,
+    B3_V0_BINDING_STATUS, BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN,
+    CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt,
 };
 
-/// ADS backend enabled; Plonky2 SNARK remains unimplemented (`commitment_binding` is BLAKE3 only).
+#[cfg(feature = "plonky2_prover")]
+pub use plonky2_prover::{
+    B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, PUBLIC_COMMIT_LEN, Plonky2RetrievalProof,
+    RetrievalWitness, ZK_BACKEND, prove_plonky2_retrieval, verify_plonky2_retrieval,
+};
+
+/// ADS backend enabled when the `ads` feature is on.
+/// Privacy path (`commitment_binding` / `zk` alias) is a tagged BLAKE3 binding envelope only — not SNARK, not Plonky2.
 #[cfg(feature = "ads")]
 pub const SEMANTIC_BACKEND_ENABLED: bool = true;
 
@@ -110,11 +122,47 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "plonky2_prover")]
+    #[test]
+    fn plonky2_prover_real_proof_verifies_and_forgeries_reject() {
+        use super::plonky2_prover::{
+            B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, RetrievalWitness, ZK_BACKEND,
+            prove_plonky2_retrieval, verify_plonky2_retrieval,
+        };
+        use mneme_core::MnemeError;
+        assert!(B3_DEFERRAL_STATUS.contains("IMPLEMENTED"));
+        assert!(PLONKY2_PROVER_HONESTY.contains("zero-knowledge"));
+        assert!(PLONKY2_PROVER_HONESTY.contains("NOT Plonky2"));
+        assert!(ZK_BACKEND.contains("no trusted setup"));
+
+        let entry = [9u8; 32];
+        let proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        assert!(!proof.proof_bytes.is_empty());
+        verify_plonky2_retrieval(&proof, &proof.public_commit).expect("verify");
+
+        // Forgery: tampering the public commitment must reject.
+        let mut wrong = proof.public_commit;
+        wrong[0] ^= 0x01;
+        assert_eq!(
+            verify_plonky2_retrieval(&proof, &wrong),
+            Err(MnemeError::ZkProofInvalid)
+        );
+
+        // Unsatisfiable witness (query != entry) cannot produce a proof.
+        let mut q = entry;
+        q[0] ^= 0x01;
+        let bad = RetrievalWitness { entry, query: q };
+        assert_eq!(
+            prove_plonky2_retrieval(&bad),
+            Err(MnemeError::ZkProofInvalid)
+        );
+    }
+
     #[cfg(feature = "commitment_binding")]
     #[test]
     fn commitment_binding_receipt_is_not_zk() {
         use super::commitment_binding::{
-            BINDING_HONESTY, prove_binding_receipt, verify_binding_receipt,
+            BINDING_ENVELOPE_TAG, BINDING_HONESTY, prove_binding_receipt, verify_binding_receipt,
         };
         let object_id = [0x01; 32];
         let embedding_commit = [0x02; 32];
@@ -122,6 +170,11 @@ mod tests {
         let receipt = prove_binding_receipt(&object_id, &embedding_commit, public_commit);
         verify_binding_receipt(&receipt, &object_id, &embedding_commit).unwrap();
         assert!(BINDING_HONESTY.contains("not zero-knowledge"));
+        assert!(BINDING_HONESTY.contains("not truth"));
+        let tag = std::str::from_utf8(BINDING_ENVELOPE_TAG).expect("utf8 tag");
+        assert!(!tag.contains("PLONKY2"));
+        assert!(!tag.contains("SNARK"));
+        assert!(!tag.contains("ZK"));
     }
 
     #[test]

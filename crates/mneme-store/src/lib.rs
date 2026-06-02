@@ -1,4 +1,7 @@
 //! MNEME store kernel: open / remember / recall_verified / forget / promote (blueprint §7).
+//!
+//! **INV-5:** Agent-facing reads use [`Store::recall_verified`] / [`Store::recall_verified_default`]
+//! only. Untrusted recall assembly is `pub(crate)` inside this crate.
 
 mod atomic;
 mod forget;
@@ -13,7 +16,7 @@ use mneme_core::{
     Draft, Entry, FixedPointEmbedding, LogicalKey, MnemeError, NodeId, ObjectId, ObjectRecord,
     PayloadEnc, Procedure, Query, Root, TrustTier, from_bytes_strict, hash_obj, to_bytes_canonical,
 };
-use mneme_crypto::FileKeyVault;
+use mneme_crypto::{FileKeyVault, KeyVault};
 use mneme_crypto::{KeyPair, TrustConfig, open_payload, seal_payload};
 use mneme_dag::DagIndex;
 use mneme_forget::{payload_aad, prove_absent as forget_prove_absent};
@@ -24,10 +27,47 @@ use mneme_smt::NonMembershipProof;
 use mneme_verify::{
     RecallContext, RecallInput, SemanticRecallInput, verify_recall, verify_semantic_recall,
 };
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+/// Upper bound on distinct (key, tier) results held by the session recall cache.
+/// Bounded so a long sweep of unique queries cannot grow it without limit; once
+/// full the slot set is reset rather than evicted one-by-one (deterministic).
+const RECALL_CACHE_CAP: usize = 256;
+
+/// §22 session verified-recall cache (K3 "cache last verified root + receipt for
+/// repeated queries in a session"). Holds results that already passed
+/// [`verify_recall`], keyed by `(logical_key_hash, min_tier)` and bound to the
+/// signed root they were verified under. It is **fail-closed**: any store mutation
+/// commits a new root (new `preimage_hash`), so a stale `root_hash` invalidates the
+/// whole cache on the next read — a forgotten or superseded entry can never be
+/// served. Only key-index recalls are cached; semantic recalls bypass it.
+#[derive(Default)]
+struct RecallSessionCache {
+    root_hash: [u8; 32],
+    entries: HashMap<([u8; 32], u8), Vec<Entry>>,
+}
+
+impl RecallSessionCache {
+    fn lookup(&self, root_hash: &[u8; 32], key: &([u8; 32], u8)) -> Option<Vec<Entry>> {
+        if &self.root_hash != root_hash {
+            return None;
+        }
+        self.entries.get(key).cloned()
+    }
+
+    fn store(&mut self, root_hash: [u8; 32], key: ([u8; 32], u8), entries: &[Entry]) {
+        if self.root_hash != root_hash || self.entries.len() >= RECALL_CACHE_CAP {
+            self.entries.clear();
+            self.root_hash = root_hash;
+        }
+        self.entries.insert(key, entries.to_vec());
+    }
+}
+
 pub use layout::Tombstone;
+pub use merge::{SyncManifest, SyncSnapshot};
 pub use pause::{
     AFTER_APPEND_CHECKPOINT, AFTER_BEGIN_INCOMPLETE, AFTER_KEY_INDEX, AFTER_OBJECT_WRITE,
     AFTER_PERSIST_INDEX, AFTER_WRITE_HEAD, BEFORE_COMMIT_INCOMPLETE, test_clear_pause,
@@ -45,10 +85,16 @@ pub struct Store {
     key_to_object: HashMap<[u8; 32], [u8; 32]>,
     object_keys: HashMap<[u8; 32], LogicalKey>,
     embeddings: HashMap<[u8; 32], FixedPointEmbedding>,
-    vault: FileKeyVault,
+    /// B6: the per-object key vault is abstracted behind the [`KeyVault`] trait so a
+    /// future HSM/KMS adapter is a drop-in (`*_with_vault` constructors) with no
+    /// kernel change. `+ Send` keeps `Store` usable inside `Arc<Mutex<Store>>` across
+    /// `tokio::spawn` (mnemed). The vault is outside the verifier TCB — it gates only
+    /// payload-key availability, never whether a recall verifies against the root.
+    vault: Box<dyn KeyVault + Send>,
     roots: Vec<Root>,
     hlc: mneme_core::Hlc,
     sequence: u64,
+    recall_cache: RefCell<RecallSessionCache>,
 }
 
 pub struct Recall {
@@ -60,6 +106,18 @@ pub struct Recall {
 
 impl Store {
     pub fn create(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
+        let vault = Box::new(FileKeyVault::new(path)?);
+        Self::create_with_vault(path, operator, vault)
+    }
+
+    /// B6 HSM/KMS seam: create a store backed by a caller-supplied [`KeyVault`].
+    /// The default ([`Store::create`]) uses the on-disk [`FileKeyVault`]; a KMS/HSM
+    /// adapter is injected here with no kernel change. See `docs/HSM_KMS_ADAPTER.md`.
+    pub fn create_with_vault(
+        path: &Path,
+        operator: KeyPair,
+        vault: Box<dyn KeyVault + Send>,
+    ) -> Result<Self, MnemeError> {
         layout::init_store(path)?;
         let trust = TrustConfig::new(operator.public_key_bytes());
         let node_id = NodeId::from_bytes([0x01; 16]);
@@ -74,22 +132,78 @@ impl Store {
             key_to_object: HashMap::new(),
             object_keys: HashMap::new(),
             embeddings: HashMap::new(),
-            vault: FileKeyVault::new(path)?,
+            vault,
             roots: Vec::new(),
             hlc: mneme_core::Hlc::zero(node_id),
             sequence: 0,
+            recall_cache: RefCell::new(RecallSessionCache::default()),
         };
         store.commit_root()?;
         Ok(store)
     }
 
     pub fn open(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
+        Self::open_pinned(path, operator, None)
+    }
+
+    /// Cold-open with an optional operator-supplied trusted root pin (§2.4 residual).
+    ///
+    /// INV-6 / `Store::open` already reject the *disk-detectable* A-REPLAY rollback
+    /// (a HEAD below an on-disk signed checkpoint). The remaining variant — an
+    /// attacker who **deletes** the newer checkpoint and rolls the entire store back
+    /// to a self-consistent older snapshot — is byte-indistinguishable from a
+    /// legitimately-older store and cannot be rejected from disk alone. When the
+    /// operator carries the expected HEAD `preimage_hash` out-of-band and passes it
+    /// here, a mismatch is rejected as `RootReplayed`, closing that residual.
+    pub fn open_pinned(
+        path: &Path,
+        operator: KeyPair,
+        pinned_root: Option<[u8; 32]>,
+    ) -> Result<Self, MnemeError> {
+        let vault = Box::new(FileKeyVault::new(path)?);
+        Self::open_pinned_with_vault(path, operator, pinned_root, vault)
+    }
+
+    /// B6 HSM/KMS seam: open with a caller-supplied [`KeyVault`]. Same A-REPLAY /
+    /// INV-6 cold-open checks as [`Store::open_pinned`]; only the key backend differs.
+    pub fn open_with_vault(
+        path: &Path,
+        operator: KeyPair,
+        vault: Box<dyn KeyVault + Send>,
+    ) -> Result<Self, MnemeError> {
+        Self::open_pinned_with_vault(path, operator, None, vault)
+    }
+
+    fn open_pinned_with_vault(
+        path: &Path,
+        operator: KeyPair,
+        pinned_root: Option<[u8; 32]>,
+        vault: Box<dyn KeyVault + Send>,
+    ) -> Result<Self, MnemeError> {
         layout::check_incomplete(path)?;
-        let trust = TrustConfig::new(operator.public_key_bytes());
+        let mut trust = TrustConfig::new(operator.public_key_bytes());
         let state = layout::load_state(path)?;
         let stored = layout::read_head(path)?;
         stored.verify_signature(&operator.verifying_key())?;
+        if let Some(expected) = pinned_root {
+            if stored.preimage_hash != expected {
+                return Err(MnemeError::RootReplayed);
+            }
+        }
+        // A-REPLAY / INV-6: reject a cold open whose HEAD has been rolled back below
+        // an on-disk signed checkpoint, and pin the log's max HLC as the replay floor
+        // (mirrors `verify_store`; the `.incomplete` guard above covers the
+        // append→write_head crash window so this only fires on genuine rollback).
         let root = stored.to_root();
+        if let Some((max_seq, max_hlc)) =
+            mneme_root::max_signed_checkpoint(path, &trust.operator_keys)?
+        {
+            if max_seq > stored.sequence {
+                return Err(MnemeError::RootReplayed);
+            }
+            trust.last_seen_hlc = Some(max_hlc);
+        }
+        mneme_root::check_replay(&root, trust.last_seen_hlc)?;
         let mut store = Self {
             path: path.to_path_buf(),
             operator,
@@ -101,10 +215,11 @@ impl Store {
             key_to_object: state.key_to_object,
             object_keys: state.object_keys,
             embeddings: state.embeddings,
-            vault: FileKeyVault::new(path)?,
+            vault,
             roots: vec![root.clone()],
             hlc: state.hlc,
             sequence: stored.sequence,
+            recall_cache: RefCell::new(RecallSessionCache::default()),
         };
         store.rebuild_semantic_index()?;
         Ok(store)
@@ -140,18 +255,23 @@ impl Store {
         pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
         let result = (|| -> Result<(ObjectId, Root), MnemeError> {
             let (id, _) = self.apply_remember_draft(&draft, cap, tier, true, true)?;
-            let key_hash = LogicalKey {
+            let logical_key = LogicalKey {
                 namespace: draft.namespace.clone(),
                 name: draft.logical_name.clone(),
-            }
-            .hash();
+            };
+            let key_hash = logical_key.hash();
+            // Incremental sidecar persistence: append-only journal entries instead
+            // of an O(n) `object_keys.json`/`embeddings.json` rewrite per write
+            // (§22 K5). Replay on open reconstructs the maps (`load_state`).
             layout::persist_key_index_upsert(&self.path, &key_hash, id.as_bytes())?;
-            layout::persist_object_keys(&self.path, self)?;
-            layout::persist_embeddings(&self.path, self)?;
+            layout::persist_object_keys_upsert(&self.path, id.as_bytes(), &logical_key)?;
+            if let Some(emb) = draft.embedding.as_ref() {
+                layout::persist_embeddings_upsert(&self.path, id.as_bytes(), emb)?;
+            }
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.commit_root_inner()?;
             pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
-            Ok((id, self.current_root()))
+            Ok((id, self.current_root()?))
         })();
 
         match result {
@@ -183,6 +303,11 @@ impl Store {
         let tier = cap.default_tier();
         layout::begin_transaction(&self.path)?;
         let result = (|| -> Result<(), MnemeError> {
+            // §22 durable group-commit: batch the per-object vault keys into one
+            // journal fsync instead of one fsync per key (~98% of ingest cost). Done
+            // inside the closure so a vault that fails to open a batch window aborts
+            // the transaction via the error arm below (no leaked `.incomplete`).
+            self.vault.begin_batch()?;
             let mut ids = Vec::with_capacity(count);
             for i in 0..count {
                 let draft = Draft {
@@ -194,6 +319,118 @@ impl Store {
                     session: [0x42; 16],
                     trust_tier: None,
                     embedding: None,
+                };
+                let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
+                ids.push(id);
+            }
+            self.vault.flush_batch()?;
+            self.dag.seed_independent_heads(&ids)?;
+            self.key_index.tree_mut().rebuild_root_cache();
+            layout::persist_key_index(&self.path, self)?;
+            layout::persist_object_keys(&self.path, self)?;
+            layout::persist_embeddings(&self.path, self)?;
+            self.commit_root_inner()?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => layout::commit_transaction(&self.path),
+            Err(MnemeError::IncompleteTransaction) => {
+                self.vault.cancel_batch();
+                Err(MnemeError::IncompleteTransaction)
+            }
+            Err(e) => {
+                self.vault.cancel_batch();
+                let _ = layout::abort_transaction(&self.path);
+                Err(e)
+            }
+        }
+    }
+
+    /// Durable batch ingest (§22 group-commit): apply many drafts in ONE atomic
+    /// `.incomplete`-guarded transaction with a single vault-key journal fsync and a
+    /// single root commit, instead of one full transaction (≈5 fsyncs) per entry.
+    /// Crash-safe: a crash before commit leaves `.incomplete` → cold open rejects and
+    /// the whole batch rolls back. Objects are durably written (per-object content
+    /// fsync) so committed entries survive; the win is amortizing the per-key,
+    /// checkpoint, HEAD, and sidecar fsyncs across the batch. Returns the new root.
+    pub fn remember_batch(
+        &mut self,
+        drafts: Vec<Draft>,
+        cap: &Capability,
+    ) -> Result<Root, MnemeError> {
+        self.verify_cap(cap)?;
+        for d in &drafts {
+            if !cap.permits_write(&d.namespace, d.kind) {
+                return Err(MnemeError::CapDenied);
+            }
+        }
+        layout::begin_transaction(&self.path)?;
+        let result = (|| -> Result<Root, MnemeError> {
+            self.vault.begin_batch()?;
+            pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
+            for draft in &drafts {
+                let tier = draft.trust_tier.unwrap_or_else(|| cap.default_tier());
+                self.apply_remember_draft(draft, cap, tier, true, true)?;
+            }
+            self.vault.flush_batch()?;
+            // One full sidecar persist for the whole batch (not per entry).
+            self.key_index.tree_mut().rebuild_root_cache();
+            layout::persist_key_index(&self.path, self)?;
+            layout::persist_object_keys(&self.path, self)?;
+            layout::persist_embeddings(&self.path, self)?;
+            pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
+            self.commit_root_inner()?;
+            pause::checkpoint(pause::BEFORE_COMMIT_INCOMPLETE)?;
+            self.current_root()
+        })();
+        match result {
+            Ok(root) => {
+                layout::commit_transaction(&self.path)?;
+                Ok(root)
+            }
+            Err(MnemeError::IncompleteTransaction) => {
+                self.vault.cancel_batch();
+                Err(MnemeError::IncompleteTransaction)
+            }
+            Err(e) => {
+                self.vault.cancel_batch();
+                let _ = layout::abort_transaction(&self.path);
+                Err(e)
+            }
+        }
+    }
+
+    /// Batch seed for the §22 / F-7 semantic-recall bench only (not production API).
+    /// Like [`Store::bench_populate_semantic_entries`] but attaches a distinct
+    /// [`bench_embedding`] to every entry so they land in the HNSW semantic index
+    /// and the semantic (ANN) `recall_verified` path is exercisable under load.
+    /// One transaction / one root commit; no per-entry fsync.
+    #[doc(hidden)]
+    pub fn bench_populate_embedded_entries(
+        &mut self,
+        namespace: &str,
+        count: usize,
+        dim: u32,
+        cap: &Capability,
+    ) -> Result<(), MnemeError> {
+        self.verify_cap(cap)?;
+        if !cap.permits_write(namespace, mneme_core::MemoryKind::Semantic) {
+            return Err(MnemeError::CapDenied);
+        }
+        let tier = cap.default_tier();
+        layout::begin_transaction(&self.path)?;
+        let result = (|| -> Result<(), MnemeError> {
+            let mut ids = Vec::with_capacity(count);
+            for i in 0..count {
+                let draft = Draft {
+                    namespace: namespace.into(),
+                    logical_name: format!("key-{i:05}"),
+                    kind: mneme_core::MemoryKind::Semantic,
+                    body: b"x".to_vec(),
+                    parent_ids: vec![],
+                    session: [0x42; 16],
+                    trust_tier: None,
+                    embedding: Some(bench_embedding(i, dim)?),
                 };
                 let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
                 ids.push(id);
@@ -234,7 +471,7 @@ impl Store {
             namespace: draft.namespace.clone(),
             name: draft.logical_name.clone(),
         };
-        let payload_enc = seal_payload(&mut self.vault, &draft.body, &payload_aad(&key))?;
+        let payload_enc = seal_payload(&mut *self.vault, &draft.body, &payload_aad(&key))?;
 
         let record = ObjectRecord {
             version: mneme_core::object::OBJECT_VERSION,
@@ -274,12 +511,31 @@ impl Store {
         Ok((id, id_bytes))
     }
 
+    /// Fail-closed recall: untrusted index fetch plus [`verify_recall`] / semantic gate (INV-5).
     pub fn recall_verified(
         &self,
         query: &Query,
         proc: &Procedure,
         cap: &Capability,
     ) -> Result<Vec<Entry>, MnemeError> {
+        // Authorize once here (cap signature + read scope); the internal `recall`
+        // assembly no longer re-verifies, so neither cache hits nor misses pay a
+        // double cap check on the hot path.
+        self.authorize_read(query, cap)?;
+        // §22 K3 session cache: serve a repeated key-index query from the last
+        // verified result while the signed root is unchanged. Fail-closed — any
+        // store mutation rotates the signed root and invalidates the cache.
+        let cache_key = if mneme_index::is_key_index_procedure(proc) {
+            let root_hash = self.current_root()?.preimage_hash;
+            let key = (query.logical_key.hash(), query.min_tier.as_u8());
+            if let Some(entries) = self.recall_cache.borrow().lookup(&root_hash, &key) {
+                return Ok(entries);
+            }
+            Some((root_hash, key))
+        } else {
+            None
+        };
+
         let recall = self.recall(query, proc, cap)?;
         let previous_root = self.roots.get(self.roots.len().wrapping_sub(2));
         if let Some(receipt) = recall.receipt {
@@ -302,6 +558,11 @@ impl Store {
             };
             let mut entries = verify_recall(&input, query, &self.trust, &ctx)?;
             self.decrypt_entries(&mut entries)?;
+            if let Some((root_hash, key)) = cache_key {
+                self.recall_cache
+                    .borrow_mut()
+                    .store(root_hash, key, &entries);
+            }
             return Ok(entries);
         }
         if let Some(semantic_receipt) = recall.semantic_receipt {
@@ -329,6 +590,29 @@ impl Store {
             return Ok(entries);
         }
         Err(MnemeError::ReceiptRootMismatch)
+    }
+
+    /// Benchmark-only: run the untrusted recall assembly (index fetch + membership
+    /// proof build) WITHOUT the `verify_recall` gate, so a caller can isolate the
+    /// §22 hot-path verification overhead (`recall_verified` minus `recall`). Not a
+    /// production API: this path is fail-open and must never be exposed to agents.
+    #[doc(hidden)]
+    pub fn bench_recall_raw(&self, query: &Query, cap: &Capability) -> Result<(), MnemeError> {
+        self.authorize_read(query, cap)?;
+        let proc = mneme_index::default_key_procedure();
+        let recall = self.recall(query, &proc, cap)?;
+        std::hint::black_box(&recall);
+        Ok(())
+    }
+
+    /// Read authorization shared by all verified-recall entry points: cap
+    /// signature validity plus read scope for the query's namespace/tier (§7).
+    fn authorize_read(&self, query: &Query, cap: &Capability) -> Result<(), MnemeError> {
+        self.verify_cap(cap)?;
+        if !cap.permits_read(&query.logical_key.namespace, query.min_tier) {
+            return Err(MnemeError::CapDenied);
+        }
+        Ok(())
     }
 
     /// Fail-closed recall with default key-index procedure (adoption-layer compat).
@@ -368,7 +652,7 @@ impl Store {
             .ok_or(MnemeError::ObjectTampered)?;
         let mut record: ObjectRecord = from_bytes_strict(&bytes)?;
         if TrustTier::from_u8(record.trust_tier)? >= to {
-            return Ok(self.current_root());
+            return self.current_root();
         }
         record.trust_tier = to.as_u8();
         self.hlc.tick_local(self.hlc.wall_ms.saturating_add(1));
@@ -402,7 +686,7 @@ impl Store {
             layout::persist_embeddings(&self.path, self)?;
             self.rebuild_semantic_index()?;
             self.commit_root_inner()?;
-            Ok(self.current_root())
+            self.current_root()
         })();
 
         match result {
@@ -429,7 +713,7 @@ impl Store {
     }
 
     pub fn head(&self) -> Result<(Root, Option<Root>), MnemeError> {
-        let current = self.current_root();
+        let current = self.current_root()?;
         let previous = if self.roots.len() > 1 {
             Some(self.roots[self.roots.len() - 2].clone())
         } else {
@@ -438,8 +722,11 @@ impl Store {
         Ok((current, previous))
     }
 
-    pub fn current_root(&self) -> Root {
-        self.roots.last().cloned().expect("genesis root")
+    pub fn current_root(&self) -> Result<Root, MnemeError> {
+        self.roots
+            .last()
+            .cloned()
+            .ok_or(MnemeError::RootInconsistent)
     }
 
     pub fn tamper_object_bytes(&mut self, id: &[u8; 32]) -> Result<(), MnemeError> {
@@ -511,7 +798,7 @@ impl Store {
                 .get(entry.id.as_bytes())
                 .ok_or(MnemeError::SchemaDrift)?;
             entry.plaintext = open_payload(
-                &self.vault,
+                &*self.vault,
                 &entry.record.payload_enc,
                 &payload_aad(logical_key),
             )?;
@@ -564,6 +851,28 @@ impl Store {
     fn verify_cap(&self, cap: &Capability) -> Result<(), MnemeError> {
         cap.verify(&self.operator, &self.hlc)
     }
+}
+
+/// Deterministic, well-spread embedding for the §22 / F-7 semantic bench: a
+/// `dim`-wide fixed-point vector whose components are a reproducible hash spread of
+/// `i` across `[-1024, 1024)`. Spreading across all dims (rather than a near-collinear
+/// vector) keeps the HNSW index non-degenerate so populate stays ~linear, while
+/// determinism means a query reusing entry `m`'s vector resolves to `m` as the exact
+/// nearest neighbour. `dim >= 1`.
+#[doc(hidden)]
+pub fn bench_embedding(i: usize, dim: u32) -> Result<FixedPointEmbedding, MnemeError> {
+    if dim == 0 {
+        return Err(MnemeError::SchemaDrift);
+    }
+    let mut components = vec![0i16; dim as usize];
+    for (d, slot) in components.iter_mut().enumerate() {
+        // Knuth-style multiplicative mix per (i, dim) — deterministic, no RNG state.
+        let mixed = (i as u64)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add((d as u64).wrapping_mul(0x632B_E593_7F4A_1C97));
+        *slot = ((mixed >> 17) % 2048) as i16 - 1024;
+    }
+    FixedPointEmbedding::new(dim, 0, components)
 }
 
 fn provenance_objects_for_bytes(

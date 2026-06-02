@@ -286,6 +286,16 @@ pub struct Draft {
 pub struct Entry {
     pub id: ObjectId,
     pub record: ObjectRecord,
+    /// Decrypted payload **only after** the store layer (`Store::recall_verified`
+    /// → `decrypt_entries`) AEAD-opens it against the per-key AAD. As returned by
+    /// the verifier TCB (`mneme_verify::verify_recall` / `verify_semantic_recall`)
+    /// this still holds the AEAD **ciphertext** (`record.payload_enc.body`): the
+    /// key vault is deliberately outside the budgeted TCB (§17.6), so the verifier
+    /// proves integrity / provenance / authorization but never decrypts (F-6). A
+    /// direct consumer of the public TCB entry points therefore receives ciphertext
+    /// here and must not treat it as readable plaintext. The field name is frozen
+    /// by the §20.3 interface freeze; the trust boundary is documented rather than
+    /// renamed. (`Store::recall_verified` is the only agent-facing read — INV-5.)
     pub plaintext: Vec<u8>,
 }
 

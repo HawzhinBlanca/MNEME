@@ -9,7 +9,6 @@ use mneme_core::{
 use mneme_crypto::TrustConfig;
 use mneme_index::{HONESTY_NOT_EXACT_NN, SemanticRecallReceipt, verify_ads_vo};
 
-/// Honesty boundary for procedure-faithful semantic receipts (§3).
 pub const HONESTY_PROCEDURE: &str = HONESTY_NOT_EXACT_NN;
 
 pub struct SemanticRecallInput {
@@ -17,7 +16,6 @@ pub struct SemanticRecallInput {
     pub root: Root,
 }
 
-/// Verify `SemanticRecallReceipt` + ADS VO against signed root (§9.3).
 pub fn verify_semantic_receipt(
     receipt: &SemanticRecallReceipt,
     root: &Root,
@@ -34,7 +32,6 @@ pub fn verify_semantic_receipt(
     verify_ads_vo(&receipt.verification_object, &root.semantic_commit, proc)
 }
 
-/// Full trust gate for store `recall_verified` (objects + tier + provenance).
 pub fn verify_semantic_recall(
     input: &SemanticRecallInput,
     proc: &Procedure,

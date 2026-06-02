@@ -55,15 +55,35 @@ pub fn read_no_follow(path: &Path) -> Result<Vec<u8>, MnemeError> {
     }
 }
 
+/// Fsync the parent directory so a preceding `rename` is durable across a crash.
+///
+/// This is a **Unix** durability primitive: after `rename(2)`, the directory entry
+/// must be fsync'd for the rename to survive power loss. Windows has no equivalent —
+/// a directory handle cannot be flushed via `sync_all` (it fails with "Access is
+/// denied"), and NTFS does not require it: the temp file's own `sync_all`
+/// (`FlushFileBuffers`, see `atomic_write`) plus the transactional `MoveFileEx`
+/// rename provide the durability barrier. So directory fsync is performed on Unix and
+/// is a correct no-op elsewhere — Windows keeps full *file*-level durability (we never
+/// disable `sync_all`), only the dir-entry fsync that the platform neither supports
+/// nor needs is skipped. This makes Windows a first-class store host with the same
+/// crash-safety contract, without the crash-unsafe `MNEME_NO_FSYNC` escape hatch.
 fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
-    if let Some(parent) = path.parent() {
-        if parent.as_os_str().is_empty() {
-            return Ok(());
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            if parent.as_os_str().is_empty() {
+                return Ok(());
+            }
+            let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
+            dir.sync_all().map_err(|e| io_err(parent, e))?;
         }
-        let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
-        dir.sync_all().map_err(|e| io_err(parent, e))?;
+        Ok(())
     }
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> MnemeError {

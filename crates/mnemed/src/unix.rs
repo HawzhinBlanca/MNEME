@@ -195,7 +195,7 @@ fn head(state: &AppState, cap_b64: &str) -> Result<serde_json::Value, MnemeError
     let cap = cap_from_b64(cap_b64)?;
     let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
     cap.verify(state.operator.as_ref(), store.current_hlc())?;
-    let root = store.current_root();
+    let root = store.current_root()?;
     Ok(serde_json::json!({
         "preimage_hash": hex::encode(root.preimage_hash),
         "sequence": root.sequence,
@@ -286,14 +286,14 @@ fn sync_frame(state: &AppState, bytes_b64: String) -> Result<serde_json::Value, 
     let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
     let out = match msg {
         SyncMessage::Hello { .. } => {
-            let root = store.current_root();
+            let root = store.current_root()?;
             encode_sync_message(&SyncMessage::RootProof {
                 root,
                 consistency_proof: None,
             })?
         }
         SyncMessage::HaveObjects { .. } => {
-            let root = store.current_root();
+            let root = store.current_root()?;
             encode_sync_message(&SyncMessage::RootProof {
                 root,
                 consistency_proof: None,

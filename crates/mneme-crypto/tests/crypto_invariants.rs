@@ -150,3 +150,168 @@ fn file_vault_persists_and_shreds_keys() {
     let err = vault.get(&key_id).unwrap_err();
     assert_eq!(err, MnemeError::Forgotten);
 }
+
+#[test]
+fn vault_batch_journal_roundtrips_durably_without_per_key_files() {
+    use mneme_crypto::FileKeyVault;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut ids = Vec::new();
+    {
+        let mut vault = FileKeyVault::new(dir.path()).expect("vault");
+        vault.begin_batch().expect("begin batch");
+        for _ in 0..50 {
+            let (_key, id) = vault.new_key().expect("new_key");
+            ids.push(id);
+            // mid-batch get works (key is live in memory before flush)
+            assert!(vault.get(&id).is_ok());
+        }
+        // Before flush: no per-key files written (batched in memory).
+        let vault_dir = dir.path().join("keys/vault");
+        let files = std::fs::read_dir(&vault_dir)
+            .map(|rd| rd.count())
+            .unwrap_or(0);
+        assert_eq!(
+            files, 0,
+            "batched keys must not write per-key files before flush"
+        );
+        vault.flush_batch().expect("flush");
+        // After flush: exactly one journal file, no per-key files.
+        let names: Vec<_> = std::fs::read_dir(&vault_dir)
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(names, vec!["vault.journal".to_string()]);
+    }
+    // Reopen from disk: every batched key replays from the journal and decrypts.
+    let reopened = mneme_crypto::FileKeyVault::new(dir.path()).expect("reopen");
+    for id in &ids {
+        assert!(
+            reopened.get(id).is_ok(),
+            "journal key {id:?} must survive reopen"
+        );
+    }
+}
+
+/// Drive a fixed sequence of [`KeyVault`] operations and record every observable
+/// outcome as a string. Used to assert FileKeyVault and MemoryKeyVault are
+/// behaviourally identical (B6 pluggability parity): same keys retrievable, same
+/// typed errors on missing/shredded ids, same idempotent-import and batch semantics.
+fn run_vault_parity_scenario(vault: &mut dyn KeyVault) -> Vec<String> {
+    let mut log = Vec::new();
+    let id_a = [0xa1u8; 16];
+    let key_a = [0x11u8; 32];
+    let id_b = [0xb2u8; 16];
+    let key_b = [0x22u8; 32];
+    let missing = [0xffu8; 16];
+
+    // new_key: bytes are random per vault so they cannot match across backends, but
+    // the *behaviour* must — a fresh key is retrievable and reported present.
+    let (gen_key, gen_id) = vault.new_key().expect("new_key");
+    log.push(format!(
+        "new_key_get_matches={}",
+        vault.get(&gen_id).map(|g| g == gen_key).unwrap_or(false)
+    ));
+    log.push(format!("new_key_contains={}", vault.contains(&gen_id)));
+
+    // Empty / missing id.
+    log.push(format!("get_missing={:?}", vault.get(&missing)));
+    log.push(format!("contains_missing={}", vault.contains(&missing)));
+    log.push(format!("shred_missing={:?}", vault.shred(&missing)));
+
+    // Import known material, then read it back.
+    log.push(format!("import_a={:?}", vault.import_key(&id_a, &key_a)));
+    log.push(format!("get_a={:?}", vault.get(&id_a)));
+    log.push(format!("contains_a={}", vault.contains(&id_a)));
+
+    // Re-import is idempotent (no error, value unchanged).
+    log.push(format!("reimport_a={:?}", vault.import_key(&id_a, &key_a)));
+    log.push(format!("get_a_again={:?}", vault.get(&id_a)));
+
+    // Shred A; B stays live.
+    log.push(format!("import_b={:?}", vault.import_key(&id_b, &key_b)));
+    log.push(format!("shred_a={:?}", vault.shred(&id_a)));
+    log.push(format!("get_a_after_shred={:?}", vault.get(&id_a)));
+    log.push(format!("contains_a_after_shred={}", vault.contains(&id_a)));
+    log.push(format!("get_b_still_live={:?}", vault.get(&id_b)));
+
+    // Re-importing a shredded id must fail closed with Forgotten on both backends.
+    log.push(format!(
+        "reimport_shredded_a={:?}",
+        vault.import_key(&id_a, &key_a)
+    ));
+
+    // Batch window ops succeed on both (FileKeyVault journals, MemoryKeyVault no-ops).
+    log.push(format!("begin_batch={:?}", vault.begin_batch()));
+    log.push(format!("flush_batch={:?}", vault.flush_batch()));
+    vault.cancel_batch();
+    log
+}
+
+#[test]
+fn file_and_memory_vaults_have_identical_behaviour() {
+    let mut memory = MemoryKeyVault::new();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut file = mneme_crypto::FileKeyVault::new(dir.path()).expect("file vault");
+
+    let memory_log = run_vault_parity_scenario(&mut memory);
+    let file_log = run_vault_parity_scenario(&mut file);
+
+    assert_eq!(
+        memory_log, file_log,
+        "FileKeyVault and MemoryKeyVault must produce identical observable behaviour"
+    );
+}
+
+#[test]
+fn memory_vault_import_after_shred_is_forgotten() {
+    let mut vault = MemoryKeyVault::new();
+    let (_, key_id) = vault.new_key().expect("new key");
+    vault.shred(&key_id).expect("shred");
+    let key = [0x33u8; 32];
+    assert_eq!(vault.import_key(&key_id, &key), Err(MnemeError::Forgotten));
+}
+
+#[test]
+fn vault_channel_key_is_deterministic_domain_separated_and_not_the_seed() {
+    let seed = [0x42u8; 32];
+    let a = KeyPair::from_seed(seed);
+    let b = KeyPair::from_seed(seed);
+    let other = KeyPair::from_seed([0x99u8; 32]);
+
+    // Same operator seed → identical channel key (so same-domain peers converge).
+    assert_eq!(
+        a.vault_channel_key(),
+        b.vault_channel_key(),
+        "same operator must derive the same B4 channel key"
+    );
+    // Different operator seed → different channel key (cross-domain cannot decrypt).
+    assert_ne!(
+        a.vault_channel_key(),
+        other.vault_channel_key(),
+        "different operators must derive different channel keys"
+    );
+    // The channel key must NOT equal the raw signing seed (no key reuse).
+    assert_ne!(
+        a.vault_channel_key(),
+        seed,
+        "channel key must be a derived secret, not the signing seed"
+    );
+
+    // The derived channel key actually works as an AEAD key (seal/open round-trip).
+    let key = a.vault_channel_key();
+    let nonce = mneme_crypto::random_nonce();
+    let ct = seal(&key, &nonce, b"bundle", b"mneme-vault-sync-v1").expect("seal");
+    let pt = open(&key, &nonce, &ct, b"mneme-vault-sync-v1").expect("open");
+    assert_eq!(pt, b"bundle");
+    // A foreign operator's key cannot open it.
+    assert!(
+        open(
+            &other.vault_channel_key(),
+            &nonce,
+            &ct,
+            b"mneme-vault-sync-v1"
+        )
+        .is_err(),
+        "foreign channel key must fail AEAD open"
+    );
+}

@@ -40,7 +40,7 @@ impl Store {
                     forget_shred(ShredForgetInput {
                         logical_key: &logical_key,
                         key_index: self.key_index.tree_mut(),
-                        vault: &mut self.vault,
+                        vault: &mut *self.vault,
                         object_bytes: object_bytes.as_deref(),
                     })?;
                     self.key_to_object.remove(&key_hash);
@@ -66,7 +66,12 @@ impl Store {
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
             self.hlc.tick_local(self.hlc.wall_ms.saturating_add(1));
             layout::persist_key_index_tombstone(&self.path, &key_hash)?;
-            layout::persist_embeddings(&self.path, self)?;
+            // Shred drops the per-object embedding; record it incrementally rather
+            // than rewriting the whole `embeddings.json` sidecar (§22 K5). Redact
+            // leaves embeddings unchanged.
+            if let ForgetMode::Shred = mode {
+                layout::persist_embeddings_remove(&self.path, &object_id)?;
+            }
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.rebuild_semantic_index()?;
             self.commit_root_inner()?;
@@ -76,7 +81,7 @@ impl Store {
                     logical_key: logical_key.clone(),
                     key_hash,
                 },
-                self.current_root(),
+                self.current_root()?,
             ))
         })();
 

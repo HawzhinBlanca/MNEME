@@ -26,7 +26,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Operator seed file (32 bytes hex) for store crypto; generated on first use if missing
+    /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; generated and stored on first use if absent
     #[arg(long, global = true, env = "MNEME_OPERATOR_SEED")]
     operator_seed: Option<String>,
 }
@@ -34,7 +34,13 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Fail-closed: exit 0 iff root and reachable proofs verify (§14.2)
-    Verify { store: PathBuf },
+    Verify {
+        store: PathBuf,
+        /// Optional trusted HEAD preimage hash (64 hex) carried out-of-band; rejects
+        /// a full-snapshot rollback that is otherwise indistinguishable from disk (§2.4).
+        #[arg(long = "pin-root")]
+        pin_root: Option<String>,
+    },
     /// Print provenance, writers, tiers, tombstones for a root checkpoint
     Audit { root: PathBuf },
     /// Key recall under min trust tier (verified)
@@ -50,6 +56,10 @@ enum Commands {
         /// Logical key name (defaults to --query value)
         #[arg(long)]
         key: Option<String>,
+        /// Optional trusted HEAD preimage hash (64 hex) carried out-of-band; rejects
+        /// a full-snapshot rollback that is otherwise indistinguishable from disk (§2.4).
+        #[arg(long = "pin-root")]
+        pin_root: Option<String>,
     },
     /// Remember one episodic entry by logical key
     Remember {
@@ -131,7 +141,7 @@ enum ForgetModeArg {
 enum CliErrorKind {
     Usage,
     StoreUnavailable,
-    VerifyFailed,
+    VerifyFailed(MnemeError),
     Kernel(MnemeError),
 }
 
@@ -146,7 +156,7 @@ fn main() -> ExitCode {
                     3,
                     "store kernel not available: build mneme-store and re-run".to_string(),
                 ),
-                CliErrorKind::VerifyFailed => (4, "verify failed".to_string()),
+                CliErrorKind::VerifyFailed(e) => (4, format!("verify failed: {e}")),
                 CliErrorKind::Kernel(e) => (5, format!("{e}")),
             };
             eprintln!("mneme: {msg}");
@@ -168,11 +178,18 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("initialized store at {}", path.display());
             Ok(())
         }
-        Commands::Verify { store } => {
+        Commands::Verify { store, pin_root } => {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let trust = TrustConfig::new(operator.public_key_bytes());
-            let report = verify_store(&store, &trust).map_err(|_| CliErrorKind::VerifyFailed)?;
+            let report = verify_store(&store, &trust).map_err(CliErrorKind::VerifyFailed)?;
+            // §2.4 residual: reject a full-snapshot rollback against an out-of-band pin.
+            if let Some(pin_hex) = pin_root {
+                let expected = parse_seed_hex(&pin_hex)?;
+                if report.root.preimage_hash != expected {
+                    return Err(CliErrorKind::VerifyFailed(MnemeError::RootReplayed));
+                }
+            }
             println!(
                 "verify ok: root seq {} objects {}",
                 report.root.sequence, report.object_count
@@ -185,6 +202,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             min_tier,
             namespace,
             key,
+            pin_root,
         } => {
             if query.trim().is_empty() && key.is_none() {
                 eprintln!("mneme: recall requires --query or --key");
@@ -192,8 +210,12 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             }
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let pin = match pin_root {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
             let mut mneme_store =
-                Store::open(&store, operator.clone()).map_err(CliErrorKind::Kernel)?;
+                Store::open_pinned(&store, operator.clone(), pin).map_err(CliErrorKind::Kernel)?;
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             mneme_store

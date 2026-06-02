@@ -2,6 +2,8 @@
 # MNEME validation ladder (blueprint §18).
 #
 # Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full>
+# Fuzz: full → fuzz-meaningful.sh (≥30s/target, 6 targets); quick uses kill-resume only.
+#       Standalone smoke: scripts/ci/fuzz-smoke.sh (-runs=16).
 # Parallel agents: set CARGO_TARGET_DIR=out/agent-targets/ci-harness (or per-lane default applies).
 set -euo pipefail
 
@@ -29,9 +31,11 @@ case "$LANE" in
       -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store \
       --lib --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
+    cargo test -p mneme-verify --test tcb_budget -- --nocapture
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
     bash scripts/ci/kill-resume-smoke.sh
+    bash scripts/ci/mcp-smoke.sh
     ;;
 
   crypto)
@@ -62,8 +66,8 @@ case "$LANE" in
 
   determinism)
     if cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+      mneme_ci_clean_foundation_gate_dirs "$ROOT"
       out="$ROOT/out/ci-foundation-gate"
-      rm -rf "$out" "${out}-2"
       for run in 1 2; do
         dest="$out"
         [[ "$run" -eq 2 ]] && dest="${out}-2"
@@ -83,19 +87,28 @@ case "$LANE" in
     # One target dir for the whole full ladder (sub-lanes inherit CARGO_TARGET_DIR).
     mneme_ci_ensure_target_dir "$ROOT" full
     export MNEME_CI_LANE=full
+    mneme_ci_clean_foundation_gate_dirs "$ROOT"
     bash "$0" quick
     bash "$0" crypto
     bash "$0" tamper
     bash "$0" determinism
     bash scripts/ci/determinism-local-second-host.sh
-    echo "validation-lane (full): real two-machine proof is separate and fail-closed; set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh"
+    # F-B: the full lane runs ONLY the same-host dual-workspace reproducibility
+    # check. It is explicitly NOT the §17.7 cross-host milestone, which stays
+    # UNPROVEN until run with MNEME_SECOND_HOST=<distinct host> (and, for a strict
+    # release gate, MNEME_STRICT_CROSS_HOST=1 to force fail-closed without a peer).
+    echo "validation-lane (full): §17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
+    echo "validation-lane (full): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."
     bash scripts/ci/determinism-two-machine.sh
     bash scripts/ci/cross-implementation-vectors.sh
     cargo test --workspace -- --nocapture
     bash scripts/ci/bench-recall-optional.sh
-    bash scripts/ci/fuzz-smoke.sh
+    # §17.4 sustained fuzz (≥30s/target, seeded corpus); 16-run smoke is quick-only.
+    bash scripts/ci/fuzz-meaningful.sh
     bash scripts/ci/check-test-vectors.sh
     bash scripts/ci/check-foundation-digests.sh
+    # B5: agent-session sim over live MCP stdio (not live Claude API — see mcp-agent-sim.sh).
+    bash scripts/ci/mcp-agent-sim.sh
     ;;
 
   *)

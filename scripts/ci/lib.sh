@@ -61,3 +61,11 @@ mneme_ci_bench_target_dir() {
   fi
   printf '%s/out/agent-targets/ci-bench-recall\n' "$root"
 }
+
+# Remove shared foundation-gate trees so consecutive full lanes cannot read partial run-a/.
+mneme_ci_clean_foundation_gate_dirs() {
+  local root="$1"
+  rm -rf \
+    "$root/out/ci-foundation-gate" \
+    "$root/out/ci-foundation-gate-2"
+}

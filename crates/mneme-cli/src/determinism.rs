@@ -2,7 +2,7 @@
 
 use mneme_cap::agent_cap;
 use mneme_core::{
-    Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, Receipt, TrustTier,
+    Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Receipt, TrustTier,
 };
 use mneme_crypto::KeyPair;
 use mneme_smt::NonMembershipProof;
@@ -172,13 +172,17 @@ fn build_fixture_run_inner(dir: &Path, operator_seed: [u8; 32]) -> Result<RunDig
         namespace: "fixture".into(),
         name: "alpha".into(),
     };
-    let query = Query {
-        logical_key: recall_key.clone(),
-        min_tier: TrustTier::Working,
-        embedding: None,
+    let proof = store.prove_membership(&recall_key)?;
+    let (root_before_forget, _) = store.head()?;
+    let receipt = Receipt {
+        root_bound: root_before_forget.preimage_hash,
+        logical_key: recall_key.hash(),
+        object_id: proof.value,
+        membership_proof: proof.path,
+        key_index_root: root_before_forget.key_index_root,
+        leaf_index: proof.leaf_index,
     };
-    let recall = store.recall_key_default(&query, &cap)?;
-    let receipt_digest = digest_receipt(recall.receipt.as_ref().expect("key receipt"));
+    let receipt_digest = digest_receipt(&receipt);
 
     store.forget(
         ForgetTarget::LogicalKey(LogicalKey {

@@ -18,8 +18,13 @@ verify_ads_vo, execute_procedure_p, replay_from_candidates, procedure_id
 // Merkle
 SemanticMerkleTree, hash_sem_leaf, hash_sem_internal, empty_semantic_root
 
-// Commitment binding (`commitment_binding` feature — BLAKE3 envelope, not SNARK)
-CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt, BINDING_HONESTY
+// Commitment binding (`commitment_binding` feature — tagged BLAKE3 envelope; NOT SNARK, NOT Plonky2)
+CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt
+BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN, B3_V0_BINDING_STATUS
+
+// Plonky2 (12-month only — `plonky2_prover` feature; fail-closed stub, B3 closed)
+Plonky2RetrievalProof, prove_plonky2_retrieval, verify_plonky2_retrieval
+B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY
 ```
 
 ## Invariants owned
@@ -27,6 +32,7 @@ CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt, BINDING
 - **INV-10** Deterministic procedure P (ObjectId asc traversal, integer distance, tie-break by ObjectId)
 - Semantic Merkle commitment under `semantic_commit` (§5.6, §5.7)
 - **§3 honesty**: receipts prove procedure-faithfulness, not exact-NN optimality
+- **§9.2 honesty**: `commitment_binding` proves leaf commitment only; `BINDING_ENVELOPE_TAG` must never claim Plonky2 or SNARK; `ZkProofInvalid` on this path means binding verification failed — not SNARK verification
 
 ## Proof obligations
 
@@ -41,7 +47,12 @@ CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt, BINDING
 | `ads_vo_rejects_tampered_candidate_distance` | ProcedureMismatch on tamper |
 | `honesty_message_is_non_empty` | §3 boundary documented |
 | `semantic_recall_returns_receipt_bound_results` | Stub removed; receipt path live |
-| `commitment_binding` feature tests (when enabled) | Binding roundtrip + forgery rejection (BLAKE3 only, not SNARK) |
+| `commitment_binding` feature tests (when enabled) | Binding roundtrip + forgery rejection (BLAKE3 only) |
+| `forgery_vectors_reject_typed` | `proof/vectors/receipts/zk/forgery_expectations.json` |
+| `privacy_fixture_roundtrip` | Pinned digests in `privacy_fixture.json` |
+| `envelope_tag_is_not_plonky2` | Domain tag excludes PLONKY2/SNARK claims |
+| `commitment_binding_receipt_is_not_zk` | `BINDING_HONESTY` + envelope tag honesty |
+| `plonky2_prover` feature tests (when enabled) | prove/verify fail closed; `B3_DEFERRAL_STATUS` honesty |
 
 ## Dependencies
 
@@ -54,7 +65,9 @@ CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt, BINDING
 ## Forbidden
 
 - No custom ANN implementation (§1.2)
-- No ZK prover in default build (`commitment_binding` feature off; current envelope is BLAKE3 binding only, not SNARK)
+- No linked Plonky2/SNARK prover in v0 (`commitment_binding` = BLAKE3 only; `plonky2_prover` = fail-closed stub for 12-month gate)
+- Do not label `commitment_binding` receipts as zero-knowledge, SNARK, or Plonky2 in code, docs, or vectors
+- Plonky2/V3DB ZK retrieval is **12-month milestone only** — not a v0/90-day exit criterion (B3 closed)
 - Do not change `mneme-core/src/interface.rs` without INTERFACE-CHANGE doc
 
 ## Handoff (§20.4)

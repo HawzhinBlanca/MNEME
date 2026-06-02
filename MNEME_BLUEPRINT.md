@@ -39,7 +39,7 @@ Turn AI-agent memory from an unauthenticated database into a **first-class authe
 - **No new vector-search engine.** Wrap an existing ANN index (HNSW via `hnsw_rs`, or LanceDB/Lance); add only the authenticated layer on top.
 - **No new LLM runtime or inference verification.** Bit-exact inference is Gensyn/EigenAI/Thinking Machines territory; MNEME is about memory, not compute.
 - **No blockchain and no token.** Signed roots + anti-entropy sync + an append-only checkpoint log are sufficient. On-chain anchoring of root checkpoints is an *optional* sink, never a dependency.
-- **No ZK proving system written from scratch.** The opt-in privacy backend uses an existing prover (Plonky2) behind a feature flag.
+- **No ZK proving system written from scratch.** **v0/90-day:** tagged BLAKE3 commitment-binding envelope only (`commitment_binding` / `zk` alias) — not zero-knowledge, not SNARK, not Plonky2; verify rejects forgeries. **12-month only:** Plonky2/V3DB-style ZK retrieval behind `plonky2_prover` (fail-closed stub until prover ships; B3 deferral closed).
 - **No attempt to prove exact nearest neighbors or semantic truth in v0.** See §3.
 - **No general-purpose database.** Memory entries only. If a use case needs a relational DB, MNEME is the wrong tool.
 
@@ -272,7 +272,7 @@ All blobs are content-addressed and immutable; only `roots/HEAD`, the checkpoint
 | Merkle-DAG (content-addressed) | provenance integrity, acyclicity-by-construction | **Proven** |
 | Merkle Search Tree (MST) | order-independent CRDT convergence + efficient diff | **Proven** (Auvolat & Taïani, SRDS 2019; Rust crate `merkle-search-tree`) |
 | Authenticated ANN + Verification Object | retrieval receipts (v0) | **Proven faithful-execution**, NOT exact-NN (ANNProof, FGCS 2024) |
-| Plonky2 zk circuit over committed ANN | private retrieval receipts (opt-in) | **Proven faithful-execution**, NOT exact-NN (V3DB, arXiv:2603.03065) |
+| Plonky2 zk circuit over committed ANN *(12-month only; not v0)* | private retrieval receipts (opt-in) | **12-month target:** faithful-execution privacy (V3DB, arXiv:2603.03065). **v0 shipped:** BLAKE3 `commitment_binding` only — not ZK, not SNARK; `plonky2_prover` fails closed |
 | XChaCha20-Poly1305 + key-shredding | crypto-erasure (GDPR/safety) | **Proven**; weak point is key-vault custody |
 | Chameleon hash (Ed25519-based trapdoor) | accountable in-place redaction | **Proven** machinery (Ateniese et al., EuroS&P 2017); weak point is trapdoor custody |
 | Hybrid Logical Clocks | causal ordering without trusting wall clocks | **Proven** |
@@ -377,7 +377,7 @@ mneme-dag       // provenance head-set Merkle root, acyclicity invariant, consis
    └─ depends: mneme-core, mneme-smt
 
 mneme-index     // committed ANN (HNSW/IVF), authenticated Verification Object,
-   │              retrieval-receipt prover; feature: `ads` (default) | `zk` (Plonky2)
+   │              retrieval-receipt prover; feature: `ads` (default) | `commitment_binding` (`zk` alias — BLAKE3 v0) | `plonky2_prover` (12-month stub, fail-closed)
    └─ depends: mneme-core, mneme-smt
 
 mneme-root      // RootPreimage assembly, signing, checkpoint log, HEAD pointer
@@ -456,9 +456,9 @@ fn recall(query, P, cap):
 
 The receipt proves, when verified (§10), that: (a) every visited index node's Merkle path resolves to `semantic_commit` inside the signed root; (b) re-executing the deterministic procedure `P` over exactly those nodes reproduces `result_ids`; (c) each returned object's stored `embedding_commit` matches the one used. **It does not prove these are the true nearest neighbors** (§3). ANNProof (FGCS 2024) reports VO-generation/verification/size improvements of ~160×/120×/28× over prior authenticated-ANN work at millisecond scale; use that design as the v0 reference.
 
-The opt-in `commitment_binding` feature (alias `zk`) is the privacy path for §9.2. **Target:** replace the ADS verification object with a Plonky2 proof of the same statement with the query/index hidden (V3DB design, arXiv:2603.03065). Same semantics, stronger privacy, higher prover cost.
+The opt-in `commitment_binding` feature (alias `zk`) is the **v0/90-day** privacy path for §9.2. It ships a tagged BLAKE3 commitment-binding envelope: binds `(object_id, embedding_commit)` to `public_commit`, rejects forgeries via `ZkProofInvalid`, and is **not** zero-knowledge (does not hide query or index data). Corpus: `proof/vectors/receipts/zk/`.
 
-**Implementation status (current):** Only a tagged BLAKE3 commitment-binding envelope ships today. It binds `(object_id, embedding_commit)` to `public_commit` and rejects forgeries via `ZkProofInvalid`. It is **not** zero-knowledge and does **not** hide query or index data. Do not label this envelope as Plonky2 or SNARK.
+**12-month only (B3 closed, not v0):** Plonky2/V3DB-style ZK retrieval replaces the ADS verification object with a proof of the same statement with query/index hidden (V3DB, arXiv:2603.03065). Feature `plonky2_prover` exists as a **fail-closed stub** (no prover linked; prove/verify always `ZkProofInvalid`). Do not label the v0 BLAKE3 envelope as Plonky2 or SNARK.
 
 ### 9.3 `verify_recall` — the fail-closed gate
 
@@ -477,10 +477,11 @@ fn verify_recall(recall, root, trust) -> Result<Vec<Entry>, MnemeError>:
             check merkle_verify(SEM, commit, path, root.semantic_commit) else IndexPathInvalid
         replay = procedure_execute(vo.P, vo.qc, vo.nodes)             // deterministic
         check replay.result_ids == vo.result_ids                      else ProcedureMismatch
-      ZK:
-        // Target: plonky2_verify(...). Current: commitment_binding BLAKE3 envelope only.
+      COMMITMENT_BINDING:  // feature alias `zk`; v0 BLAKE3 envelope — NOT Plonky2, NOT SNARK
         check binding_verify(receipt.proof, public_inputs{leaf_commit, public_commit})
-                                                                       else ZkProofInvalid
+                                                                       else ZkProofInvalid  // binding forgery / mismatch (§3 honesty)
+      PLONKY2:  // feature `plonky2_prover` — 12-month only; stub fails closed until prover ships
+        check plonky2_verify(...)                                          else ZkProofInvalid  // never succeeds in v0 builds
     // 4. Fetch + re-hash the actual entry bytes (content addressing)
     entries = []
     for id in recall.entries:
@@ -754,7 +755,7 @@ Workspace tests run with bounded threads to avoid OOM. Golden root/receipt diges
 - `<1 ms` verification for a 10k-entry store on M4 Max.
 - Reuses Chronicle atomic-IO primitives; determinism gate green twice.
 
-**Implementation status (2026-05-30):** criteria except `<1 ms` recall are green on single-host fixture crypto. Measured `recall_verified` @ 10k is **556–948 ms** (release isolated; O(n) SMT `auth_path`); advisory bench only — not a closed §19 perf milestone.
+**Implementation status (2026-05-31):** criteria green on single-host fixture crypto. `scripts/ci/bench-recall-optional.sh` (`tests/bench_recall.rs`, release isolated, warmed): populate 10k **109.9 s**; `recall_verified` **197.7 µs** (`out/readiness/final-ready-20260531/13-bench-recall.log`) — **PASS** strict **<1000 µs** gate (blueprint `<1 ms` @ 10k).
 
 ### 90-day (semantic + forgetting + adoption wedge)
 **Add:** `mneme-index` (ADS/ANNProof-style authenticated semantic retrieval), `mneme-forget` (crypto-shredding + tombstones), `mneme-cap` (capability tokens + tier model), `mneme-mcp` wrapper.
@@ -768,14 +769,16 @@ Workspace tests run with bounded threads to avoid OOM. Golden root/receipt diges
 **Implementation status (2026-05-30):** store generative tamper ≥120 executed; **147** verify tamper `#[test]`s; killer-demo A-DB/A-INJ green. Live MCP agent path not CI-gated.
 
 ### 12-month (multi-agent + privacy + redaction)
-**Add:** `mneme-crdt` (MST merge + anti-entropy sync), `mnemed` daemon, accountable chameleon redaction, opt-in `zk` retrieval backend (Plonky2/V3DB-style).
+**Add:** `mneme-crdt` (MST merge + anti-entropy sync), `mnemed` daemon, accountable chameleon redaction, **Plonky2/V3DB-style ZK retrieval** (`plonky2_prover` with real prover — not the v0 fail-closed stub).
 **Exit criteria:**
 - Two agents on two machines merge divergent memory deterministically to the **same root**.
 - The end-to-end demo: memory poisoning is provably non-actionable (rejected, attributed, forgettable).
 - Tamper suite ≥150 cases; cross-implementation test vectors published; determinism gate green across two machines.
-- Optional: a privacy-sensitive corpus served with ZK receipts (index contents hidden from the verifier).
+- Privacy-sensitive corpus with **true ZK receipts** (index contents hidden from verifier) — **12-month only**; v0 `commitment_binding` is BLAKE3 binding, not ZK.
 
-**Implementation status (2026-05-30):** `commitment_binding` ships tagged BLAKE3 binding only (not SNARK, not Plonky2). Two-machine same-root requires `MNEME_SECOND_HOST` (fail-closed without SSH peer). Cross-impl Appendix B vectors green via `mneme-crossref`.
+**v0/90-day (not 12-month):** `commitment_binding` (BLAKE3 envelope, forgery rejection) — **PASS**; audit **B3 CLOSED** (Plonky2 explicitly out of v0; `plonky2_prover` fails closed).
+
+**Implementation status (2026-05-31):** v0 binding + `proof/vectors/receipts/zk/` green; Plonky2 prover **not in v0 scope**. **Determinism CI:** `determinism-two-machine.sh` dual-workspace passes — **does not** close §17.7 cross-host proof (audit B4). **Operational follow-up:** `MNEME_SECOND_HOST` for SSH peer run. Cross-impl Appendix B vectors green via `mneme-crossref`.
 
 ---
 

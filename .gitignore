@@ -3,8 +3,12 @@
 /e2e/test-results/
 /playwright-report/
 /blob-report/
-package-lock.json
 # Evidence + isolated agent build trees (17G+ logs, 6G+ Cargo targets) — never commit.
 /out/
 /out/agent-targets/
 **/*.incomplete
+# Tooling / fuzz transient artifacts — never commit.
+/.cocoindex_code/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/

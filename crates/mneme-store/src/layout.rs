@@ -6,7 +6,7 @@ use mneme_dag::DagIndex;
 use mneme_index::KeyIndex;
 use mneme_root::{CheckpointLog, StoredRoot};
 use mneme_smt::SparseMerkleTree;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -29,7 +29,10 @@ pub struct LoadedState {
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct ObjectKeysSidecar {
-    entries: HashMap<String, LogicalKeySidecarEntry>,
+    // BTreeMap (not HashMap) so the on-disk snapshot is byte-deterministic across
+    // processes — the foundation gate's identity artifacts plus the full store
+    // tree must reproduce bit-for-bit (§17.7). HashMap iteration order is not.
+    entries: BTreeMap<String, LogicalKeySidecarEntry>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -38,9 +41,30 @@ struct LogicalKeySidecarEntry {
     name: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ObjectKeysJournalEntry {
+    id: String,
+    namespace: String,
+    name: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum EmbeddingJournalEntry {
+    Upsert {
+        id: String,
+        dim: u32,
+        scale: i8,
+        components: Vec<i16>,
+    },
+    Remove {
+        id: String,
+    },
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct KeyIndexSidecar {
-    entries: HashMap<String, String>,
+    entries: BTreeMap<String, String>,
     tombstones: Vec<String>,
 }
 
@@ -60,7 +84,7 @@ struct EmbeddingSidecarEntry {
 
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct EmbeddingSidecar {
-    entries: HashMap<String, EmbeddingSidecarEntry>,
+    entries: BTreeMap<String, EmbeddingSidecarEntry>,
 }
 
 pub fn init_store(path: &Path) -> Result<(), MnemeError> {
@@ -140,30 +164,26 @@ pub fn remove_object(path: &Path, id: &[u8; 32]) -> Result<(), MnemeError> {
     Ok(())
 }
 
+/// Full snapshot rewrite of `meta/key_index.json`, resetting the append-only journal
+/// (the batch path: bench seed, `remember_batch`, merge, promote). Writes the whole
+/// sidecar in ONE `atomic_write` (one fsync) instead of appending one fsync'd journal
+/// line per key — that per-entry append was O(n) fsyncs and dominated batch ingest
+/// (§22). Single-key `remember` still uses the O(1) `persist_key_index_upsert` journal
+/// append. Deterministic: `BTreeMap` entries + sorted tombstones.
 pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
     fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
-    // Keep `meta/key_index.json` as the deterministic base path, but persist
-    // mutations through an append-only journal so single-key `remember` avoids
-    // rewriting the whole sidecar on every commit.
+    let mut sidecar = KeyIndexSidecar::default();
     for (k, v) in store.key_to_object_ref() {
-        append_key_index_journal_entry(
-            path,
-            &KeyIndexJournalEntry::Upsert {
-                key: hex_encode(k),
-                object: hex_encode(v),
-            },
-        )?;
+        sidecar.entries.insert(hex_encode(k), hex_encode(v));
     }
-    for t in store.tombstones_ref() {
-        append_key_index_journal_entry(
-            path,
-            &KeyIndexJournalEntry::Tombstone {
-                key: hex_encode(&t),
-            },
-        )?;
-    }
-    Ok(())
+    let mut tombstones: Vec<String> = store.tombstones_ref().iter().map(hex_encode).collect();
+    tombstones.sort();
+    sidecar.tombstones = tombstones;
+    let data = serde_json::to_string_pretty(&sidecar)
+        .map_err(|_| MnemeError::SerializationNonCanonical)?;
+    crate::atomic::atomic_write(&meta.join("key_index.json"), data.as_bytes())?;
+    truncate_journal(path, "key_index.journal")
 }
 
 pub fn persist_key_index_upsert(
@@ -189,6 +209,10 @@ pub fn persist_key_index_tombstone(path: &Path, key_hash: &[u8; 32]) -> Result<(
     )
 }
 
+/// Full snapshot rewrite of `object_keys.json`. Resets the append-only journal so
+/// the base sidecar + journal stay consistent (used by batch/rare ops: bench seed,
+/// promote). The single-key `remember`/`merge` hot paths use the incremental
+/// `persist_object_keys_upsert` below to avoid an O(n) rewrite per op (§22 K5).
 pub fn persist_object_keys(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
     fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
@@ -204,27 +228,58 @@ pub fn persist_object_keys(path: &Path, store: &Store) -> Result<(), MnemeError>
     }
     let data = serde_json::to_string_pretty(&sidecar)
         .map_err(|_| MnemeError::SerializationNonCanonical)?;
-    crate::atomic::atomic_write(&meta.join("object_keys.json"), data.as_bytes())
+    crate::atomic::atomic_write(&meta.join("object_keys.json"), data.as_bytes())?;
+    truncate_journal(path, "object_keys.journal")
+}
+
+/// Append one object-id → logical-key mapping to `object_keys.journal` (O(1)).
+pub fn persist_object_keys_upsert(
+    path: &Path,
+    id: &[u8; 32],
+    key: &LogicalKey,
+) -> Result<(), MnemeError> {
+    let entry = ObjectKeysJournalEntry {
+        id: hex_encode(id),
+        namespace: key.namespace.clone(),
+        name: key.name.clone(),
+    };
+    let line = serde_json::to_string(&entry).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    append_journal_line(path, "object_keys.journal", &line)
 }
 
 fn load_object_keys(path: &Path) -> Result<HashMap<[u8; 32], LogicalKey>, MnemeError> {
-    let p = path.join("meta/object_keys.json");
-    if !p.exists() {
-        return Ok(HashMap::new());
-    }
-    let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
-    let sidecar: ObjectKeysSidecar =
-        serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
     let mut out = HashMap::new();
-    for (id_hex, entry) in sidecar.entries {
-        let id = parse_hex32(&id_hex)?;
-        out.insert(
-            id,
-            LogicalKey {
-                namespace: entry.namespace,
-                name: entry.name,
-            },
-        );
+    let p = path.join("meta/object_keys.json");
+    if p.exists() {
+        let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
+        let sidecar: ObjectKeysSidecar =
+            serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
+        for (id_hex, entry) in sidecar.entries {
+            let id = parse_hex32(&id_hex)?;
+            out.insert(
+                id,
+                LogicalKey {
+                    namespace: entry.namespace,
+                    name: entry.name,
+                },
+            );
+        }
+    }
+    let journal = path.join("meta/object_keys.journal");
+    if journal.exists() {
+        let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+        for line in data.lines().filter(|l| !l.trim().is_empty()) {
+            let entry: ObjectKeysJournalEntry =
+                serde_json::from_str(line).map_err(|_| MnemeError::SchemaDrift)?;
+            let id = parse_hex32(&entry.id)?;
+            out.insert(
+                id,
+                LogicalKey {
+                    namespace: entry.namespace,
+                    name: entry.name,
+                },
+            );
+        }
     }
     Ok(out)
 }
@@ -268,6 +323,8 @@ pub fn load_state(path: &Path) -> Result<LoadedState, MnemeError> {
     })
 }
 
+/// Full snapshot rewrite of `embeddings.json`; resets the journal (see
+/// `persist_object_keys`). Hot paths use the incremental helpers below.
 pub fn persist_embeddings(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
     fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
@@ -284,23 +341,71 @@ pub fn persist_embeddings(path: &Path, store: &Store) -> Result<(), MnemeError> 
     }
     let data = serde_json::to_string_pretty(&sidecar)
         .map_err(|_| MnemeError::SerializationNonCanonical)?;
-    crate::atomic::atomic_write(&meta.join("embeddings.json"), data.as_bytes())
+    crate::atomic::atomic_write(&meta.join("embeddings.json"), data.as_bytes())?;
+    truncate_journal(path, "embeddings.journal")
+}
+
+/// Append one embedding upsert to `embeddings.journal` (O(1)).
+pub fn persist_embeddings_upsert(
+    path: &Path,
+    id: &[u8; 32],
+    emb: &FixedPointEmbedding,
+) -> Result<(), MnemeError> {
+    let entry = EmbeddingJournalEntry::Upsert {
+        id: hex_encode(id),
+        dim: emb.dim,
+        scale: emb.scale,
+        components: emb.components.clone(),
+    };
+    let line = serde_json::to_string(&entry).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    append_journal_line(path, "embeddings.journal", &line)
+}
+
+/// Append one embedding removal (forget shred) to `embeddings.journal` (O(1)).
+pub fn persist_embeddings_remove(path: &Path, id: &[u8; 32]) -> Result<(), MnemeError> {
+    let entry = EmbeddingJournalEntry::Remove { id: hex_encode(id) };
+    let line = serde_json::to_string(&entry).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    append_journal_line(path, "embeddings.journal", &line)
 }
 
 fn load_embeddings(path: &Path) -> Result<HashMap<[u8; 32], FixedPointEmbedding>, MnemeError> {
-    let p = path.join("meta/embeddings.json");
-    if !p.exists() {
-        return Ok(HashMap::new());
-    }
-    let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
-    let sidecar: EmbeddingSidecar =
-        serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
     let mut out = HashMap::new();
-    for (id_hex, entry) in sidecar.entries {
-        let id = parse_hex32(&id_hex)?;
-        let emb = FixedPointEmbedding::new(entry.dim, entry.scale, entry.components)
-            .map_err(|_| MnemeError::SchemaDrift)?;
-        out.insert(id, emb);
+    let p = path.join("meta/embeddings.json");
+    if p.exists() {
+        let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
+        let sidecar: EmbeddingSidecar =
+            serde_json::from_str(&data).map_err(|_| MnemeError::SchemaDrift)?;
+        for (id_hex, entry) in sidecar.entries {
+            let id = parse_hex32(&id_hex)?;
+            let emb = FixedPointEmbedding::new(entry.dim, entry.scale, entry.components)
+                .map_err(|_| MnemeError::SchemaDrift)?;
+            out.insert(id, emb);
+        }
+    }
+    let journal = path.join("meta/embeddings.journal");
+    if journal.exists() {
+        let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+        for line in data.lines().filter(|l| !l.trim().is_empty()) {
+            let entry: EmbeddingJournalEntry =
+                serde_json::from_str(line).map_err(|_| MnemeError::SchemaDrift)?;
+            match entry {
+                EmbeddingJournalEntry::Upsert {
+                    id,
+                    dim,
+                    scale,
+                    components,
+                } => {
+                    let id = parse_hex32(&id)?;
+                    let emb = FixedPointEmbedding::new(dim, scale, components)
+                        .map_err(|_| MnemeError::SchemaDrift)?;
+                    out.insert(id, emb);
+                }
+                EmbeddingJournalEntry::Remove { id } => {
+                    let id = parse_hex32(&id)?;
+                    out.remove(&id);
+                }
+            }
+        }
     }
     Ok(out)
 }
@@ -329,7 +434,14 @@ fn append_key_index_journal_entry(
     path: &Path,
     entry: &KeyIndexJournalEntry,
 ) -> Result<(), MnemeError> {
-    let journal = path.join("meta/key_index.journal");
+    let line = serde_json::to_string(entry).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    append_journal_line(path, "key_index.journal", &line)
+}
+
+/// Append one newline-terminated record to a `meta/<name>` journal, with the same
+/// crash-safe fsync discipline as the key-index journal.
+fn append_journal_line(path: &Path, name: &str, line: &str) -> Result<(), MnemeError> {
+    let journal = path.join("meta").join(name);
     if let Some(parent) = journal.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(&journal, e))?;
     }
@@ -338,13 +450,26 @@ fn append_key_index_journal_entry(
         .append(true)
         .open(&journal)
         .map_err(|e| io_err(&journal, e))?;
-    let line = serde_json::to_string(entry).map_err(|_| MnemeError::SerializationNonCanonical)?;
     file.write_all(line.as_bytes())
         .map_err(|e| io_err(&journal, e))?;
     file.write_all(b"\n").map_err(|e| io_err(&journal, e))?;
     if std::env::var("MNEME_NO_FSYNC").is_err() {
         file.sync_all().map_err(|e| io_err(&journal, e))?;
         sync_parent_dir(&journal)?;
+    }
+    Ok(())
+}
+
+/// Drop a `meta/<name>` journal after a full snapshot rewrite of its base sidecar,
+/// keeping base + journal consistent. Replay is idempotent, so a crash between the
+/// snapshot write and this removal is safe (stale upserts re-apply the same state).
+fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
+    let journal = path.join("meta").join(name);
+    if journal.exists() {
+        fs::remove_file(&journal).map_err(|e| io_err(&journal, e))?;
+        if std::env::var("MNEME_NO_FSYNC").is_err() {
+            sync_parent_dir(&journal)?;
+        }
     }
     Ok(())
 }

@@ -2,10 +2,10 @@
 
 use assert_cmd::Command;
 use mneme_cap::agent_cap;
-use mneme_core::{Draft, MemoryKind};
+use mneme_core::{Draft, MemoryKind, MnemeError};
 use mneme_crypto::KeyPair;
 use mneme_store::{Store, test_clear_pause};
-use mneme_verify::{verify_store, verify_store_head};
+use mneme_verify::{verify_signed_head_only, verify_store};
 use predicates::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -219,10 +219,10 @@ fn head_only_verify_misses_object_tamper_full_verify_and_cli_reject() {
 
     store.tamper_object_bytes(id.as_bytes()).unwrap();
 
-    let head_report = verify_store_head(&root, &trust).expect("head-only accepts stale root");
+    let head_report = verify_signed_head_only(&root, &trust).expect("head-only accepts stale root");
     assert_eq!(
-        head_report.object_count, 0,
-        "verify_store_head must not walk persisted objects"
+        head_report.root.sequence, root.sequence,
+        "verify_signed_head_only must not walk persisted objects"
     );
 
     assert!(
@@ -258,6 +258,149 @@ fn find_first_object_cbor(store: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) {
+    for entry in WalkDir::new(src)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let rel = entry.path().strip_prefix(src).unwrap();
+        let target = dst.join(rel);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target).unwrap();
+        } else {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// F-2 (A-REPLAY / INV-6, §2.4): an A-DB adversary rolls HEAD back to a fully
+/// self-consistent older signed snapshot while the newer checkpoint is still on
+/// disk. Cold open, `mneme verify`, and `mneme recall` MUST all fail closed with
+/// `RootReplayed` — exercised through the PUBLIC paths (CLI binary + `Store::open`),
+/// not unit-test trust injection. Red before the fix (verify printed "verify ok"
+/// and recall served the stale VALUE-1); green after wiring the checkpoint-log
+/// max-sequence scan into `Store::open` / `verify_store`.
+#[test]
+fn f2_replay_rollback_to_signed_snapshot_rejected_through_public_paths() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let seed = "11".repeat(32);
+
+    mneme()
+        .args(["--operator-seed", &seed, "init", store.to_str().unwrap()])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "user",
+            "--name",
+            "secret",
+            "--body",
+            "VALUE-1",
+        ])
+        .assert()
+        .success();
+
+    // Full, self-consistent seq2 snapshot (HEAD + meta + objects + checkpoints 1..2).
+    let snapshot = dir.path().join("rolled-back");
+    copy_dir_recursive(&store, &snapshot);
+
+    // seq3: secret = VALUE-2 (advances the live store, appending roots/3.root.cbor).
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "user",
+            "--name",
+            "secret",
+            "--body",
+            "VALUE-2",
+        ])
+        .assert()
+        .success();
+
+    // Attack: drop the newer validly-signed checkpoint into the rolled-back seq2 tree.
+    fs::copy(
+        store.join("roots/3.root.cbor"),
+        snapshot.join("roots/3.root.cbor"),
+    )
+    .unwrap();
+
+    // 1) Public `mneme verify` must reject (returned exit 0 "verify ok" before F-2 fix).
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "verify",
+            snapshot.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    // 2) Public `mneme recall` must reject (served stale VALUE-1 before F-2 fix).
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "recall",
+            snapshot.to_str().unwrap(),
+            "-q",
+            "secret",
+            "--namespace",
+            "user",
+            "--min-tier",
+            "trusted",
+        ])
+        .assert()
+        .failure();
+
+    // 3) Public Store::open must fail closed with the typed replay error.
+    match Store::open(&snapshot, KeyPair::from_seed([0x11; 32])) {
+        Ok(_) => panic!("rolled-back cold open must fail closed, but Store::open succeeded"),
+        Err(e) => assert_eq!(
+            e,
+            MnemeError::RootReplayed,
+            "expected RootReplayed, got {e:?}"
+        ),
+    }
+
+    // Control (no false positive): the legitimate seq3 store still verifies and recalls VALUE-2.
+    mneme()
+        .args(["--operator-seed", &seed, "verify", store.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify ok"));
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "secret",
+            "--namespace",
+            "user",
+            "--min-tier",
+            "trusted",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("VALUE-2"));
 }
 
 #[test]

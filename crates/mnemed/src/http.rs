@@ -108,7 +108,7 @@ async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, A
         .store
         .lock()
         .map_err(|_| ApiError::internal("store lock poisoned"))?;
-    let root = store.current_root();
+    let root = store.current_root().map_err(ApiError::from_mneme)?;
     Ok(Json(HealthResponse {
         status: "ok",
         root_sequence: root.sequence,
@@ -126,7 +126,7 @@ async fn head(
         .store
         .lock()
         .map_err(|_| ApiError::internal("store lock poisoned"))?;
-    let root = store.current_root();
+    let root = store.current_root().map_err(ApiError::from_mneme)?;
     Ok(Json(HeadResponse {
         root_hash_hex: hex::encode(root.preimage_hash),
         sequence: root.sequence,
@@ -272,7 +272,7 @@ async fn prove_absent(
         .map_err(|_| ApiError::internal("store lock poisoned"))?;
     let key = LogicalKey { namespace, name };
     let proof = store.prove_absent(&key).map_err(ApiError::from_mneme)?;
-    let root = store.current_root();
+    let root = store.current_root().map_err(ApiError::from_mneme)?;
     Ok(Json(ProveAbsentResponse {
         root_hash_hex: hex::encode(proof.root),
         absent: proof.root == root.key_index_root,

@@ -3,13 +3,15 @@
   "private": true,
   "description": "E2E harness for MNEME (CLI now; browser UI when added)",
   "scripts": {
-    "test:e2e": "npm run test:e2e:cli && npm run test:e2e:ui",
+    "test:e2e": "npm run test:e2e:cli && npm run test:e2e:mcp && npm run test:e2e:ui",
     "test:e2e:cli": "node --test e2e/cli/*.test.mjs",
+    "test:e2e:mcp": "node --test e2e/mcp/*.test.mjs",
     "test:e2e:ui": "playwright test",
     "test:e2e:ui:headed": "playwright test --headed",
     "playwright:install": "playwright install chromium"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.52.0"
   }
 }

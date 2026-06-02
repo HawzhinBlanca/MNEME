@@ -22,6 +22,14 @@ name = "two_peer_sync"
 path = "tests/two_peer_sync.rs"
 
 [[test]]
+name = "two_peer_ws_sync"
+path = "tests/two_peer_ws_sync.rs"
+
+[[test]]
+name = "v11_object_sync"
+path = "tests/v11_object_sync.rs"
+
+[[test]]
 name = "unix_api"
 path = "tests/unix_api.rs"
 
@@ -58,3 +66,6 @@ tonic = { workspace = true, features = ["transport"] }
 
 [build-dependencies]
 tonic-build = "0.13"
+# Self-sufficient protoc: vendored binary so the build never depends on a
+# system `protoc` being installed (fixes CI/e2e-daemon + fresh local checkouts).
+protoc-bin-vendored = "3"

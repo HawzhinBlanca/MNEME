@@ -32,7 +32,7 @@ impl MemoryService for GrpcMemoryService {
         let store = self.state.store.lock().map_err(grpc_internal)?;
         Ok(Response::new(HealthResponse {
             status: "ok".into(),
-            root_sequence: store.current_root().sequence,
+            root_sequence: store.current_root().map_err(grpc_status_mneme)?.sequence,
         }))
     }
 
@@ -42,7 +42,7 @@ impl MemoryService for GrpcMemoryService {
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
         let store = self.state.store.lock().map_err(grpc_internal)?;
-        let root = store.current_root();
+        let root = store.current_root().map_err(grpc_status_mneme)?;
         Ok(Response::new(HeadResponse {
             root_hash_hex: hex::encode(root.preimage_hash),
             sequence: root.sequence,

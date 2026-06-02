@@ -9,7 +9,7 @@ async fn grpc_remember_recall_forget() {
         .await
         .expect("connect grpc");
 
-    let cap = mnemed::cap_to_b64(&h.agent_cap);
+    let cap = mnemed::cap_to_b64(&h.agent_cap).expect("cap b64");
 
     let remembered = client
         .remember(RememberRequest {
