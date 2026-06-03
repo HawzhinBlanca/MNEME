@@ -154,6 +154,58 @@ mod tests {
         assert_eq!(err, MnemeError::SchemaDrift);
     }
 
+    #[test]
+    fn cca_wire_rejects_garbage_bytes() {
+        let garbage_inputs: &[&[u8]] = &[b"", b"\xff", b"not-cbor", b"\xa1\x00\x00"];
+        for garbage in garbage_inputs {
+            assert!(
+                decode_context_consumption_attestation(garbage).is_err(),
+                "malformed CCA wire must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn cca_wire_rejects_unknown_field() {
+        let att = sample_attestation(0x09);
+        let good = encode_context_consumption_attestation(&att).unwrap();
+        let mut dec = Decoder::new(&good);
+        let map = dec.decode_map().unwrap();
+        let mut enc = Encoder::new();
+        enc.begin_map(map.len() as u64 + 1).unwrap();
+        for (k, v) in map {
+            let field = k.as_u64().unwrap();
+            enc.encode_unsigned(field).unwrap();
+            encode_value(&mut enc, &v).unwrap();
+        }
+        enc.encode_unsigned(99).unwrap();
+        enc.encode_bytes(&[0u8; 32]).unwrap();
+        let bad = enc.finish();
+        let err = decode_context_consumption_attestation(&bad).unwrap_err();
+        assert_eq!(err, MnemeError::UnknownField { field: 99 });
+    }
+
+    #[test]
+    fn cca_wire_rejects_non_32_byte_hashes() {
+        let att = sample_attestation(0x0a);
+        let good = encode_context_consumption_attestation(&att).unwrap();
+        let mut dec = Decoder::new(&good);
+        let map = dec.decode_map().unwrap();
+        let mut enc = Encoder::new();
+        enc.begin_map(map.len() as u64).unwrap();
+        for (k, v) in map {
+            let field = k.as_u64().unwrap();
+            enc.encode_unsigned(field).unwrap();
+            match field {
+                3 | 4 => enc.encode_bytes(&[0u8; 31]).unwrap(),
+                _ => encode_value(&mut enc, &v).unwrap(),
+            }
+        }
+        let bad = enc.finish();
+        let err = decode_context_consumption_attestation(&bad).unwrap_err();
+        assert_eq!(err, MnemeError::SchemaDrift);
+    }
+
     fn encode_value(enc: &mut Encoder, value: &CborValue) -> Result<(), MnemeError> {
         match value {
             CborValue::Unsigned(v) => enc.encode_unsigned(*v)?,

@@ -43,6 +43,9 @@ pub fn verify_consumption_attestation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mneme_core::{
+        decode_context_consumption_attestation, encode_context_consumption_attestation,
+    };
 
     fn sample_attestation() -> (
         Vec<u8>,
@@ -113,6 +116,37 @@ mod tests {
         assert!(
             CONTEXT_GATE_STATUS.contains("gate closed"),
             "status string must declare gate closed"
+        );
+    }
+
+    #[test]
+    fn malformed_cca_wire_fails_closed_before_verify() {
+        let garbage_inputs: &[&[u8]] = &[b"", b"\xff\xfe", b"not-a-cca-wire"];
+        for garbage in garbage_inputs {
+            assert!(
+                decode_context_consumption_attestation(garbage).is_err(),
+                "malformed CCA wire must fail closed before verify"
+            );
+        }
+    }
+
+    #[test]
+    fn cca_wire_roundtrip_then_verify_accepts_matching_digests() {
+        let (assembled, certified, profile, attestation) = sample_attestation();
+        let wire = encode_context_consumption_attestation(&attestation).unwrap();
+        let decoded = decode_context_consumption_attestation(&wire).unwrap();
+        verify_consumption_attestation(&decoded, &assembled, &certified, &profile).unwrap();
+    }
+
+    #[test]
+    fn cca_wire_roundtrip_rejects_tampered_context_hash() {
+        let (assembled, certified, profile, mut attestation) = sample_attestation();
+        attestation.context_hash[0] ^= 0x01;
+        let wire = encode_context_consumption_attestation(&attestation).unwrap();
+        let decoded = decode_context_consumption_attestation(&wire).unwrap();
+        assert_eq!(
+            verify_consumption_attestation(&decoded, &assembled, &certified, &profile),
+            Err(MnemeError::ProvenanceBroken)
         );
     }
 }
