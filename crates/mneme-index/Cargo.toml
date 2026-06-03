@@ -8,6 +8,7 @@ description = "Key-index + authenticated semantic ANN (blueprint §5.6, §9.2)"
 [dependencies]
 mneme-core.workspace = true
 mneme-smt.workspace = true
+mneme-gate = { workspace = true, optional = true }
 blake3 = "1.8"
 thiserror.workspace = true
 fast-hnsw = "1.0.1"
@@ -26,7 +27,7 @@ rand = { version = "0.8", optional = true }
 default = ["ads"]
 ads = []
 # Phase II Context Gate verification; off by default.
-context_gate = []
+context_gate = ["mneme-gate"]
 # Tagged BLAKE3 commitment-binding envelope (§9.2). Binding only — NOT zero-knowledge, NOT SNARK, NOT Plonky2.
 # (The legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it
 # implied zero-knowledge, which the BLAKE3 envelope is not. The regression test

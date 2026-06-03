@@ -1,6 +1,7 @@
 //! Blueprint-aligned end-to-end integration tests (§17, §19 v0, §21 killer demo).
 
 pub mod helpers;
+mod phase_i_gates;
 
 use helpers::{
     ConventionalVectorDb, KILLER_POISON, agent_store, bypass_attempt, demo_audit, semantic_draft,

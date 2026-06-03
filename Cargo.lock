@@ -1353,6 +1353,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-gate"
+version = "0.1.0"
+dependencies = [
+ "mneme-core",
+]
+
+[[package]]
 name = "mneme-index"
 version = "0.1.0"
 dependencies = [
@@ -1361,6 +1368,7 @@ dependencies = [
  "fast-hnsw",
  "hex",
  "mneme-core",
+ "mneme-gate",
  "mneme-smt",
  "rand 0.8.6",
  "serde",

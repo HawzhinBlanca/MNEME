@@ -107,7 +107,7 @@ fn golden_context_hash_v1() {
     // Frozen cross-run digest for foundation-gate style determinism checks.
     assert_eq!(
         hex::encode(outcome.context_hash),
-        "950db4dc4c290285c6c31769b7f17f9ba0a03ba343455fd5bb7380148425a7e4"
+        "edc807aed614ff303364de536abbbc7504637335e302021b9b7ac371e789994e"
     );
 }
 

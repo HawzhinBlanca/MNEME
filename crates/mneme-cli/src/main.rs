@@ -15,6 +15,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+const PHASE_I_CERTIFY_VERSION: u16 = 1;
+const PHASE_I_VERIFY_CERT_VERSION: u16 = 1;
+
 #[derive(Parser)]
 #[command(
     name = "mneme",
@@ -95,6 +98,14 @@ enum Commands {
     },
     /// Emit a Sigstore-signable attestation over a root (§15.2)
     Attest { root: PathBuf },
+    /// Phase I certificate scaffold (gate closed; fail-closed)
+    Certify {
+        store: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Phase I certificate verifier scaffold (gate closed; fail-closed)
+    VerifyCert { file: PathBuf },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
@@ -369,6 +380,19 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             Ok(())
         }
         Commands::Audit { root } => require_path_exists(&root, "root checkpoint"),
+        Commands::Certify { store, output } => {
+            require_store_dir(&store)?;
+            let _ = output;
+            Err(CliErrorKind::Kernel(MnemeError::UnsupportedVersion {
+                got: PHASE_I_CERTIFY_VERSION,
+            }))
+        }
+        Commands::VerifyCert { file } => {
+            require_file_exists(&file, "certificate")?;
+            Err(CliErrorKind::Kernel(MnemeError::UnsupportedVersion {
+                got: PHASE_I_VERIFY_CERT_VERSION,
+            }))
+        }
         Commands::Attest { root } => {
             require_file_exists(&root, "root checkpoint")?;
             let bytes = std::fs::read(&root).map_err(|_| CliErrorKind::Usage)?;

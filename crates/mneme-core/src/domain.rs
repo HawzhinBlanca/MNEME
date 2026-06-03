@@ -97,12 +97,12 @@ pub fn hash_receipt_preimage(bytes: &[u8]) -> [u8; 32] {
 
 /// Deterministic assembled-context digest (Phase II P2-3/4).
 pub fn hash_context_assembled(bytes: &[u8]) -> [u8; 32] {
-    *blake3::hash(bytes).as_bytes()
+    hash_domain(DomainTag::ContextAssembled, bytes)
 }
 
 /// Certified memory-set digest (order-only on object ids).
 pub fn hash_certified_memory_set(bytes: &[u8]) -> [u8; 32] {
-    *blake3::hash(bytes).as_bytes()
+    hash_domain(DomainTag::CertifiedMemorySet, bytes)
 }
 
 #[cfg(test)]

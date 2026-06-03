@@ -49,6 +49,9 @@ struct RecallSessionCache {
     entries: HashMap<([u8; 32], u8), Vec<Entry>>,
 }
 
+const PHASE_I_BITEMPORAL_VERSION: u16 = 1;
+const PHASE_I_PROVENANCE_SCOPE_VERSION: u16 = 1;
+
 impl RecallSessionCache {
     fn lookup(&self, root_hash: &[u8; 32], key: &([u8; 32], u8)) -> Option<Vec<Entry>> {
         if &self.root_hash != root_hash {
@@ -102,6 +105,13 @@ pub struct Recall {
     pub receipt: Option<mneme_core::Receipt>,
     pub semantic_receipt: Option<SemanticRecallReceipt>,
     pub root: Root,
+}
+
+/// Bi-temporal recall anchor (Phase I scaffold). Gate remains closed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AsOf {
+    RootSeq(u64),
+    ValidTime(u64),
 }
 
 impl Store {
@@ -632,6 +642,35 @@ impl Store {
         cap: &Capability,
     ) -> Result<Vec<Entry>, MnemeError> {
         self.recall_verified_default(query, cap)
+    }
+
+    /// Phase I bi-temporal scaffold: gate stays closed until implemented.
+    pub fn recall_verified_at(
+        &self,
+        query: &Query,
+        _proc: &Procedure,
+        cap: &Capability,
+        as_of: AsOf,
+    ) -> Result<Vec<Entry>, MnemeError> {
+        let _ = as_of;
+        self.authorize_read(query, cap)?;
+        Err(MnemeError::UnsupportedVersion {
+            got: PHASE_I_BITEMPORAL_VERSION,
+        })
+    }
+
+    /// Phase I provenance-scoped recall scaffold: fail-closed placeholder.
+    pub fn provenance_scoped_recall(
+        &self,
+        query: &Query,
+        proc: &Procedure,
+        cap: &Capability,
+    ) -> Result<Vec<Entry>, MnemeError> {
+        let _ = proc;
+        self.authorize_read(query, cap)?;
+        Err(MnemeError::UnsupportedVersion {
+            got: PHASE_I_PROVENANCE_SCOPE_VERSION,
+        })
     }
 
     pub fn promote(
