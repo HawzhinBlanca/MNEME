@@ -87,4 +87,32 @@ mod tests {
             Err(MnemeError::ProvenanceBroken)
         );
     }
+
+    #[test]
+    fn profile_mismatch_fails_closed() {
+        let (assembled, certified, _profile, attestation) = sample_attestation();
+        let other_profile = AssemblyProfile { id: [0x99; 32] };
+        assert_eq!(
+            verify_consumption_attestation(&attestation, &assembled, &certified, &other_profile),
+            Err(MnemeError::SchemaDrift)
+        );
+    }
+
+    #[test]
+    fn certified_hash_mismatch_fails_closed() {
+        let (assembled, mut certified, profile, attestation) = sample_attestation();
+        certified[0] ^= 0x02;
+        assert_eq!(
+            verify_consumption_attestation(&attestation, &assembled, &certified, &profile),
+            Err(MnemeError::ProvenanceBroken)
+        );
+    }
+
+    #[test]
+    fn status_string_marks_gate_closed() {
+        assert!(
+            CONTEXT_GATE_STATUS.contains("gate closed"),
+            "status string must declare gate closed"
+        );
+    }
 }

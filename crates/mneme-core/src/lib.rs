@@ -1,6 +1,7 @@
 //! Core types, errors, canonical serialization, and content addressing (Wave 0/1).
 
 pub mod accountability;
+pub mod context;
 pub mod dcbor;
 pub mod domain;
 pub mod embedding;
@@ -13,6 +14,10 @@ pub mod types;
 
 pub use accountability::{
     ACTION_RECEIPT_VERSION, ActionReceipt, FORGET_PROOF_VERSION, ForgetProof,
+};
+pub use context::{
+    CONTEXT_ATTESTATION_VERSION, decode_context_consumption_attestation,
+    encode_context_consumption_attestation,
 };
 pub use dcbor::{
     CborValue, DcborDecode, DcborEncode, Decoder, Encoder, assert_canonical, decode_strict,

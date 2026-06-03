@@ -109,6 +109,15 @@ fn golden_context_hash_v1() {
         hex::encode(outcome.context_hash),
         "edc807aed614ff303364de536abbbc7504637335e302021b9b7ac371e789994e"
     );
+    assert_eq!(
+        hex::encode(outcome.assembled_bytes),
+        // `MNEME-CTX-ASM-v1\n` magic + object id + plaintext ("golden").
+        "4d4e454d452d4354582d41534d2d76310a98027d55cef76ac7a67093a74810fd4bfd8bc8f48819778a33ff04c7041affd0676f6c64656e"
+    );
+    assert_eq!(
+        hex::encode(outcome.certified_memory_set_hash),
+        "f0bc0d84b6272da744b0f8daf0f9122799b769fe2d9bc32a7ed511321a11a2bd"
+    );
 }
 
 #[test]
