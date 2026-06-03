@@ -15,7 +15,7 @@ fail closed.
 | Phase | Goal | Unlocks (the new proof) | Exit gate | ~Effort | Spec |
 |---|---|---|---|---|---|
 | **0 ✅** | Verifiable memory | integrity · provenance · authorization of stored memory | `master` green; cross-OS determinism proven | shipped | `READINESS.md`, `MNEME_2.0_TASK_SPEC.md` |
-| **I** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team; offline `verify-cert` | ~3 mo | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
+| **I** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team; offline `verify-cert` — implementation on `master`; red-team/tag pending | ~3 mo | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
 | **II** | The **Context Gate** (the kernel) | the model consumed *exactly* the certified context | end-to-end PCC on one model in a TEE, offline-verifiable | ~3–5 mo | (Phase II spec — TBA) |
 | **III** | **Accountability** complete | who sanctioned the action · what was forgotten · machine-checked TCB | NIST 4-dim met; Lean/F* proof; regulated pilot + 3rd-party audit | ~4 mo | (Phase III spec — TBA) |
 | **IV** | **Scale & standard** | global exact-NN; federated certificates; open spec | certificate is an interop standard; cost ≈ "default tier" | ongoing | (Phase IV spec — TBA) |

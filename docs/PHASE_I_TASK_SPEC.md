@@ -135,7 +135,8 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 | Date | Item | Status |
 |---|---|---|
 | 2026-06-03 | Phase I spec authored (from `VISION_PROOF_CARRYING_COGNITION.md`) | Done |
-| 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, `mneme certify`, and `mneme verify-cert`; all fail closed with tests. | **Landed (gated scaffold only)** |
+| 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, `mneme certify`, and `mneme verify-cert`; all fail closed with tests. | **Landed (initial gated scaffold; superseded by full integration on `master`)** |
+| 2026-06-03 | Phase I full integration (`7b19c13`): zkANN-1 dominance + audit-on-demand path gated; bi-temporal `recall_verified_at`; provenance-scoped recall; Cognition Certificate v1 (`mneme certify` / `verify-cert`); `mneme-crossref` vectors exercised; CLI certify path wired. | **Landed (on `master`; `validation-lane full` green; red-team + tag pending)** |
 
 ---
 
