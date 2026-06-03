@@ -75,6 +75,12 @@ pub fn hash_sem_internal(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     hash_sem_domain(&payload)
 }
 
+/// Root of an empty semantic index — parity with `mneme-index::commit::empty_semantic_root`:
+/// `BLAKE3(SEM ‖ 0x12)`.
+pub fn empty_semantic_root() -> [u8; 32] {
+    hash_sem_domain(&[0x12])
+}
+
 pub fn hash_root_preimage(bytes: &[u8]) -> [u8; 32] {
     hash_domain(DomainTag::Root, bytes)
 }
