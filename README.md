@@ -2,7 +2,7 @@
 
 Verifiable memory substrate for AI agents — fail-closed reads, content-addressed storage, signed roots, and typed verification receipts.
 
-See [MNEME_BLUEPRINT.md](MNEME_BLUEPRINT.md) for the full build specification. The **2.0 multi-agent upgrade** task list is in [MNEME_2.0_TASK_SPEC.md](MNEME_2.0_TASK_SPEC.md).
+See [MNEME_BLUEPRINT.md](MNEME_BLUEPRINT.md) for the full build specification. The **2.0 multi-agent upgrade** task list is in [MNEME_2.0_TASK_SPEC.md](MNEME_2.0_TASK_SPEC.md). Program phases and honest completion status: [ROADMAP.md](docs/ROADMAP.md), [PROGRAM_STATUS.md](docs/phase-program/PROGRAM_STATUS.md); gated CI: `scripts/ci/phase-program-gate.sh`.
 
 **Network sync (2.0-A):** pull a peer’s object delta over canonical §11 WebSocket sync:
 
