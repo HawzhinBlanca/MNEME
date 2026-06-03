@@ -69,3 +69,15 @@ mneme_ci_clean_foundation_gate_dirs() {
     "$root/out/ci-foundation-gate" \
     "$root/out/ci-foundation-gate-2"
 }
+
+# Prefer the macOS system Python because PATH can point at framework builds that
+# hang under non-interactive here-doc execution. Operators can override explicitly.
+mneme_ci_python() {
+  if [[ -n "${MNEME_PYTHON:-}" ]]; then
+    printf '%s\n' "$MNEME_PYTHON"
+  elif [[ -x /usr/bin/python3 ]]; then
+    printf '%s\n' /usr/bin/python3
+  else
+    printf '%s\n' python3
+  fi
+}

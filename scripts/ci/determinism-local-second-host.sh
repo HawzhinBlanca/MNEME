@@ -26,7 +26,7 @@ cargo run -p mneme-cli -- determinism foundation-gate --out "$OUT_A" --timestamp
 cargo run -p mneme-cli -- determinism foundation-gate --out "$OUT_B" --timestamp "$TS"
 
 export OUT_A OUT_B
-python3 - <<'PY'
+"$(mneme_ci_python)" - <<'PY'
 import json, os, sys
 
 def load_run(path):

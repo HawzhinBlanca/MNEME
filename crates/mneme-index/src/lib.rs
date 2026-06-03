@@ -22,11 +22,15 @@ mod wire;
 #[cfg(feature = "commitment_binding")]
 mod commitment_binding;
 
-#[cfg(feature = "plonky2_prover")]
-mod plonky2_prover;
+#[cfg(feature = "pedersen_schnorr_zk")]
+mod pedersen_schnorr_zk;
 
-#[cfg(feature = "plonky2_prover")]
+#[cfg(feature = "pedersen_schnorr_zk")]
 mod semantic_zk;
+
+// Phase IV-A research seam — UNIMPLEMENTED, off by default, wired into no recall path.
+#[cfg(feature = "piop_research")]
+mod piop_research;
 
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
@@ -42,20 +46,36 @@ pub use semantic::SemanticIndex;
 pub use verify::{HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_vo};
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 
+#[cfg(feature = "context_gate")]
+pub use verify::verify_consumption_attestation;
+
 #[cfg(feature = "commitment_binding")]
 pub use commitment_binding::{
     B3_V0_BINDING_STATUS, BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN,
     CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt,
 };
 
-#[cfg(feature = "plonky2_prover")]
-pub use plonky2_prover::{
-    B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, PUBLIC_COMMIT_LEN, Plonky2RetrievalProof,
-    RetrievalWitness, ZK_BACKEND, prove_plonky2_retrieval, verify_plonky2_retrieval,
+#[cfg(feature = "pedersen_schnorr_zk")]
+pub use pedersen_schnorr_zk::{
+    PEDERSEN_SCHNORR_HONESTY, PUBLIC_COMMIT_LEN, PedersenSchnorrRetrievalProof, RetrievalWitness,
+    ZK_BACKEND, prove_pedersen_schnorr, verify_pedersen_schnorr,
 };
 
+// `B3_DEFERRAL_STATUS` re-exported separately because it documents the
+// *deferral* (Plonky2/FRI SNARK target not shipped), not the actual backend.
+#[cfg(feature = "pedersen_schnorr_zk")]
+pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
+
+// Phase IV-A research seam (UNIMPLEMENTED). Exported only so the honesty
+// constants are inspectable; `prove_exact_nn_piop` panics and proves nothing.
+#[cfg(feature = "piop_research")]
+pub use piop_research::{PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop};
+
 /// ADS backend enabled when the `ads` feature is on.
-/// Privacy path (`commitment_binding` / `zk` alias) is a tagged BLAKE3 binding envelope only — not SNARK, not Plonky2.
+/// Privacy path is `commitment_binding` only — a tagged BLAKE3 binding envelope,
+/// not SNARK, not Plonky2. (The legacy `zk` Cargo feature alias was dropped
+/// because it implied zero-knowledge, which the BLAKE3 envelope is not. The
+/// deprecated `plonky2_prover` alias maps to `pedersen_schnorr_zk`, not this path.)
 #[cfg(feature = "ads")]
 pub const SEMANTIC_BACKEND_ENABLED: bool = true;
 
@@ -126,29 +146,29 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "plonky2_prover")]
+    #[cfg(feature = "pedersen_schnorr_zk")]
     #[test]
-    fn plonky2_prover_real_proof_verifies_and_forgeries_reject() {
-        use super::plonky2_prover::{
-            B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY, RetrievalWitness, ZK_BACKEND,
-            prove_plonky2_retrieval, verify_plonky2_retrieval,
+    fn pedersen_schnorr_zk_real_proof_verifies_and_forgeries_reject() {
+        use super::pedersen_schnorr_zk::{
+            B3_DEFERRAL_STATUS, PEDERSEN_SCHNORR_HONESTY, RetrievalWitness, ZK_BACKEND,
+            prove_pedersen_schnorr, verify_pedersen_schnorr,
         };
         use mneme_core::MnemeError;
         assert!(B3_DEFERRAL_STATUS.contains("IMPLEMENTED"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("zero-knowledge"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("NOT Plonky2"));
+        assert!(PEDERSEN_SCHNORR_HONESTY.contains("zero-knowledge"));
+        assert!(PEDERSEN_SCHNORR_HONESTY.contains("NOT Plonky2"));
         assert!(ZK_BACKEND.contains("no trusted setup"));
 
         let entry = [9u8; 32];
-        let proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        let proof = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("prove");
         assert!(!proof.proof_bytes.is_empty());
-        verify_plonky2_retrieval(&proof, &proof.public_commit).expect("verify");
+        verify_pedersen_schnorr(&proof, &proof.public_commit).expect("verify");
 
         // Forgery: tampering the public commitment must reject.
         let mut wrong = proof.public_commit;
         wrong[0] ^= 0x01;
         assert_eq!(
-            verify_plonky2_retrieval(&proof, &wrong),
+            verify_pedersen_schnorr(&proof, &wrong),
             Err(MnemeError::ZkProofInvalid)
         );
 
@@ -157,9 +177,20 @@ mod tests {
         q[0] ^= 0x01;
         let bad = RetrievalWitness { entry, query: q };
         assert_eq!(
-            prove_plonky2_retrieval(&bad),
+            prove_pedersen_schnorr(&bad),
             Err(MnemeError::ZkProofInvalid)
         );
+    }
+
+    #[cfg(feature = "piop_research")]
+    #[test]
+    fn piop_research_seam_is_honest() {
+        use super::piop_research::{PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS};
+        // Research seam must never claim to prove anything.
+        assert!(PIOP_RESEARCH_HONESTY.contains("UNIMPLEMENTED"));
+        assert!(PIOP_RESEARCH_HONESTY.contains("proves NOTHING"));
+        assert!(PIOP_RESEARCH_HONESTY.contains("NOT a SNARK"));
+        assert!(PIOP_RESEARCH_STATUS.contains("UNIMPLEMENTED"));
     }
 
     #[cfg(feature = "commitment_binding")]

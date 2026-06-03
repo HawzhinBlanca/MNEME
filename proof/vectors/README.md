@@ -11,7 +11,7 @@ Frozen fixtures for byte conformance (blueprint Appendix B, §17.8). Each direct
 | `smt/` | (3) SMT membership + non-membership roots and proofs | PASS |
 | `roots/` | (4) signed `RootPreimage` + Ed25519 signature | PASS — byte-pinned by `mneme-root` `appendix_b_roots` test |
 | `receipts/` | (5) passing + tampered retrieval receipt (ADS backend) | PASS — byte-pinned by `mneme-verify` `appendix_b_receipts` test |
-| `receipts/zk/` | Commitment-binding + forgery corpus (not Appendix B item 5) | **PASS (v0)** — `privacy_fixture.json` + `forgery_expectations.json` pin BLAKE3 binding digests and typed `ZkProofInvalid` rejection; **NOT zero-knowledge, NOT SNARK, NOT Plonky2**. Plonky2/V3DB ZK retrieval is **12-month only** (`plonky2_prover` feature fails closed; B3 deferral closed) |
+| `receipts/zk/` | Commitment-binding + forgery corpus (not Appendix B item 5) | **PASS (v0)** — `privacy_fixture.json` + `forgery_expectations.json` pin BLAKE3 binding digests and typed `ZkProofInvalid` rejection; **NOT zero-knowledge, NOT SNARK, NOT Plonky2**. Plonky2/V3DB ZK retrieval is **12-month only** (`pedersen_schnorr_zk` feature ships a real Pedersen+Schnorr NIZK on Ristretto — not Plonky2; the previous `plonky2_prover` feature was renamed for honesty; B3 deferral closed) |
 | `capabilities/` | (6) capability sig-chain + caveat evaluation | PASS — byte-pinned by `mneme-cap` `appendix_b_capabilities` test |
 | `mst/` | (7) MST convergence triple (order-independence) | PASS — byte-pinned by `mneme-crdt` vector test |
 

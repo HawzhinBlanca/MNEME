@@ -35,8 +35,8 @@
 //! **not** prove semantic truth, that the entry is the true nearest neighbor, or that an
 //! authenticated entry is factually correct. **Authenticated ≠ true.**
 //!
-//! v0/90-day still ships [`super::commitment_binding`] (feature `commitment_binding`, alias
-//! `zk`): a tagged BLAKE3 binding envelope that rejects forgeries but is **not** zero-knowledge.
+//! v0/90-day still ships [`super::commitment_binding`] (feature `commitment_binding`): a
+//! tagged BLAKE3 binding envelope that rejects forgeries but is **not** zero-knowledge.
 
 use std::sync::OnceLock;
 
@@ -67,8 +67,13 @@ pub const B3_DEFERRAL_STATUS: &str = "IMPLEMENTED (12-month milestone B3): real 
      Faithful-execution privacy — NOT semantic truth, NOT exact-NN. v0/90-day still uses commitment_binding \
      (BLAKE3 envelope, not ZK).";
 
-/// Honesty boundary when `plonky2_prover` is enabled.
-pub const PLONKY2_PROVER_HONESTY: &str = "ZK retrieval proof is a real zero-knowledge proof (Pedersen + Schnorr over Ristretto, transparent, \
+/// Honesty boundary for the `pedersen_schnorr_zk` feature (named for the actual backend).
+///
+/// The `B3_DEFERRAL_STATUS` string (above) records the deferral from the blueprint's
+/// Plonky2/V3DB SNARK target; the regression tests below assert this constant mentions
+/// the Plonky2/FRI name only as a *non*-claim — protecting against future contributors
+/// re-labelling the implementation in a way that misrepresents the backend.
+pub const PEDERSEN_SCHNORR_HONESTY: &str = "ZK retrieval proof is a real zero-knowledge proof (Pedersen + Schnorr over Ristretto, transparent, \
      no trusted setup; NOT Plonky2, NOT FRI). It proves faithful execution of a retrieval-match predicate with \
      witness privacy; it is not semantic truth, not exact-NN, and not a claim that an authenticated entry is factually correct.";
 
@@ -77,7 +82,7 @@ pub const PLONKY2_PROVER_HONESTY: &str = "ZK retrieval proof is a real zero-know
 /// `public_commit` is the binding+hiding Pedersen commitment to the stored `entry` (the value
 /// the verifier checks against). `proof_bytes` = `query_commit (32) || R (32) || z (32)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Plonky2RetrievalProof {
+pub struct PedersenSchnorrRetrievalProof {
     pub public_commit: [u8; PUBLIC_COMMIT_LEN],
     pub proof_bytes: Vec<u8>,
 }
@@ -146,9 +151,9 @@ fn fiat_shamir_challenge(
 ///
 /// Fails closed with [`MnemeError::ZkProofInvalid`] when the witness is unsatisfiable
 /// (`query != entry`); a false statement cannot be proven.
-pub fn prove_plonky2_retrieval(
+pub fn prove_pedersen_schnorr(
     witness: &RetrievalWitness,
-) -> Result<Plonky2RetrievalProof, MnemeError> {
+) -> Result<PedersenSchnorrRetrievalProof, MnemeError> {
     let entry = scalar_from_bytes(&witness.entry);
     let query = scalar_from_bytes(&witness.query);
 
@@ -178,7 +183,7 @@ pub fn prove_plonky2_retrieval(
     proof_bytes.extend_from_slice(nonce_point.as_bytes());
     proof_bytes.extend_from_slice(z.as_bytes());
 
-    Ok(Plonky2RetrievalProof {
+    Ok(PedersenSchnorrRetrievalProof {
         public_commit: *c_e.as_bytes(),
         proof_bytes,
     })
@@ -189,8 +194,8 @@ pub fn prove_plonky2_retrieval(
 /// Fails closed with [`MnemeError::ZkProofInvalid`] on malformed bytes, a public-commit
 /// mismatch (the proof binds to a different committed entry than claimed), a non-canonical
 /// scalar, or a failed Schnorr check.
-pub fn verify_plonky2_retrieval(
-    proof: &Plonky2RetrievalProof,
+pub fn verify_pedersen_schnorr(
+    proof: &PedersenSchnorrRetrievalProof,
     public_commit: &[u8],
 ) -> Result<(), MnemeError> {
     if public_commit.len() != PUBLIC_COMMIT_LEN {
@@ -244,10 +249,10 @@ mod tests {
         assert!(B3_DEFERRAL_STATUS.contains("NOT semantic truth"));
         assert!(B3_DEFERRAL_STATUS.contains("NOT exact-NN"));
         assert!(B3_DEFERRAL_STATUS.contains("NOT Plonky2/FRI"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("zero-knowledge"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("NOT Plonky2"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("not semantic truth"));
-        assert!(PLONKY2_PROVER_HONESTY.contains("not exact-NN"));
+        assert!(PEDERSEN_SCHNORR_HONESTY.contains("zero-knowledge"));
+        assert!(PEDERSEN_SCHNORR_HONESTY.contains("NOT Plonky2"));
+        assert!(PEDERSEN_SCHNORR_HONESTY.contains("not semantic truth"));
+        assert!(PEDERSEN_SCHNORR_HONESTY.contains("not exact-NN"));
         assert!(ZK_BACKEND.contains("pedersen-schnorr"));
         assert!(ZK_BACKEND.contains("no trusted setup"));
     }
@@ -255,9 +260,9 @@ mod tests {
     #[test]
     fn real_proof_round_trips() {
         let entry = [42u8; 32];
-        let proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        let proof = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("prove");
         assert_eq!(proof.proof_bytes.len(), PROOF_LEN);
-        verify_plonky2_retrieval(&proof, &proof.public_commit).expect("verify");
+        verify_pedersen_schnorr(&proof, &proof.public_commit).expect("verify");
     }
 
     #[test]
@@ -265,15 +270,15 @@ mod tests {
         // Two proofs over the same witness differ (fresh blindings) yet both verify, and
         // their public commitments differ (hiding) — the commitment leaks nothing.
         let entry = [7u8; 32];
-        let p1 = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("p1");
-        let p2 = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("p2");
+        let p1 = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("p1");
+        let p2 = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("p2");
         assert_ne!(
             p1.public_commit, p2.public_commit,
             "commitment must be hiding"
         );
         assert_ne!(p1.proof_bytes, p2.proof_bytes, "proof must be randomized");
-        verify_plonky2_retrieval(&p1, &p1.public_commit).expect("verify p1");
-        verify_plonky2_retrieval(&p2, &p2.public_commit).expect("verify p2");
+        verify_pedersen_schnorr(&p1, &p1.public_commit).expect("verify p1");
+        verify_pedersen_schnorr(&p2, &p2.public_commit).expect("verify p2");
     }
 
     #[test]
@@ -284,7 +289,7 @@ mod tests {
         entry[0] = 1;
         query[0] = 2;
         assert_eq!(
-            prove_plonky2_retrieval(&RetrievalWitness { entry, query }),
+            prove_pedersen_schnorr(&RetrievalWitness { entry, query }),
             Err(MnemeError::ZkProofInvalid)
         );
     }
@@ -292,11 +297,11 @@ mod tests {
     #[test]
     fn wrong_public_commit_rejects() {
         let entry = [9u8; 32];
-        let proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        let proof = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("prove");
         let mut wrong = proof.public_commit;
         wrong[0] ^= 0x01;
         assert_eq!(
-            verify_plonky2_retrieval(&proof, &wrong),
+            verify_pedersen_schnorr(&proof, &wrong),
             Err(MnemeError::ZkProofInvalid)
         );
     }
@@ -304,11 +309,11 @@ mod tests {
     #[test]
     fn forged_response_scalar_rejects() {
         let entry = [11u8; 32];
-        let mut proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        let mut proof = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("prove");
         // Corrupt the Schnorr response z (last 32 bytes); the verification equation breaks.
         proof.proof_bytes[64] = proof.proof_bytes[64].wrapping_add(1);
         assert_eq!(
-            verify_plonky2_retrieval(&proof, &proof.public_commit),
+            verify_pedersen_schnorr(&proof, &proof.public_commit),
             Err(MnemeError::ZkProofInvalid)
         );
     }
@@ -316,10 +321,10 @@ mod tests {
     #[test]
     fn tampered_nonce_point_rejects() {
         let entry = [13u8; 32];
-        let mut proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
+        let mut proof = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("prove");
         proof.proof_bytes[32] ^= 0xff;
         assert_eq!(
-            verify_plonky2_retrieval(&proof, &proof.public_commit),
+            verify_pedersen_schnorr(&proof, &proof.public_commit),
             Err(MnemeError::ZkProofInvalid)
         );
     }
@@ -328,22 +333,21 @@ mod tests {
     fn swapped_query_commitment_rejects() {
         // Splice the query commitment from a *different* proof: the equality no longer holds,
         // and the Fiat–Shamir challenge no longer matches, so verification fails closed.
-        let proof_a = prove_plonky2_retrieval(&RetrievalWitness::matching([1u8; 32])).expect("a");
-        let proof_b = prove_plonky2_retrieval(&RetrievalWitness::matching([2u8; 32])).expect("b");
+        let proof_a = prove_pedersen_schnorr(&RetrievalWitness::matching([1u8; 32])).expect("a");
+        let proof_b = prove_pedersen_schnorr(&RetrievalWitness::matching([2u8; 32])).expect("b");
         let mut spliced = proof_a.clone();
         spliced.proof_bytes[0..32].copy_from_slice(&proof_b.proof_bytes[0..32]);
         assert_eq!(
-            verify_plonky2_retrieval(&spliced, &spliced.public_commit),
+            verify_pedersen_schnorr(&spliced, &spliced.public_commit),
             Err(MnemeError::ZkProofInvalid)
         );
     }
 
     #[test]
     fn malformed_commit_length_rejects() {
-        let proof =
-            prove_plonky2_retrieval(&RetrievalWitness::matching([11u8; 32])).expect("prove");
+        let proof = prove_pedersen_schnorr(&RetrievalWitness::matching([11u8; 32])).expect("prove");
         assert_eq!(
-            verify_plonky2_retrieval(&proof, &[0u8; 16]),
+            verify_pedersen_schnorr(&proof, &[0u8; 16]),
             Err(MnemeError::ZkProofInvalid)
         );
     }
@@ -351,10 +355,10 @@ mod tests {
     #[test]
     fn truncated_proof_bytes_reject() {
         let mut proof =
-            prove_plonky2_retrieval(&RetrievalWitness::matching([11u8; 32])).expect("prove");
+            prove_pedersen_schnorr(&RetrievalWitness::matching([11u8; 32])).expect("prove");
         proof.proof_bytes.truncate(8);
         assert_eq!(
-            verify_plonky2_retrieval(&proof, &proof.public_commit),
+            verify_pedersen_schnorr(&proof, &proof.public_commit),
             Err(MnemeError::ZkProofInvalid)
         );
     }

@@ -122,8 +122,17 @@ async fn quarantine_entry_blocked_at_trusted_tier() {
 async fn prove_absent_never_written_key() {
     let h = TestHarness::new().await;
     let client = reqwest::Client::new();
+
+    let unauth = client
+        .get(format!("{}/v1/prove-absent/user/never-seen", h.http_base()))
+        .send()
+        .await
+        .expect("unauth prove absent");
+    assert_eq!(unauth.status(), 401);
+
     let resp = client
         .get(format!("{}/v1/prove-absent/user/never-seen", h.http_base()))
+        .header("Authorization", h.agent_auth_header())
         .send()
         .await
         .expect("prove absent");

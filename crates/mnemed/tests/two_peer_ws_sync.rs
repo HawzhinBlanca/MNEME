@@ -11,11 +11,13 @@ use mneme_cap::{Capability, agent_cap};
 use mneme_core::{Draft, LogicalKey, MemoryKind, Query, TrustTier};
 use mneme_crypto::KeyPair;
 use mnemed::state::RateLimiter;
-use mnemed::{AppState, RunningServer, ServerConfig, start_with_state};
+use mnemed::{AppState, RunningServer, ServerConfig, cap_to_b64, start_with_state};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 
 fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capability) {
     let mut store = state.store.lock().expect("lock");
@@ -57,10 +59,25 @@ async fn serve(state: AppState) -> RunningServer {
     start_with_state(config, state).await.expect("start")
 }
 
-/// Pull the peer daemon's snapshot over WebSocket and merge it into `local`.
-async fn pull_and_merge(local: &AppState, peer: &RunningServer) {
+fn authed_ws_request(
+    peer: &RunningServer,
+    cap: &Capability,
+) -> tokio_tungstenite::tungstenite::http::Request<()> {
     let url = format!("ws://{}/v1/sync", peer.http_addr);
-    let (mut ws, _) = connect_async(&url).await.expect("ws connect");
+    let mut req = url.into_client_request().expect("ws request");
+    let auth = format!("Bearer {}", cap_to_b64(cap).expect("cap b64"));
+    req.headers_mut().insert(
+        "Authorization",
+        HeaderValue::from_str(&auth).expect("auth header"),
+    );
+    req
+}
+
+/// Pull the peer daemon's snapshot over WebSocket and merge it into `local`.
+async fn pull_and_merge(local: &AppState, peer: &RunningServer, cap: &Capability) {
+    let (mut ws, _) = connect_async(authed_ws_request(peer, cap))
+        .await
+        .expect("ws connect");
     ws.send(Message::Binary(
         mnemed::sync::encode_snapshot_request().into(),
     ))
@@ -93,8 +110,8 @@ async fn two_daemons_converge_over_websocket() {
     let server_b = serve(state_b.clone()).await;
 
     // A pulls B (now holds the union); then B pulls the updated A.
-    pull_and_merge(&state_a, &server_b).await;
-    pull_and_merge(&state_b, &server_a).await;
+    pull_and_merge(&state_a, &server_b, &cap).await;
+    pull_and_merge(&state_b, &server_a, &cap).await;
 
     let key_a = LogicalKey {
         namespace: "peer".into(),
@@ -149,7 +166,7 @@ async fn plaintext_recall_after_websocket_sync() {
     remember(&state_a, "peer", "only-a", b"alpha-secret", &cap);
 
     let server_a = serve(state_a.clone()).await;
-    pull_and_merge(&state_b, &server_a).await; // sealed snapshot over the wire
+    pull_and_merge(&state_b, &server_a, &cap).await; // sealed snapshot over the wire
 
     let query = Query {
         logical_key: LogicalKey {
@@ -213,9 +230,10 @@ async fn wire_object_tamper_is_not_ingested() {
 /// Phase 2a: incremental anti-entropy over a real WebSocket — pull the peer's
 /// manifest, then fetch ONLY the missing object delta, then merge. Converges the
 /// content roots while transferring just the delta (not the full snapshot).
-async fn pull_incremental(local: &AppState, peer: &RunningServer) -> usize {
-    let url = format!("ws://{}/v1/sync", peer.http_addr);
-    let (mut ws, _) = connect_async(&url).await.expect("ws connect");
+async fn pull_incremental(local: &AppState, peer: &RunningServer, cap: &Capability) -> usize {
+    let (mut ws, _) = connect_async(authed_ws_request(peer, cap))
+        .await
+        .expect("ws connect");
 
     // 1) manifest (structure only, no object bytes)
     ws.send(Message::Binary(
@@ -278,14 +296,14 @@ async fn two_daemons_converge_incrementally_over_websocket() {
     let server_a = serve(state_a.clone()).await;
     let server_b = serve(state_b.clone()).await;
 
-    let fetched_b = pull_incremental(&state_a, &server_b).await;
+    let fetched_b = pull_incremental(&state_a, &server_b, &cap).await;
     assert_eq!(fetched_b, 1, "A fetched only B's single missing object");
-    let fetched_a = pull_incremental(&state_b, &server_a).await;
+    let fetched_a = pull_incremental(&state_b, &server_a, &cap).await;
     assert_eq!(fetched_a, 1, "B fetched only A's single missing object");
 
     // Re-pull is a no-op delta (idempotent).
     assert_eq!(
-        pull_incremental(&state_a, &server_b).await,
+        pull_incremental(&state_a, &server_b, &cap).await,
         0,
         "converged: empty delta"
     );

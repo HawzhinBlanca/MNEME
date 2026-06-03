@@ -11,11 +11,13 @@ use mneme_cap::{Capability, agent_cap};
 use mneme_core::{Draft, LogicalKey, MemoryKind, MnemeError};
 use mneme_crypto::KeyPair;
 use mnemed::state::RateLimiter;
-use mnemed::{AppState, RunningServer, ServerConfig, start_with_state};
+use mnemed::{AppState, RunningServer, ServerConfig, cap_to_b64, start_with_state};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
 
 async fn recv_binary(
     ws: &mut tokio_tungstenite::WebSocketStream<
@@ -70,6 +72,20 @@ async fn serve(state: AppState) -> RunningServer {
     start_with_state(config, state).await.expect("start")
 }
 
+fn authed_ws_request(
+    peer: &RunningServer,
+    cap: &Capability,
+) -> tokio_tungstenite::tungstenite::http::Request<()> {
+    let url = format!("ws://{}/v1/sync", peer.http_addr);
+    let mut req = url.into_client_request().expect("ws request");
+    let auth = format!("Bearer {}", cap_to_b64(cap).expect("cap b64"));
+    req.headers_mut().insert(
+        "Authorization",
+        HeaderValue::from_str(&auth).expect("auth header"),
+    );
+    req
+}
+
 // The production client (`sync_client::pull_canonical`, CLI `mneme sync pull`) owns the
 // `Store` directly and holds no lock across `.await`. This single-task test wraps the
 // store in `AppState`'s `std::sync::Mutex`, so the guard is held across the WebSocket
@@ -77,10 +93,11 @@ async fn serve(state: AppState) -> RunningServer {
 // `clippy::await_holding_lock`. Allowed with justification rather than forcing an async
 // mutex into `AppState` for a property only this test needs.
 #[allow(clippy::await_holding_lock)]
-async fn pull_canonical(local: &AppState, peer: &RunningServer) -> usize {
+async fn pull_canonical(local: &AppState, peer: &RunningServer, cap: &Capability) -> usize {
     let url = format!("ws://{}/v1/sync", peer.http_addr);
     let mut store = local.store.lock().expect("lock");
-    mnemed::sync_client::pull_canonical(&mut store, &url)
+    let cap_b64 = cap_to_b64(cap).expect("cap b64");
+    mnemed::sync_client::pull_canonical_with_cap(&mut store, &url, &cap_b64)
         .await
         .expect("pull")
 }
@@ -100,18 +117,18 @@ async fn two_peers_converge_via_canonical_v11_protocol() {
 
     // A pulls B's delta, then B pulls A's (now-larger) delta.
     assert_eq!(
-        pull_canonical(&state_a, &server_b).await,
+        pull_canonical(&state_a, &server_b, &cap).await,
         1,
         "A fetched B's single missing object over the canonical wire"
     );
     assert_eq!(
-        pull_canonical(&state_b, &server_a).await,
+        pull_canonical(&state_b, &server_a, &cap).await,
         1,
         "B fetched A's single missing object over the canonical wire"
     );
     // Converged: a re-pull diffs to an empty delta (idempotent).
     assert_eq!(
-        pull_canonical(&state_a, &server_b).await,
+        pull_canonical(&state_a, &server_b, &cap).await,
         0,
         "converged: DiffReq yields an empty want set"
     );
@@ -171,8 +188,9 @@ async fn canonical_tampered_have_objects_rejected_with_typed_error() {
     );
     let server_b = serve(state_b.clone()).await;
 
-    let url = format!("ws://{}/v1/sync", server_b.http_addr);
-    let (mut ws, _) = connect_async(&url).await.expect("ws connect");
+    let (mut ws, _) = connect_async(authed_ws_request(&server_b, &cap))
+        .await
+        .expect("ws connect");
     ws.send(Message::Binary(
         mnemed::sync::encode_diff_request([0u8; 32])
             .expect("diff req")

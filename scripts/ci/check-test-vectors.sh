@@ -6,6 +6,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 VECTOR_ROOT="$ROOT/proof/vectors"
 REQUIRED_DIRS=(
   objects
@@ -35,7 +38,7 @@ if [[ "$missing" -ne 0 ]]; then
   exit 1
 fi
 
-python3 - "$VECTOR_ROOT" <<'PY'
+"$(mneme_ci_python)" - "$VECTOR_ROOT" <<'PY'
 import json
 import sys
 from pathlib import Path

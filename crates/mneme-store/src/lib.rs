@@ -174,7 +174,7 @@ impl Store {
         Self::open_pinned_with_vault(path, operator, None, vault)
     }
 
-    fn open_pinned_with_vault(
+    pub fn open_pinned_with_vault(
         path: &Path,
         operator: KeyPair,
         pinned_root: Option<[u8; 32]>,
@@ -789,6 +789,16 @@ impl Store {
 
     pub(crate) fn object_keys_ref(&self) -> &HashMap<[u8; 32], LogicalKey> {
         &self.object_keys
+    }
+
+    pub(crate) fn prune_keyed_metadata_to_live_keys(&mut self) -> bool {
+        let live: std::collections::HashSet<[u8; 32]> =
+            self.key_to_object.values().copied().collect();
+        let before_object_keys = self.object_keys.len();
+        let before_embeddings = self.embeddings.len();
+        self.object_keys.retain(|id, _| live.contains(id));
+        self.embeddings.retain(|id, _| live.contains(id));
+        before_object_keys != self.object_keys.len() || before_embeddings != self.embeddings.len()
     }
 
     fn decrypt_entries(&self, entries: &mut [Entry]) -> Result<(), MnemeError> {

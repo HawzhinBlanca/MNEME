@@ -6,6 +6,7 @@ use mneme_core::{
     TrustTier,
 };
 use mneme_crdt::{decode_sync_message, encode_sync_message};
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -36,10 +37,12 @@ pub enum KernelRequest {
         mode: String,
     },
     ProveAbsent {
+        cap_b64: String,
         namespace: String,
         name: String,
     },
     SyncFrame {
+        cap_b64: String,
         bytes_b64: String,
     },
 }
@@ -69,6 +72,7 @@ impl UnixServer {
             let _ = std::fs::create_dir_all(parent);
         }
         let listener = UnixListener::bind(&self.path)?;
+        std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))?;
         loop {
             let (stream, _) = listener.accept().await?;
             let state = self.state.clone();
@@ -182,8 +186,12 @@ fn dispatch_inner(state: &AppState, req: KernelRequest) -> Result<serde_json::Va
             name,
             mode,
         } => forget(state, &cap_b64, namespace, name, mode),
-        KernelRequest::ProveAbsent { namespace, name } => prove_absent(state, namespace, name),
-        KernelRequest::SyncFrame { bytes_b64 } => sync_frame(state, bytes_b64),
+        KernelRequest::ProveAbsent {
+            cap_b64,
+            namespace,
+            name,
+        } => prove_absent(state, &cap_b64, namespace, name),
+        KernelRequest::SyncFrame { cap_b64, bytes_b64 } => sync_frame(state, &cap_b64, bytes_b64),
     }
 }
 
@@ -268,22 +276,37 @@ fn forget(
 
 fn prove_absent(
     state: &AppState,
+    cap_b64: &str,
     namespace: String,
     name: String,
 ) -> Result<serde_json::Value, MnemeError> {
+    let cap = cap_from_b64(cap_b64)?;
+    if !cap.permits_read(&namespace, TrustTier::Quarantine) {
+        return Err(MnemeError::CapDenied);
+    }
     let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    cap.verify(state.operator.as_ref(), store.current_hlc())?;
     let key = LogicalKey { namespace, name };
     let _proof = store.prove_absent(&key)?;
     Ok(serde_json::json!({ "absent": true }))
 }
 
-fn sync_frame(state: &AppState, bytes_b64: String) -> Result<serde_json::Value, MnemeError> {
+fn sync_frame(
+    state: &AppState,
+    cap_b64: &str,
+    bytes_b64: String,
+) -> Result<serde_json::Value, MnemeError> {
     use base64::Engine;
+    let cap = cap_from_b64(cap_b64)?;
+    if !cap.permits_read("sync", TrustTier::Quarantine) {
+        return Err(MnemeError::CapDenied);
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(bytes_b64.trim())
         .map_err(|_| MnemeError::SchemaDrift)?;
     let msg = decode_sync_message(&bytes)?;
     let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    cap.verify(state.operator.as_ref(), store.current_hlc())?;
     let out = match msg {
         SyncMessage::Hello { .. } => {
             let root = store.current_root()?;

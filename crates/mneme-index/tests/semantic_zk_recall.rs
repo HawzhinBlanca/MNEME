@@ -1,6 +1,6 @@
-//! Semantic recall + ZK attachment on the agent hot path (`plonky2_prover` feature).
+//! Semantic recall + ZK attachment on the agent hot path (`pedersen_schnorr_zk` feature).
 
-#![cfg(feature = "plonky2_prover")]
+#![cfg(feature = "pedersen_schnorr_zk")]
 
 use mneme_core::{
     DistanceMetric, FixedPointEmbedding, MnemeError, ObjectId, Procedure, ProcedureAlgo,

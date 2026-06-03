@@ -15,17 +15,21 @@
 //! Neither dialect can cause a write that bypasses the kernel's verified merge: every
 //! ingested object is re-hashed and its writer re-authorized inside `apply_peer_snapshot`.
 
-use crate::state::AppState;
+use crate::state::{
+    ApiError, AppState, capability_from_header, check_rate_limit, parse_capability_b64, verify_cap,
+};
 use axum::{
     Router,
     extract::{
-        State,
+        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::HeaderMap,
     response::IntoResponse,
     routing::get,
 };
-use mneme_core::{MnemeError, SyncMessage, hash_obj};
+use mneme_cap::Capability;
+use mneme_core::{MnemeError, SyncMessage, TrustTier, hash_obj};
 use mneme_crdt::{decode_sync_message, encode_sync_message};
 use mneme_smt::TOMBSTONE;
 use mneme_store::SyncSnapshot;
@@ -72,8 +76,46 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_sync(socket, state))
+#[derive(Default, Deserialize)]
+struct SyncAuthQuery {
+    cap: Option<String>,
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<SyncAuthQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    authorize_sync(&state, &headers, &params)?;
+    Ok(ws.on_upgrade(move |socket| handle_sync(socket, state)))
+}
+
+fn authorize_sync(
+    state: &AppState,
+    headers: &HeaderMap,
+    params: &SyncAuthQuery,
+) -> Result<(), ApiError> {
+    let cap = sync_cap(headers, params)?;
+    check_rate_limit(state, &cap)?;
+    verify_cap(state, &cap)?;
+    if !cap.permits_read("sync", TrustTier::Quarantine) {
+        return Err(ApiError::from_mneme(MnemeError::CapDenied));
+    }
+    Ok(())
+}
+
+fn sync_cap(headers: &HeaderMap, params: &SyncAuthQuery) -> Result<Capability, ApiError> {
+    if let Some(cap) = params.cap.as_deref() {
+        return parse_capability_b64(cap);
+    }
+    let value = headers
+        .get("authorization")
+        .or_else(|| headers.get("Authorization"))
+        .ok_or_else(|| ApiError::bad_auth("missing Authorization header"))?
+        .to_str()
+        .map_err(|_| ApiError::bad_auth("invalid Authorization header"))?;
+    capability_from_header(value)
 }
 
 async fn handle_sync(mut socket: WebSocket, state: AppState) {

@@ -30,7 +30,8 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("audit"))
         .stdout(predicate::str::contains("attest"))
         .stdout(predicate::str::contains("init"))
-        .stdout(predicate::str::contains("sync"));
+        .stdout(predicate::str::contains("sync"))
+        .stdout(predicate::str::contains("--vault"));
 }
 
 #[test]
@@ -137,6 +138,79 @@ fn init_verify_recall_forget_journey() {
         .assert()
         .success()
         .stdout(predicate::str::contains("forgot key"));
+}
+
+#[test]
+fn cli_envelope_vault_writes_wrapped_object_keys() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let seed = "22".repeat(32);
+    let master = "33".repeat(32);
+
+    mneme()
+        .env("MNEME_KMS_MASTER_KEY_HEX", &master)
+        .args([
+            "--operator-seed",
+            &seed,
+            "--vault",
+            "envelope",
+            "init",
+            store.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    mneme()
+        .env("MNEME_KMS_MASTER_KEY_HEX", &master)
+        .args([
+            "--operator-seed",
+            &seed,
+            "--vault",
+            "envelope",
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "user",
+            "--name",
+            "vaulted",
+            "--body",
+            "wrapped",
+        ])
+        .assert()
+        .success();
+
+    let key_file = first_vault_key_file(&store).expect("wrapped vault key file");
+    let bytes = fs::read(&key_file).unwrap();
+    assert_eq!(
+        bytes.len(),
+        24 + 32 + 16,
+        "envelope vault persists nonce + ciphertext + tag"
+    );
+    assert_ne!(
+        bytes[24..56],
+        [0u8; 32],
+        "wrapped key payload must not be plaintext zeros"
+    );
+
+    mneme()
+        .env("MNEME_KMS_MASTER_KEY_HEX", &master)
+        .args([
+            "--operator-seed",
+            &seed,
+            "--vault",
+            "envelope",
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "vaulted",
+            "--namespace",
+            "user",
+            "--min-tier",
+            "trusted",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("wrapped"));
 }
 
 #[test]
@@ -264,6 +338,26 @@ fn find_first_object_cbor(store: &Path) -> Option<PathBuf> {
     {
         let path = entry.path();
         if path.is_file() && path.extension().is_some_and(|e| e == "cbor") {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
+}
+
+fn first_vault_key_file(store: &Path) -> Option<PathBuf> {
+    let vault_dir = store.join("keys/vault");
+    for entry in WalkDir::new(&vault_dir)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| !name.ends_with(".shred") && name != "vault.journal")
+        {
             return Some(path.to_path_buf());
         }
     }

@@ -9,8 +9,8 @@ use axum::{
     routing::{delete, get, post},
 };
 use mneme_cap::Capability;
-use mneme_core::ObjectId;
 use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
+use mneme_core::{MnemeError, ObjectId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -264,8 +264,15 @@ async fn promote(
 
 async fn prove_absent(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path((namespace, name)): Path<(String, String)>,
 ) -> Result<Json<ProveAbsentResponse>, ApiError> {
+    let cap = auth_cap(&headers)?;
+    check_rate_limit(&state, &cap)?;
+    verify_cap(&state, &cap)?;
+    if !cap.permits_read(&namespace, TrustTier::Quarantine) {
+        return Err(ApiError::from_mneme(MnemeError::CapDenied));
+    }
     let store = state
         .store
         .lock()

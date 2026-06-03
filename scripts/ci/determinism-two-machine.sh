@@ -111,7 +111,7 @@ compare_run_a_digests() {
   local report_b="$2"
   local label_a="${3:-workspace-a}"
   local label_b="${4:-workspace-b}"
-  python3 - "$report_a" "$report_b" "$label_a" "$label_b" <<'PY'
+  "$(mneme_ci_python)" - "$report_a" "$report_b" "$label_a" "$label_b" <<'PY'
 import json, sys
 
 report_a, report_b, label_a, label_b = sys.argv[1:5]
@@ -286,7 +286,7 @@ run_docker_sim() {
 
   MNEME_DOCKER_IMAGE_RESOLVED="$image" \
     MNEME_DOCKER_REV="$rev" \
-    python3 - "$report_a" "$report_b" "$manifest" "$TS" <<'PY'
+    "$(mneme_ci_python)" - "$report_a" "$report_b" "$manifest" "$TS" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
 

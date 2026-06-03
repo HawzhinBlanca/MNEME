@@ -51,7 +51,7 @@ while [[ $(date +%s) -lt $end_epoch ]]; do
   # (the previous `sed` columns shifted on rows whose `actual` carried escaped
   # quotes). The matrix TSV now matches the JSON ground truth byte-for-byte.
   grep '^CHAOS_ROW|' "$LOG" | tail -n $((ITERATIONS * 9)) \
-    | python3 "$ROOT/scripts/chaos/chaos_rows_to_tsv.py" "$run" "$UNSAFE_LOG" \
+    | "$(mneme_ci_python)" "$ROOT/scripts/chaos/chaos_rows_to_tsv.py" "$run" "$UNSAFE_LOG" \
         >>"$MATRIX_TSV"
 done
 

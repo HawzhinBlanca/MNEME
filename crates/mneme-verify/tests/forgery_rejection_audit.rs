@@ -11,7 +11,7 @@
 //!   MembershipProofInvalid  -> MnemeError::IndexPathInvalid
 //!   ProcedureReplayFailed   -> MnemeError::ProcedureMismatch
 //!   CapabilityInvalid       -> MnemeError::CapDenied
-//! ZK verification (check 6) lives behind mneme-index `plonky2_prover`; see
+//! ZK verification (check 6) lives behind mneme-index `pedersen_schnorr_zk`; see
 //! crates/mneme-index/tests/forgery_zk_audit.rs.
 
 mod helpers;
@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 
 use helpers::{
     SemanticFixture, build_root_chain_fixture, build_valid_recall, build_valid_recall_with_parent,
-    build_valid_semantic_recall, sample_procedure, theme_key,
+    build_valid_semantic_recall, sample_procedure, sample_query_embedding, theme_key,
 };
 use mneme_cap::{Capability, Permissions, agent_cap};
 use mneme_core::{
@@ -517,7 +517,7 @@ fn semantic_recall_object_swapped_object_tampered() {
     let query = Query {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
-        embedding: None,
+        embedding: Some(sample_query_embedding()),
     };
     let ctx = RecallContext {
         key_index: &f.key_index,
@@ -532,6 +532,30 @@ fn semantic_recall_object_swapped_object_tampered() {
     assert_eq!(
         verify_semantic_recall(&input, &sample_procedure(), &query, &f.trust, &ctx).unwrap_err(),
         MnemeError::ObjectTampered,
+    );
+}
+
+#[test]
+fn semantic_recall_missing_query_embedding_fails_closed() {
+    let f = build_valid_semantic_recall();
+    let query = Query {
+        logical_key: theme_key("semantic", "query"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    let ctx = RecallContext {
+        key_index: &f.key_index,
+        dag: &f.dag,
+        objects: &f.objects,
+        previous_root: f.previous_root.as_ref(),
+    };
+    let input = SemanticRecallInput {
+        receipt: f.receipt.clone(),
+        root: f.root.clone(),
+    };
+    assert_eq!(
+        verify_semantic_recall(&input, &sample_procedure(), &query, &f.trust, &ctx).unwrap_err(),
+        MnemeError::ProcedureMismatch,
     );
 }
 

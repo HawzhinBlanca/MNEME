@@ -1,12 +1,39 @@
 use super::common::TestHarness;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
+
+fn authed_ws_request(h: &TestHarness) -> tokio_tungstenite::tungstenite::http::Request<()> {
+    let ws_url = format!("ws://{}/v1/sync", h.server.http_addr);
+    let mut req = ws_url.into_client_request().expect("ws request");
+    req.headers_mut().insert(
+        "Authorization",
+        HeaderValue::from_str(&h.agent_auth_header()).expect("auth header"),
+    );
+    req
+}
+
+#[tokio::test]
+async fn websocket_sync_requires_auth() {
+    let h = TestHarness::new().await;
+    let ws_url = format!("ws://{}/v1/sync", h.server.http_addr);
+    let err = connect_async(&ws_url)
+        .await
+        .expect_err("unauthenticated sync websocket must fail closed");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("401") || msg.contains("HTTP error"),
+        "expected HTTP auth rejection, got {msg}"
+    );
+}
 
 #[tokio::test]
 async fn websocket_sync_hello_root_proof() {
     let h = TestHarness::new().await;
-    let ws_url = format!("ws://{}/v1/sync", h.server.http_addr);
-    let (mut ws, _) = connect_async(&ws_url).await.expect("ws connect");
+    let (mut ws, _) = connect_async(authed_ws_request(&h))
+        .await
+        .expect("ws connect");
 
     let hello = mnemed::sync::encode_hello(&h.server.state, [0x02; 16]).expect("hello");
     ws.send(tokio_tungstenite::tungstenite::Message::Binary(
@@ -27,8 +54,9 @@ async fn websocket_sync_hello_root_proof() {
 #[tokio::test]
 async fn websocket_sync_bye_closes() {
     let h = TestHarness::new().await;
-    let ws_url = format!("ws://{}/v1/sync", h.server.http_addr);
-    let (mut ws, _) = connect_async(&ws_url).await.expect("ws connect");
+    let (mut ws, _) = connect_async(authed_ws_request(&h))
+        .await
+        .expect("ws connect");
     ws.send(tokio_tungstenite::tungstenite::Message::Binary(
         vec![0x07].into(),
     ))
