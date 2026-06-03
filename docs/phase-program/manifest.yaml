@@ -111,24 +111,27 @@ phases:
 
   - phase: Phase IV — Scale & standard
     status: deferred
+    note: "Research-only slice on master; piop_research flag off-by-default and panics; no PIOP/FRI prover or verifier shipped."
     items:
       - id: P4-1
         title: Global exact-NN (zkRAG/PIOP path)
         status: deferred
         evidence:
-          - path: docs/ROADMAP.md
+          - path: docs/PHASE_IV_TASK_SPEC.md
+          - path: docs/research/PHASE_IV_A_PIOP_SPIKE.md
+          - path: crates/mneme-index/src/piop_research.rs
       - id: P4-2
         title: Federated cognition certificates
         status: deferred
         evidence:
-          - path: docs/ROADMAP.md
+          - path: docs/PHASE_IV_TASK_SPEC.md
       - id: P4-3
         title: Open standardization + interop SDKs
         status: deferred
         evidence:
-          - path: docs/ROADMAP.md
+          - path: docs/PHASE_IV_TASK_SPEC.md
       - id: P4-4
         title: Cost-to-default (performance + cost)
         status: deferred
         evidence:
-          - path: docs/ROADMAP.md
+          - path: docs/PHASE_IV_TASK_SPEC.md

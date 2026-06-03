@@ -212,6 +212,14 @@ mod tests {
         assert!(PIOP_RESEARCH_STATUS.contains("UNIMPLEMENTED"));
     }
 
+    #[test]
+    fn piop_research_feature_is_not_default() {
+        assert!(
+            !cfg!(feature = "piop_research"),
+            "piop_research must remain off-by-default and research-only; remove it from default features."
+        );
+    }
+
     #[cfg(feature = "commitment_binding")]
     #[test]
     fn commitment_binding_receipt_is_not_zk() {
