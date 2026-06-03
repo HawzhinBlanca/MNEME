@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const PHASE_I_CERTIFY_VERSION: u16 = 1;
+const PHASE_I_VERIFY_CERT_VERSION: u16 = 1;
 
 #[derive(Parser)]
 #[command(
@@ -103,6 +104,8 @@ enum Commands {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Phase I certificate verifier scaffold (gate closed; fail-closed)
+    VerifyCert { file: PathBuf },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
@@ -382,6 +385,12 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             let _ = output;
             Err(CliErrorKind::Kernel(MnemeError::UnsupportedVersion {
                 got: PHASE_I_CERTIFY_VERSION,
+            }))
+        }
+        Commands::VerifyCert { file } => {
+            require_file_exists(&file, "certificate")?;
+            Err(CliErrorKind::Kernel(MnemeError::UnsupportedVersion {
+                got: PHASE_I_VERIFY_CERT_VERSION,
             }))
         }
         Commands::Attest { root } => {

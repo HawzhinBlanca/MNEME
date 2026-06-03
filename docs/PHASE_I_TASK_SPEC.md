@@ -135,7 +135,7 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 | Date | Item | Status |
 |---|---|---|
 | 2026-06-03 | Phase I spec authored (from `VISION_PROOF_CARRYING_COGNITION.md`) | Done |
-| 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, and `mneme certify`; all fail closed with tests. | **Landed (gated scaffold only)** |
+| 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, `mneme certify`, and `mneme verify-cert`; all fail closed with tests. | **Landed (gated scaffold only)** |
 
 ---
 

@@ -14,7 +14,7 @@ use mneme_core::{
 
 /// Text status for observability surfaces; gate remains closed.
 pub const CONTEXT_GATE_STATUS: &str =
-    "context gate attestation verifier stub — gate closed until remote attestation ships";
+    "context gate attestation verifier stub - gate closed until remote attestation ships";
 
 /// Verify that the provided attestation matches the assembled context digests.
 pub fn verify_consumption_attestation(

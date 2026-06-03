@@ -30,6 +30,7 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("audit"))
         .stdout(predicate::str::contains("attest"))
         .stdout(predicate::str::contains("certify"))
+        .stdout(predicate::str::contains("verify-cert"))
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("sync"))
         .stdout(predicate::str::contains("--vault"));
@@ -95,6 +96,20 @@ fn certify_is_fail_closed() {
             "--output",
             output.to_str().unwrap(),
         ])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("unsupported version"));
+}
+
+#[test]
+fn verify_cert_is_fail_closed() {
+    let dir = tempdir().unwrap();
+    let cert = dir.path().join("cert.json");
+    fs::write(&cert, b"{\"version\":1}").unwrap();
+
+    mneme()
+        .args(["verify-cert", cert.to_str().unwrap()])
         .assert()
         .failure()
         .code(5)
