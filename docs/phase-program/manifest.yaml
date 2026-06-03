@@ -67,6 +67,7 @@ phases:
           - path: docs/PHASE_II_TASK_SPEC.md
           - path: crates/mneme-core/src/context.rs
           - path: crates/mneme-gate/src/lib.rs
+          - path: crates/mneme-context/tests/deterministic_assembly.rs
       - id: P2-5
         title: Consumption attestation verifier tests (stub gate closed)
         status: done
