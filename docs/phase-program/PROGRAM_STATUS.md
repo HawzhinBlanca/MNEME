@@ -1,16 +1,16 @@
 # MNEME Phase Program — Status (master)
 
-**Date:** 2026-06-03 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; fail-closed defaults unchanged.
+**Date:** 2026-06-04 • **Branch:** `master` @ `9462a04` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
 ---
 
 ## On master (software slices)
-- Phase I: zkANN-1 + bi-temporal + provenance + Certificate v1 **landed** (P1-1..P1-4 done); docs/tamper/fuzz lane **partial** (P1-5).
-- Phase II: Context Gate software scaffolding **landed** (P2-3..P2-6 done); enclave/RA remains out-of-scope for this slice.
+- Phase I: zkANN-1 + bi-temporal + provenance + Certificate v1 + proof obligations **done** (P1-1..P1-5). `validation-lane full` and `phase-program-gate full` green; `cognition_cert_parse` fuzz in smoke/meaningful lanes. Red-team **#3** (provenance-scoped functional path) and **#5** (HNSW overclaim honesty) resolved at `d433999`. HNSW path remains **prover-asserted authenticated set**, not graph-walk replay (see `docs/redteam/PHASE_I_HNSW_AUDIT_OVERCLAIM.md`).
+- Phase II: Context Gate software scaffolding **landed** (P2-3..P2-6); CCA wire adversarial tests in `mneme-core` / `mneme-gate`; gate closed, no enclave claims.
 - Phase III: Accountability scaffolding **partial** (P3-1, P3-2); formal verifier proof and trust-ops **deferred** (P3-3, P3-4).
 - Phase IV: **Research-only**; `piop_research` flag off-by-default, panicking entry; no global exact-NN prover or federation/interop work on master.
 
-Approx. software progress by item count: **~47% done (8/17)**, **~18% partial (3/17)**, **~35% deferred (6/17)** — honest, excluding any hardware/TEE/PIOP delivery.
+Approx. software progress by item count: **~59% done (10/17)**, **~12% partial (2/17)**, **~29% deferred (5/17)** — honest, excluding hardware/TEE/PIOP delivery.
 
 ---
 
@@ -29,3 +29,5 @@ Approx. software progress by item count: **~47% done (8/17)**, **~18% partial (3
 - `docs/PHASE_III_TASK_SPEC.md`
 - `docs/PHASE_IV_TASK_SPEC.md`
 - `docs/research/PHASE_IV_A_PIOP_SPIKE.md`
+- `docs/redteam/PHASE_I_PROVENANCE_SCOPED.md`
+- `docs/redteam/PHASE_I_HNSW_AUDIT_OVERCLAIM.md`

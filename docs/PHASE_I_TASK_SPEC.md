@@ -66,7 +66,7 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
 - [ ] Cross-impl: the `mneme-crossref` reference verifier can check a Certificate v1 (independent reimpl).
 
 ### P1-5 — Proof obligations & docs (P1)
-- [ ] `validation-lane.sh full` green; new generative tamper cases for each proof; fuzz target for the certificate wire.
+- [x] `validation-lane.sh full` green; new generative tamper cases for each proof; fuzz target for the certificate wire (`cognition_cert_parse`).
 - [ ] Determinism foundation-gate unaffected (proofs are off the signed-root preimage path) — byte-identical ×2.
 - [ ] README + `REMAINING_ITEMS.md` updated; honesty boundary section for zkANN-1 (dominance vs global-NN).
 
