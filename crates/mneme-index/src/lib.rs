@@ -51,8 +51,8 @@ pub use receipt::ZkRetrievalAttachment;
 pub use receipt::{ProvenanceAttestation, ZkannAttachment};
 pub use semantic::SemanticIndex;
 pub use verify::{
-    HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_full, verify_semantic_receipt_vo,
-    verify_semantic_receipt_vo_zkann,
+    HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_ads_vo_membership, verify_semantic_receipt_full,
+    verify_semantic_receipt_tcb_gate, verify_semantic_receipt_vo, verify_semantic_receipt_vo_zkann,
 };
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkann_attachment};

@@ -3,6 +3,10 @@
 **Severity: CRITICAL (TCB soundness / fail-open).** Introduced by `d433999`
 ("fix(phase-i): close red-team findings #3 and #5"), **live on `master`**, CI green. Date 2026-06-04.
 
+**Status: FIXED** on branch `redteam/tcb-failopen` — `verify_semantic_receipt_tcb_gate` always runs
+Merkle membership; provenance receipts use `verify_provenance_attestation` instead of skipping VO.
+Regression: `forgery_provenance_bearing_non_topk_result_rejected`.
+
 ## What
 
 `crates/mneme-verify/src/semantic.rs::verify_semantic_receipt` — a function in the **fail-closed

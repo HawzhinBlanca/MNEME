@@ -6,8 +6,8 @@ use crate::receipt::SemanticRecallReceipt;
 use mneme_core::{MnemeError, Procedure, VerificationObject};
 use std::collections::{HashMap, HashSet};
 
-/// Verify ADS backend VO: Merkle paths + deterministic procedure replay.
-pub fn verify_ads_vo(
+/// Merkle membership for every VO candidate against `semantic_commit` (always required).
+pub fn verify_ads_vo_membership(
     vo: &VerificationObject,
     semantic_commit: &[u8; 32],
     proc: &Procedure,
@@ -41,21 +41,40 @@ pub fn verify_ads_vo(
         };
         SemanticMerkleTree::verify_path_with_index(*leaf_index, &commit, path, semantic_commit)?;
     }
+    Ok(())
+}
 
+/// Verify ADS backend VO: Merkle paths + deterministic procedure replay.
+pub fn verify_ads_vo(
+    vo: &VerificationObject,
+    semantic_commit: &[u8; 32],
+    proc: &Procedure,
+) -> Result<(), MnemeError> {
+    verify_ads_vo_membership(vo, semantic_commit, proc)?;
     let replayed = replay_from_candidates(proc, &vo.candidates);
     if replayed != vo.result_ids {
         return Err(MnemeError::ProcedureMismatch);
     }
-
     Ok(())
 }
 
-/// Verify ADS VO plus optional ZK retrieval attachment on a semantic recall receipt.
-pub fn verify_semantic_receipt_vo(
+/// Semantic receipt VO gate for the verifier TCB: membership always; dominance via
+/// unfiltered replay or provenance attestation; optional ZK attachment.
+pub fn verify_semantic_receipt_tcb_gate(
     receipt: &SemanticRecallReceipt,
     proc: &Procedure,
+    object_bytes: Option<&std::collections::BTreeMap<[u8; 32], Vec<u8>>>,
 ) -> Result<(), MnemeError> {
-    verify_ads_vo(&receipt.verification_object, &receipt.semantic_commit, proc)?;
+    verify_ads_vo_membership(&receipt.verification_object, &receipt.semantic_commit, proc)?;
+    if receipt.provenance.is_none() {
+        let replayed = replay_from_candidates(proc, &receipt.verification_object.candidates);
+        if replayed != receipt.verification_object.result_ids {
+            return Err(MnemeError::ProcedureMismatch);
+        }
+    } else {
+        let objs = object_bytes.ok_or(MnemeError::ProvenanceFilterViolation)?;
+        crate::provenance::verify_provenance_attestation(receipt, proc, objs)?;
+    }
     if let Some(zk) = &receipt.zk_retrieval {
         #[cfg(feature = "pedersen_schnorr_zk")]
         {
@@ -68,6 +87,14 @@ pub fn verify_semantic_receipt_vo(
         }
     }
     Ok(())
+}
+
+/// Verify ADS VO plus optional ZK retrieval attachment on a semantic recall receipt.
+pub fn verify_semantic_receipt_vo(
+    receipt: &SemanticRecallReceipt,
+    proc: &Procedure,
+) -> Result<(), MnemeError> {
+    verify_semantic_receipt_tcb_gate(receipt, proc, None)
 }
 
 /// Verify ADS VO plus zkANN-1 attachment (Phase I P1-1).
