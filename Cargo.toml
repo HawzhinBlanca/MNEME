@@ -15,6 +15,7 @@ members = [
     "crates/mneme-verify",
     "crates/mneme-store",
     "crates/mneme-account",
+    "crates/mneme-gate",
     "crates/mneme-mcp",
     "crates/mneme-cli",
     "crates/mnemed",
@@ -45,6 +46,7 @@ mneme-attest = { path = "crates/mneme-attest" }
 mneme-verify = { path = "crates/mneme-verify" }
 mneme-store = { path = "crates/mneme-store" }
 mneme-account = { path = "crates/mneme-account" }
+mneme-gate = { path = "crates/mneme-gate" }
 mnemed = { path = "crates/mnemed" }
 mneme-context = { path = "crates/mneme-context" }
 

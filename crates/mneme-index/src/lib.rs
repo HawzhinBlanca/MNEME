@@ -47,7 +47,7 @@ pub use verify::{HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_vo
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 
 #[cfg(feature = "context_gate")]
-pub use verify::verify_consumption_attestation;
+pub use mneme_gate::verify_consumption_attestation;
 
 #[cfg(feature = "commitment_binding")]
 pub use commitment_binding::{

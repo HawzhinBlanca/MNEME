@@ -1,7 +1,8 @@
 //! Byte-deterministic prompt assembly from verified recall entries (Phase II P2-3).
 //!
-//! **Untrusted component:** the Context Gate checks `context_hash == certified_memory_set_hash`
-//! binding via the CCA; a buggy assembler cannot smuggle context past hash equality.
+//! **Untrusted component:** the Context Gate independently checks the assembled-context
+//! digest and certified-memory-set digest carried by the CCA. The two digests are
+//! domain-separated and must not be compared for equality.
 //!
 //! **Honesty:** assembly proves *which authenticated entries* were concatenated into the prompt —
 //! not semantic truth, not output correctness (see `docs/ROADMAP.md` Phase II).
@@ -19,7 +20,6 @@ pub use assembly::{
 #[cfg(test)]
 mod profile_id_tests {
     use super::ASSEMBLY_PROFILE_V1;
-    use blake3;
 
     #[test]
     fn profile_v1_id_is_frozen() {

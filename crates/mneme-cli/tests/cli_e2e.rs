@@ -29,6 +29,7 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("merge"))
         .stdout(predicate::str::contains("audit"))
         .stdout(predicate::str::contains("attest"))
+        .stdout(predicate::str::contains("certify"))
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("sync"))
         .stdout(predicate::str::contains("--vault"));
@@ -77,6 +78,27 @@ fn verify_missing_store_path_exits_usage() {
         .failure()
         .code(2)
         .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn certify_is_fail_closed() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    fs::create_dir_all(&store).unwrap();
+    Store::create(&store, KeyPair::generate()).unwrap();
+    let output = dir.path().join("cert.json");
+
+    mneme()
+        .args([
+            "certify",
+            store.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("unsupported version"));
 }
 
 #[test]

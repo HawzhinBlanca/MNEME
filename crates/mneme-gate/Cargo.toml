@@ -1,0 +1,12 @@
+[package]
+name = "mneme-gate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Context gate attestation verifier (fail-closed digest guard)"
+
+[dependencies]
+mneme-core.workspace = true
+
+[dev-dependencies]
+hex.workspace = true

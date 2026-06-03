@@ -107,8 +107,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings        # incl. --features plonky2_prover
 scripts/ci/verify-tcb-guard.sh                                # mneme-verify ≤ 500 lines
 cargo test -p mneme-index --features plonky2_prover -- zkann --nocapture
-cargo test -p mneme-store -- recall_verified_at provenance_scoped --nocapture
-cargo test -p mneme-cli   -- certify verify_cert --nocapture
+cargo test -p mneme-store recall_verified_at -- --nocapture
+cargo test -p mneme-store provenance_scoped -- --nocapture
+cargo test -p mneme-cli certify -- --nocapture
+cargo test -p mneme-cli verify_cert -- --nocapture
 scripts/ci/validation-lane.sh full                            # tamper ≥150, determinism ×2, fuzz, vectors
 scripts/ci/cross-implementation-vectors.sh                    # crossref verifies Certificate v1
 ```
@@ -133,6 +135,7 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 | Date | Item | Status |
 |---|---|---|
 | 2026-06-03 | Phase I spec authored (from `VISION_PROOF_CARRYING_COGNITION.md`) | Done |
+| 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, and `mneme certify`; all fail closed with tests. | **Landed (gated scaffold only)** |
 
 ---
 
