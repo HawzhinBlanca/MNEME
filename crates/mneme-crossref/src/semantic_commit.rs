@@ -3,7 +3,7 @@
 //! Independent reimplementation mirroring mneme-index `commit.rs`, `verify.rs`,
 //! and `zkann.rs`. No `mneme-*` deps.
 
-use crate::domain::{hash_sem_internal, hash_sem_leaf};
+use crate::domain::{empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 use crate::error::CrossrefError;
 use crate::procedure::{CandidateRow, Procedure, procedure_id, replay_from_candidates};
 use std::collections::{HashMap, HashSet};
@@ -114,6 +114,12 @@ pub fn verify_semantic_vo_zkann(
             verify_ads_vo(vo, semantic_commit, proc)?;
             match z.level {
                 RetrievalProofLevel::ExactDominance => {
+                    // SOUNDNESS PARITY with the main verifier (mneme-index
+                    // verify_candidate_set_binds_root): completeness MUST bind to the signed
+                    // root, never a prover-supplied count. Without this, crossref accepts the
+                    // dropped-true-nearest-neighbor forge the main verifier rejects — a
+                    // soundness gap AND a divergence between the two verifiers.
+                    verify_candidate_set_binds_root(vo, semantic_commit)?;
                     verify_exact_dominance(vo, proc, committed_leaf_count)
                 }
                 RetrievalProofLevel::HnswAuditOnDemand => {
@@ -135,6 +141,56 @@ pub fn verify_exact_dominance(
         return Err(CrossrefError::RetrievalDominanceFailed);
     }
     dominance_over_candidates(vo, proc)
+}
+
+/// Authenticate the COMPLETE candidate set against the signed `semantic_commit` (parity with
+/// `mneme-index::zkann::verify_candidate_set_binds_root`): rebuild the semantic Merkle tree from
+/// exactly the presented `(object_id, embedding_commit)` leaves and require
+/// `root == semantic_commit`, rejecting duplicate object_ids. Any dropped/added/substituted/
+/// duplicated leaf changes the root → fail closed. Replaces the unsound prover-supplied count.
+fn verify_candidate_set_binds_root(
+    vo: &VerificationObject,
+    semantic_commit: &[u8; 32],
+) -> Result<(), CrossrefError> {
+    let mut ids: Vec<[u8; 32]> = vo.candidates.iter().map(|(id, _, _)| *id).collect();
+    let n = ids.len();
+    ids.sort();
+    ids.dedup();
+    if ids.len() != n {
+        return Err(CrossrefError::RetrievalDominanceFailed);
+    }
+    if rebuild_semantic_root(&vo.candidates) != *semantic_commit {
+        return Err(CrossrefError::RetrievalDominanceFailed);
+    }
+    Ok(())
+}
+
+/// Mirror of `SemanticMerkleTree::from_entries().root()`: sort leaves by object_id, hash each
+/// leaf, then pairwise-hash up the tree with odd-node self-promotion.
+fn rebuild_semantic_root(candidates: &[CandidateRow]) -> [u8; 32] {
+    let mut pairs: Vec<([u8; 32], [u8; 32])> =
+        candidates.iter().map(|(id, ec, _)| (*id, *ec)).collect();
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut level: Vec<[u8; 32]> = pairs.iter().map(|(id, ec)| hash_sem_leaf(id, ec)).collect();
+    if level.is_empty() {
+        return empty_semantic_root();
+    }
+    while level.len() > 1 {
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        let mut i = 0;
+        while i < level.len() {
+            let l = level[i];
+            let r = if i + 1 < level.len() {
+                level[i + 1]
+            } else {
+                level[i]
+            };
+            next.push(hash_sem_internal(&l, &r));
+            i += 2;
+        }
+        level = next;
+    }
+    level[0]
 }
 
 /// Dominance over the declared visited neighborhood (HNSW audit-on-demand path).
@@ -194,4 +250,65 @@ fn dominance_over_candidates(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod soundness_tests {
+    use super::*;
+
+    fn cand(id: u8, ec: u8, d: i64) -> CandidateRow {
+        ([id; 32], [ec; 32], d)
+    }
+
+    fn vo(candidates: Vec<CandidateRow>) -> VerificationObject {
+        VerificationObject {
+            nodes: vec![],
+            candidates,
+            leaf_indices: vec![],
+            procedure_id: [0u8; 32],
+            query_commit: [0u8; 32],
+            result_ids: vec![],
+        }
+    }
+
+    /// Parity with the main verifier's `zkann_dropped_true_nearest_neighbor_must_be_rejected`:
+    /// dropping the true nearest neighbor (id 9) yields a different rebuilt root than the signed
+    /// `semantic_commit`, so completeness binding fails closed — crossref no longer diverges.
+    #[test]
+    fn binds_root_rejects_dropped_true_nearest_neighbor() {
+        let full = vec![cand(1, 0x11, 5), cand(2, 0x22, 9), cand(9, 0x99, 1)];
+        let commit = rebuild_semantic_root(&full);
+        assert!(verify_candidate_set_binds_root(&vo(full), &commit).is_ok());
+
+        let dropped = vec![cand(1, 0x11, 5), cand(2, 0x22, 9)]; // true NN (id 9) hidden
+        assert_eq!(
+            verify_candidate_set_binds_root(&vo(dropped), &commit),
+            Err(CrossrefError::RetrievalDominanceFailed),
+            "dropping the true nearest neighbor must fail closed (root mismatch)"
+        );
+    }
+
+    /// Duplicate-padding (repeat a member to hit a count) is rejected before the root check.
+    #[test]
+    fn binds_root_rejects_duplicate_padding() {
+        let full = vec![cand(1, 0x11, 5), cand(2, 0x22, 9)];
+        let commit = rebuild_semantic_root(&full);
+        let dup = vec![cand(1, 0x11, 5), cand(1, 0x11, 5)];
+        assert_eq!(
+            verify_candidate_set_binds_root(&vo(dup), &commit),
+            Err(CrossrefError::RetrievalDominanceFailed)
+        );
+    }
+
+    /// A substituted leaf (wrong embedding_commit) changes the root → rejected.
+    #[test]
+    fn binds_root_rejects_substituted_leaf() {
+        let full = vec![cand(1, 0x11, 5), cand(2, 0x22, 9)];
+        let commit = rebuild_semantic_root(&full);
+        let swapped = vec![cand(1, 0x11, 5), cand(2, 0xAB, 9)]; // 0x22 -> 0xAB
+        assert_eq!(
+            verify_candidate_set_binds_root(&vo(swapped), &commit),
+            Err(CrossrefError::RetrievalDominanceFailed)
+        );
+    }
 }
