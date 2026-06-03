@@ -1217,6 +1217,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-attest"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "der",
+ "mneme-core",
+ "pem-rfc7468",
+]
+
+[[package]]
 name = "mneme-cap"
 version = "0.1.0"
 dependencies = [
@@ -1587,6 +1597,15 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "pem-rfc7468"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6305423e0e7738146434843d1694d621cce767262b2a86910beab705e4493d9"
+dependencies = [
+ "base64ct",
 ]
 
 [[package]]

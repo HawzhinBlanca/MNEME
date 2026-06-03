@@ -14,6 +14,7 @@ mneme-core = { path = "../crates/mneme-core" }
 mneme-index = { path = "../crates/mneme-index" }
 mneme-smt = { path = "../crates/mneme-smt" }
 mneme-crdt = { path = "../crates/mneme-crdt" }
+mneme-attest = { path = "../crates/mneme-attest" }
 
 [[bin]]
 name = "dcbor_parse"
@@ -53,6 +54,13 @@ bench = false
 [[bin]]
 name = "sync_message_parse"
 path = "fuzz_targets/sync_message_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attest_parse"
+path = "fuzz_targets/attest_parse.rs"
 test = false
 doc = false
 bench = false
