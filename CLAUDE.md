@@ -44,7 +44,7 @@ scripts/ci/validation-lane.sh full         # everything above + bench + fuzz + v
 # §21 acceptance demo (offline, tests real adversarial scenarios)
 scripts/demo/killer-demo.sh
 
-# Fuzz (cargo-fuzz required; targets: dcbor_parse, smt_parse, cap_parse, receipt_parse, index_wire, sync_message_parse)
+# Fuzz (cargo-fuzz required; targets: dcbor_parse, smt_parse, cap_parse, receipt_parse, index_wire, sync_message_parse, cognition_cert_parse)
 scripts/ci/fuzz-smoke.sh          # fast smoke (-runs=16)
 scripts/ci/fuzz-meaningful.sh     # ≥30s per target
 
