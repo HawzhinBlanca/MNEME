@@ -31,7 +31,7 @@
 
 ### E2 — ZK on recall path (P0)
 
-- [x] `plonky2_prover` feature wires proof generation into semantic `recall_receipt` and `verify_semantic_recall` via `verify_semantic_receipt_vo` in `mneme-index` (TCB unchanged).
+- [x] `pedersen_schnorr_zk` feature wires proof generation into semantic `recall_receipt` and `verify_semantic_recall` via `verify_semantic_receipt_vo` in `mneme-index` (TCB unchanged). The feature was previously mis-named `plonky2_prover` and has been renamed for honesty; `plonky2_prover` remains only as a deprecated compatibility alias and still uses Pedersen+Schnorr over Ristretto on stable Rust, not Plonky2.
 - [x] Forgery tests reject wrong commits / Schnorr scalars with `MnemeError::ZkProofInvalid` (`forgery_zk_audit`, `semantic_zk_recall`).
 - [x] Default build remains non-ZK; honesty strings preserved in errors and MCP tool descriptions.
 
@@ -71,7 +71,7 @@ Wave 2.0-E:              live MCP CI + two-peer sync demo — DONE
 |---|---|
 | `mnemed::sync_client` | Canonical §11 WebSocket **client** (production pull) |
 | `mneme-cli` | `sync` subcommand; operator UX |
-| `mneme-index` | ZK prove/verify on semantic path (`plonky2_prover`) |
+| `mneme-index` | ZK prove/verify on semantic path (`pedersen_schnorr_zk`; deprecated `plonky2_prover` alias delegates to it) |
 | `mneme-verify` | Fail-closed ZK gate (budgeted) |
 | `mneme-store` | Merge barriers, incremental semantic rebuild |
 | `mneme-crypto` | KMS `KeyVault` implementation |
@@ -85,7 +85,7 @@ cargo fmt --all -- --check
 scripts/ci/validation-lane.sh full
 cargo test -p mnemed -- v11_object_sync --nocapture
 cargo test -p mneme-cli -- sync --nocapture   # after CLI sync lands
-cargo test -p mneme-index --features plonky2_prover -- forgery_zk --nocapture
+cargo test -p mneme-index --features pedersen_schnorr_zk -- forgery_zk --nocapture
 scripts/ci/verify-tcb-guard.sh   # must stay ≤500 lines in mneme-verify
 ```
 

@@ -1,7 +1,8 @@
-//! ZK retrieval attachment for semantic recall receipts (`plonky2_prover` feature).
+//! ZK retrieval attachment for semantic recall receipts (`pedersen_schnorr_zk` feature).
 
-use crate::plonky2_prover::{
-    Plonky2RetrievalProof, RetrievalWitness, prove_plonky2_retrieval, verify_plonky2_retrieval,
+use crate::pedersen_schnorr_zk::{
+    PedersenSchnorrRetrievalProof, RetrievalWitness, prove_pedersen_schnorr,
+    verify_pedersen_schnorr,
 };
 use crate::receipt::{SemanticRecallReceipt, ZkRetrievalAttachment};
 use mneme_core::{FixedPointEmbedding, MnemeError, VerificationObject};
@@ -27,7 +28,7 @@ pub fn try_attach_zk_retrieval(receipt: &mut SemanticRecallReceipt, query: &Fixe
         return;
     }
     let witness = RetrievalWitness::matching(query_commit);
-    let Ok(proof) = prove_plonky2_retrieval(&witness) else {
+    let Ok(proof) = prove_pedersen_schnorr(&witness) else {
         return;
     };
     receipt.zk_retrieval = Some(ZkRetrievalAttachment {
@@ -41,11 +42,11 @@ pub fn verify_zk_retrieval_attachment(
     zk: &ZkRetrievalAttachment,
     vo: &VerificationObject,
 ) -> Result<(), MnemeError> {
-    let proof = Plonky2RetrievalProof {
+    let proof = PedersenSchnorrRetrievalProof {
         public_commit: zk.public_commit,
         proof_bytes: zk.proof_bytes.clone(),
     };
-    verify_plonky2_retrieval(&proof, &zk.public_commit)?;
+    verify_pedersen_schnorr(&proof, &zk.public_commit)?;
     let top = vo.result_ids.first().ok_or(MnemeError::ZkProofInvalid)?;
     let emb = vo
         .candidates

@@ -3,7 +3,7 @@
 //! **Not zero-knowledge.** This module binds `(object_id, embedding_commit)` to a
 //! public semantic-leaf commitment using a tagged BLAKE3 digest envelope. It does
 //! not hide query or index data and is not a SNARK. Plonky2/V3DB-style ZK retrieval
-//! is a **12-month milestone only** — see `plonky2_prover` (fail-closed stub, B3 closed).
+//! is a **12-month milestone only** — see `pedersen_schnorr_zk` (real ZK, B3 closed).
 
 use crate::commit::hash_sem_leaf;
 use mneme_core::MnemeError;

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use helpers::{
     build_root_chain_fixture, build_valid_recall, build_valid_semantic_recall, sample_procedure,
-    theme_key,
+    sample_query_embedding, theme_key,
 };
 use mneme_core::{MnemeError, Query, TrustTier};
 use mneme_crypto::KeyPair;
@@ -226,7 +226,7 @@ fn forgery_semantic_recall_swaps_object_bytes_under_valid_receipt() {
     let query = Query {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
-        embedding: None,
+        embedding: Some(sample_query_embedding()),
     };
     let ctx = RecallContext {
         key_index: &f.key_index,

@@ -326,6 +326,7 @@ impl Store {
                 peer_snapshot,
                 &self.trust,
             )?;
+            let pruned_keyed_metadata = self.prune_keyed_metadata_to_live_keys();
             if let Some(peer_path) = peer_vault_path {
                 copy_peer_vault_keys(peer_snapshot, peer_path, &self.objects, &mut *self.vault)?;
             }
@@ -339,7 +340,12 @@ impl Store {
                 .collect();
             layout::write_objects_batch(&self.path, &new_objects)?;
             pause::checkpoint(pause::AFTER_OBJECT_WRITE)?;
-            self.apply_semantic_merge_delta(&pre_objects)?;
+            if pruned_keyed_metadata {
+                self.rebuild_semantic_index()?;
+                layout::persist_embeddings(&self.path, self)?;
+            } else {
+                self.apply_semantic_merge_delta(&pre_objects)?;
+            }
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
             // §22 B5: one snapshot persist (O(1) fsync) for the key-index and
             // object-keys sidecars, instead of an O(merged) loop of per-key journal

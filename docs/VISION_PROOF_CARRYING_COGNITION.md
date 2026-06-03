@@ -102,7 +102,7 @@ month moonshot.
 | # | Process | What it proves | Seed in MNEME today |
 |---|---|---|---|
 | 1 | **Verifiable memory** | integrity / provenance / authorization of each stored memory | ✅ shipped (signed root, receipts, fail-closed) |
-| 2 | **Proven-correct retrieval (zkANN)** | the returned k *are* the true top-k of the committed index — upgrades *procedure-faithful → retrieval-correct* | seam exists (`plonky2_prover`); needs [zkRAG/V3DB-style HNSW PIOP](https://eprint.iacr.org/2026/709) |
+| 2 | **Proven-correct retrieval (zkANN)** | the returned k *are* the true top-k of the committed index — upgrades *procedure-faithful → retrieval-correct* | seam exists (`pedersen_schnorr_zk` — renamed from `plonky2_prover` for honesty); needs [zkRAG/V3DB-style HNSW PIOP](https://eprint.iacr.org/2026/709) |
 | 3 | **Attested execution** | the genuine model weights ran unmodified in a sealed enclave | new: NVIDIA CC + Remote Attestation |
 | 4 | **Context-consumption proof** | the model ingested *exactly* the certified memory set, nothing injected | **new — the kernel (§2)** |
 | 5 | **Capability-bound action + non-repudiation** | every external action was authorized and links to the sanctioning human | caps shipped; bind to action + identity ([NIST](https://csrc.nist.gov/pubs/other/2026/02/05/accelerating-the-adoption-of-software-and-ai-agent/ipd)) |

@@ -1,23 +1,24 @@
-//! Forgery-rejection audit — CHECK 6: ZK retrieval-match proof (plonky2_prover).
+//! Forgery-rejection audit — CHECK 6: ZK retrieval-match proof (pedersen_schnorr_zk).
 //!
-//! Run with: `cargo test -p mneme-index --features plonky2_prover --test forgery_zk_audit`.
+//! Run with: `cargo test -p mneme-index --features pedersen_schnorr_zk --test forgery_zk_audit`.
 //! Without the feature this file compiles to an empty (passing) test binary.
 //!
 //! Backend honesty: this is a transparent Pedersen+Schnorr NIZK over Ristretto, NOT
-//! Plonky2/FRI and NOT a SNARK (see plonky2_prover.rs). All forgeries fail closed with
-//! MnemeError::ZkProofInvalid (the audit's "ZkProofInvalid" expectation).
+//! Plonky2/FRI and NOT a SNARK (see pedersen_schnorr_zk.rs). All forgeries fail closed
+//! with MnemeError::ZkProofInvalid (the audit's "ZkProofInvalid" expectation).
 
-#![cfg(feature = "plonky2_prover")]
+#![cfg(feature = "pedersen_schnorr_zk")]
 
 use mneme_core::MnemeError;
 use mneme_index::{
-    Plonky2RetrievalProof, RetrievalWitness, prove_plonky2_retrieval, verify_plonky2_retrieval,
+    PedersenSchnorrRetrievalProof, RetrievalWitness, prove_pedersen_schnorr,
+    verify_pedersen_schnorr,
 };
 
-fn baseline() -> Plonky2RetrievalProof {
+fn baseline() -> PedersenSchnorrRetrievalProof {
     let entry = [0x42; 32];
-    let proof = prove_plonky2_retrieval(&RetrievalWitness::matching(entry)).expect("prove");
-    verify_plonky2_retrieval(&proof, &proof.public_commit).expect("baseline verifies");
+    let proof = prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("prove");
+    verify_pedersen_schnorr(&proof, &proof.public_commit).expect("baseline verifies");
     proof
 }
 
@@ -28,7 +29,7 @@ fn check06a_wrong_public_commit_zk_proof_invalid() {
     let mut wrong = proof.public_commit;
     wrong[0] ^= 0x01;
     assert_eq!(
-        verify_plonky2_retrieval(&proof, &wrong),
+        verify_pedersen_schnorr(&proof, &wrong),
         Err(MnemeError::ZkProofInvalid),
     );
 }
@@ -39,7 +40,7 @@ fn check06b_forged_response_scalar_zk_proof_invalid() {
     let mut proof = baseline();
     proof.proof_bytes[64] = proof.proof_bytes[64].wrapping_add(1);
     assert_eq!(
-        verify_plonky2_retrieval(&proof, &proof.public_commit),
+        verify_pedersen_schnorr(&proof, &proof.public_commit),
         Err(MnemeError::ZkProofInvalid),
     );
 }
@@ -47,12 +48,12 @@ fn check06b_forged_response_scalar_zk_proof_invalid() {
 // Forgery 6c: splice a query commitment from a DIFFERENT proof (procedure-result swap analog).
 #[test]
 fn check06c_spliced_query_commitment_zk_proof_invalid() {
-    let a = prove_plonky2_retrieval(&RetrievalWitness::matching([1u8; 32])).expect("a");
-    let b = prove_plonky2_retrieval(&RetrievalWitness::matching([2u8; 32])).expect("b");
+    let a = prove_pedersen_schnorr(&RetrievalWitness::matching([1u8; 32])).expect("a");
+    let b = prove_pedersen_schnorr(&RetrievalWitness::matching([2u8; 32])).expect("b");
     let mut spliced = a.clone();
     spliced.proof_bytes[0..32].copy_from_slice(&b.proof_bytes[0..32]);
     assert_eq!(
-        verify_plonky2_retrieval(&spliced, &spliced.public_commit),
+        verify_pedersen_schnorr(&spliced, &spliced.public_commit),
         Err(MnemeError::ZkProofInvalid),
     );
 }
@@ -65,7 +66,7 @@ fn check06d_unsatisfiable_witness_cannot_prove_zk_proof_invalid() {
     entry[0] = 1;
     query[0] = 2;
     assert_eq!(
-        prove_plonky2_retrieval(&RetrievalWitness { entry, query }),
+        prove_pedersen_schnorr(&RetrievalWitness { entry, query }),
         Err(MnemeError::ZkProofInvalid),
     );
 }
@@ -76,7 +77,7 @@ fn check06e_tampered_nonce_point_zk_proof_invalid() {
     let mut proof = baseline();
     proof.proof_bytes[32] ^= 0xff;
     assert_eq!(
-        verify_plonky2_retrieval(&proof, &proof.public_commit),
+        verify_pedersen_schnorr(&proof, &proof.public_commit),
         Err(MnemeError::ZkProofInvalid),
     );
 }

@@ -13,12 +13,12 @@ thiserror.workspace = true
 fast-hnsw = "1.0.1"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-# 12-month milestone (B3) ZK retrieval backend, only linked under `plonky2_prover`.
+# 12-month milestone (B3) ZK retrieval backend, only linked under `pedersen_schnorr_zk`.
 # NOTE: Plonky2 1.x requires nightly (`feature(specialization)` in plonky2_field) and is
 # incompatible with the repo's pinned stable toolchain (rust-toolchain.toml = 1.86.0). We
 # therefore ship a real *transparent* zero-knowledge proof (Pedersen commitments + a
 # Schnorr equality-of-openings NIZK over Ristretto, no trusted setup) that compiles on
-# stable and reuses the curve25519-dalek already in the tree. See plonky2_prover.rs.
+# stable and reuses the curve25519-dalek already in the tree. See pedersen_schnorr_zk.rs.
 curve25519-dalek = { version = "4.1.3", default-features = false, features = ["alloc", "rand_core", "precomputed-tables"], optional = true }
 rand = { version = "0.8", optional = true }
 
@@ -26,19 +26,26 @@ rand = { version = "0.8", optional = true }
 default = ["ads"]
 ads = []
 # Tagged BLAKE3 commitment-binding envelope (§9.2). Binding only — NOT zero-knowledge, NOT SNARK, NOT Plonky2.
+# (The legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it
+# implied zero-knowledge, which the BLAKE3 envelope is not. The regression test
+# `commitment_binding_receipt_is_not_zk` in lib.rs asserts the envelope tag does not
+# contain "ZK", "PLONKY2", or "SNARK" — protecting against re-introduction.)
 commitment_binding = []
-# Deprecated alias for `commitment_binding` (name does not imply Plonky2/SNARK).
-zk = ["commitment_binding"]
 # 12-month milestone (B3): real transparent zero-knowledge proof (Pedersen + Schnorr over
 # Ristretto) of a private retrieval-match statement — knowledge that a committed entry equals
 # a hidden query. Zero-knowledge + no trusted setup — NOT semantic truth, NOT exact-NN
 # (blueprint §3). Backend is Pedersen/Schnorr, NOT Plonky2/FRI (Plonky2 1.x is nightly-only).
-plonky2_prover = ["dep:curve25519-dalek", "dep:rand"]
+# The feature name reflects the actual backend. The `B3_DEFERRAL_STATUS` string in
+# `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
+pedersen_schnorr_zk = ["dep:curve25519-dalek", "dep:rand"]
+# Deprecated compatibility alias for pre-rename operator/CI commands. This enables the
+# same honest Pedersen+Schnorr backend; it does not add or claim Plonky2/FRI.
+plonky2_prover = ["pedersen_schnorr_zk"]
 
 [[test]]
 name = "semantic_zk_recall"
 path = "tests/semantic_zk_recall.rs"
-required-features = ["plonky2_prover"]
+required-features = ["pedersen_schnorr_zk"]
 
 [dev-dependencies]
 hex.workspace = true

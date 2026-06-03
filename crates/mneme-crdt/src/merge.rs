@@ -83,10 +83,25 @@ pub fn apply_peer_snapshot(
     for k in diff.conflicting_keys {
         keys_to_process.insert(k);
     }
+    for k in peer.key_index.tombstone_keys() {
+        keys_to_process.insert(k);
+    }
 
     for key_hash in keys_to_process {
         let peer_val = peer.key_index.get(&key_hash).unwrap_or(TOMBSTONE);
         if peer_val == TOMBSTONE {
+            let previous = local_key_index.get(&key_hash);
+            let removed = local_key_to_object.remove(&key_hash);
+            if let Some(object_id) = removed {
+                local_object_keys.remove(&object_id);
+            }
+            if previous != Some(TOMBSTONE) || removed.is_some() {
+                result.keys_updated += 1;
+            }
+            local_key_index.tombstone(key_hash);
+            continue;
+        }
+        if local_key_index.is_tombstoned(&key_hash) {
             continue;
         }
         let peer_id = peer_val;

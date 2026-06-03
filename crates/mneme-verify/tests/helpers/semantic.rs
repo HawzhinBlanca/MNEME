@@ -47,6 +47,10 @@ pub fn sample_procedure() -> Procedure {
     }
 }
 
+pub fn sample_query_embedding() -> FixedPointEmbedding {
+    FixedPointEmbedding::new(2, 0, vec![0, 0]).expect("query")
+}
+
 pub fn build_valid_semantic_recall() -> SemanticFixture {
     let operator = KeyPair::from_seed([0x01; 32]);
     let agent = KeyPair::from_seed([0x02; 32]);
@@ -121,7 +125,7 @@ pub fn build_valid_semantic_recall() -> SemanticFixture {
     )
     .expect("root");
     let root = stored.to_root();
-    let query = FixedPointEmbedding::new(2, 0, vec![0, 0]).expect("query");
+    let query = sample_query_embedding();
     let receipt = semantic
         .recall_receipt(&proc, &query, root.preimage_hash)
         .expect("receipt");

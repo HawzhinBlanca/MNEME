@@ -1,0 +1,13 @@
+[package]
+name = "mneme-context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deterministic context assembly (Phase II P2-3)"
+
+[dependencies]
+mneme-core.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+blake3.workspace = true

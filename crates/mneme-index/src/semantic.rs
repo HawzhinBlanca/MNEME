@@ -171,13 +171,13 @@ impl SemanticIndex {
         root_bound: [u8; 32],
     ) -> Result<SemanticRecallReceipt, IndexError> {
         let (_, vo) = self.search_deterministic(proc, query)?;
-        #[cfg(feature = "plonky2_prover")]
+        #[cfg(feature = "pedersen_schnorr_zk")]
         {
             let mut receipt = SemanticRecallReceipt::new(root_bound, self.semantic_commit(), vo);
             crate::semantic_zk::try_attach_zk_retrieval(&mut receipt, query);
             Ok(receipt)
         }
-        #[cfg(not(feature = "plonky2_prover"))]
+        #[cfg(not(feature = "pedersen_schnorr_zk"))]
         {
             Ok(SemanticRecallReceipt::new(
                 root_bound,

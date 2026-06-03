@@ -210,6 +210,57 @@ fn merge_convergence_two_agents_same_root() {
     );
 }
 
+#[test]
+fn peer_tombstone_removes_local_live_leaf() {
+    let op = KeyPair::from_seed([0x01; 32]);
+    let mut trust = TrustConfig::new(op.public_key_bytes());
+    trust.authorize_capability_subject(op.public_key_bytes());
+
+    let key = LogicalKey {
+        namespace: "user".into(),
+        name: "deleted".into(),
+    };
+    let key_hash = key.hash();
+    let bytes = record_bytes(&sample_record(
+        writer_hash(&op.public_key_bytes()),
+        MemoryKind::Episodic,
+        10,
+    ));
+    let object_id = hash_obj(&bytes);
+
+    let mut local_index = SparseMerkleTree::new();
+    local_index.upsert(key_hash, object_id);
+    let mut local_key_to_object = HashMap::from([(key_hash, object_id)]);
+    let mut local_object_keys = HashMap::from([(object_id, key.clone())]);
+    let mut local_objects = HashMap::from([(object_id, bytes)]);
+
+    let mut peer_index = SparseMerkleTree::new();
+    peer_index.tombstone(key_hash);
+    let peer = PeerSnapshot {
+        key_index: peer_index,
+        key_to_object: HashMap::new(),
+        object_keys: HashMap::new(),
+        objects: HashMap::new(),
+        dag: DagIndex::new(),
+    };
+
+    let outcome = apply_peer_snapshot(
+        &mut local_index,
+        &mut local_key_to_object,
+        &mut local_object_keys,
+        &mut local_objects,
+        &mut DagIndex::new(),
+        &peer,
+        &trust,
+    )
+    .expect("apply tombstone");
+
+    assert_eq!(outcome.keys_updated, 1);
+    assert!(local_index.is_tombstoned(&key_hash));
+    assert!(!local_key_to_object.contains_key(&key_hash));
+    assert!(!local_object_keys.contains_key(&object_id));
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
 

@@ -45,11 +45,11 @@ pub fn verify_semantic_receipt_vo(
 ) -> Result<(), MnemeError> {
     verify_ads_vo(&receipt.verification_object, &receipt.semantic_commit, proc)?;
     if let Some(zk) = &receipt.zk_retrieval {
-        #[cfg(feature = "plonky2_prover")]
+        #[cfg(feature = "pedersen_schnorr_zk")]
         {
             crate::semantic_zk::verify_zk_retrieval_attachment(zk, &receipt.verification_object)?;
         }
-        #[cfg(not(feature = "plonky2_prover"))]
+        #[cfg(not(feature = "pedersen_schnorr_zk"))]
         {
             let _ = zk;
             return Err(MnemeError::ZkProofInvalid);

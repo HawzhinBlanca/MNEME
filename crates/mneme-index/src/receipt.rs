@@ -2,7 +2,7 @@
 
 use mneme_core::{VerificationObject, hash_receipt_preimage};
 
-/// Optional transparent ZK retrieval-match proof bytes (12-month `plonky2_prover` feature).
+/// Optional transparent ZK retrieval-match proof bytes (12-month `pedersen_schnorr_zk` feature).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ZkRetrievalAttachment {
     pub public_commit: [u8; 32],
@@ -18,7 +18,7 @@ pub struct SemanticRecallReceipt {
     pub semantic_commit: [u8; 32],
     /// ADS verification object (§9.2).
     pub verification_object: VerificationObject,
-    /// When present, a real transparent ZK proof (`plonky2_prover`) binds the top-1 result's
+    /// When present, a real transparent ZK proof (`pedersen_schnorr_zk`) binds the top-1 result's
     /// embedding commit to the query commit without expanding the verifier TCB.
     pub zk_retrieval: Option<ZkRetrievalAttachment>,
 }

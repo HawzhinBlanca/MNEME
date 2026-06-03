@@ -75,7 +75,9 @@ async fn unix_remember_and_head_roundtrip() {
 async fn unix_sync_hello_returns_root_proof() {
     let dir = tempdir().expect("tempdir");
     let sock = dir.path().join("sync.sock");
-    let (state, _operator, _agent) = test_state(dir.path()).expect("test_state");
+    let (state, operator, agent) = test_state(dir.path()).expect("test_state");
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let cap_b64 = cap_to_b64(&cap).expect("cap b64");
     let handle = spawn_unix(sock.clone(), state).await;
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -87,14 +89,81 @@ async fn unix_sync_hello_returns_root_proof() {
     };
     let wire = encode_sync_message(&hello).expect("encode");
     let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, wire);
-    let resp = request_json(&sock, &KernelRequest::SyncFrame { bytes_b64: b64 })
-        .await
-        .expect("sync");
+    let resp = request_json(
+        &sock,
+        &KernelRequest::SyncFrame {
+            cap_b64,
+            bytes_b64: b64,
+        },
+    )
+    .await
+    .expect("sync");
     match resp {
         mnemed::unix::KernelResponse::Ok { payload } => {
             assert!(payload.get("sync_bytes_b64").is_some());
         }
         mnemed::unix::KernelResponse::Err { message, .. } => panic!("sync failed: {message}"),
+    }
+    handle.abort();
+}
+
+#[tokio::test]
+async fn unix_sync_frame_requires_capability() {
+    let dir = tempdir().expect("tempdir");
+    let sock = dir.path().join("sync-auth.sock");
+    let (state, _operator, _agent) = test_state(dir.path()).expect("test_state");
+    let handle = spawn_unix(sock.clone(), state).await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let hello = SyncMessage::Hello {
+        proto_ver: 1,
+        node_id: NodeId([0x01; 16]),
+        head_root: [0u8; 32],
+        head_sig: vec![],
+    };
+    let wire = encode_sync_message(&hello).expect("encode");
+    let bytes_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, wire);
+    let resp = request_json(
+        &sock,
+        &KernelRequest::SyncFrame {
+            cap_b64: "not-valid".into(),
+            bytes_b64,
+        },
+    )
+    .await
+    .expect("sync");
+    match resp {
+        mnemed::unix::KernelResponse::Err { code, .. } => assert_eq!(code, "CapDenied"),
+        mnemed::unix::KernelResponse::Ok { payload } => {
+            panic!("unauthorized sync frame returned payload: {payload}")
+        }
+    }
+    handle.abort();
+}
+
+#[tokio::test]
+async fn unix_prove_absent_requires_capability() {
+    let dir = tempdir().expect("tempdir");
+    let sock = dir.path().join("absent-auth.sock");
+    let (state, _operator, _agent) = test_state(dir.path()).expect("test_state");
+    let handle = spawn_unix(sock.clone(), state).await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let resp = request_json(
+        &sock,
+        &KernelRequest::ProveAbsent {
+            cap_b64: "not-valid".into(),
+            namespace: "user".into(),
+            name: "never-seen".into(),
+        },
+    )
+    .await
+    .expect("prove absent");
+    match resp {
+        mnemed::unix::KernelResponse::Err { code, .. } => assert_eq!(code, "CapDenied"),
+        mnemed::unix::KernelResponse::Ok { payload } => {
+            panic!("unauthorized prove-absent returned payload: {payload}")
+        }
     }
     handle.abort();
 }

@@ -40,10 +40,12 @@ pub fn verify_semantic_recall(
     ctx: &RecallContext<'_>,
 ) -> Result<Vec<Entry>, MnemeError> {
     verify_semantic_receipt(&input.receipt, &input.root, proc, trust, ctx.previous_root)?;
-    if let Some(emb) = &query.embedding {
-        if emb.commit() != input.receipt.verification_object.query_commit {
-            return Err(MnemeError::ProcedureMismatch);
-        }
+    let emb = query
+        .embedding
+        .as_ref()
+        .ok_or(MnemeError::ProcedureMismatch)?;
+    if emb.commit() != input.receipt.verification_object.query_commit {
+        return Err(MnemeError::ProcedureMismatch);
     }
 
     let mut entries = Vec::new();

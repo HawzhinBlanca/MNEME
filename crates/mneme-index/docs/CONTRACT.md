@@ -22,9 +22,12 @@ SemanticMerkleTree, hash_sem_leaf, hash_sem_internal, empty_semantic_root
 CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt
 BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN, B3_V0_BINDING_STATUS
 
-// Plonky2 (12-month only — `plonky2_prover` feature; fail-closed stub, B3 closed)
-Plonky2RetrievalProof, prove_plonky2_retrieval, verify_plonky2_retrieval
-B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY
+// Pedersen + Schnorr (12-month only — `pedersen_schnorr_zk` feature; real transparent
+// NIZK over Ristretto; previously mis-named `plonky2_prover` and renamed for honesty.
+// `plonky2_prover` is retained only as a deprecated compatibility alias.
+// Not Plonky2, not FRI, not a SNARK. See B3_DEFERRAL_STATUS for the Plonky2/FRI deferral.)
+PedersenSchnorrRetrievalProof, prove_pedersen_schnorr, verify_pedersen_schnorr
+PEDERSEN_SCHNORR_HONESTY, B3_DEFERRAL_STATUS
 ```
 
 ## Invariants owned
@@ -52,7 +55,7 @@ B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY
 | `privacy_fixture_roundtrip` | Pinned digests in `privacy_fixture.json` |
 | `envelope_tag_is_not_plonky2` | Domain tag excludes PLONKY2/SNARK claims |
 | `commitment_binding_receipt_is_not_zk` | `BINDING_HONESTY` + envelope tag honesty |
-| `plonky2_prover` feature tests (when enabled) | prove/verify fail closed; `B3_DEFERRAL_STATUS` honesty |
+| `pedersen_schnorr_zk` feature tests (when enabled) | prove/verify pass; `B3_DEFERRAL_STATUS` honesty; forgery rejection |
 
 ## Dependencies
 
@@ -65,7 +68,7 @@ B3_DEFERRAL_STATUS, PLONKY2_PROVER_HONESTY
 ## Forbidden
 
 - No custom ANN implementation (§1.2)
-- No linked Plonky2/SNARK prover in v0 (`commitment_binding` = BLAKE3 only; `plonky2_prover` = fail-closed stub for 12-month gate)
+- No linked Plonky2/SNARK prover in v0 (`commitment_binding` = BLAKE3 only; `pedersen_schnorr_zk` = real transparent Pedersen+Schnorr NIZK over Ristretto, NOT Plonky2/FRI). The `B3_DEFERRAL_STATUS` constant in `pedersen_schnorr_zk.rs` records the Plonky2/V3DB SNARK deferral.
 - Do not label `commitment_binding` receipts as zero-knowledge, SNARK, or Plonky2 in code, docs, or vectors
 - Plonky2/V3DB ZK retrieval is **12-month milestone only** — not a v0/90-day exit criterion (B3 closed)
 - Do not change `mneme-core/src/interface.rs` without INTERFACE-CHANGE doc

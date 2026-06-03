@@ -65,7 +65,7 @@ run_gate() {
 
   bash "$ROOT/scripts/ci/check-foundation-digests.sh" "$out/foundation.report.json"
 
-  python3 - "$out/foundation.report.json" "$out/digest-manifest.json" "$label" <<'PY'
+  "$(mneme_ci_python)" - "$out/foundation.report.json" "$out/digest-manifest.json" "$label" <<'PY'
 import json, os, sys
 from datetime import datetime, timezone
 

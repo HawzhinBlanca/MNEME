@@ -91,7 +91,7 @@ schema; the HNSW audit-on-demand path (P1-1b) can land after the exact path prov
 
 | Module | Phase I responsibility |
 |---|---|
-| `mneme-index` | zkANN-1 prover (dominance + audit-on-demand) on the existing HNSW/flat path; `plonky2_prover`-gated |
+| `mneme-index` | zkANN-1 prover (dominance + audit-on-demand) on the existing HNSW/flat path; `pedersen_schnorr_zk`-gated (renamed from `plonky2_prover` for honesty) |
 | `mneme-verify` | zkANN-1 + certificate verification gates (budgeted; justify every line) |
 | `mneme-core` | `Draft` valid-time field; `CognitionCertificate` + `AsOf` interface types (freeze-reviewed) |
 | `mneme-store` | `recall_verified_at`; provenance-filter recall; auditable promotion event |

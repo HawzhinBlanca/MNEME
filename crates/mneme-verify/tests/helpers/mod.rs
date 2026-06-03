@@ -14,7 +14,9 @@ use mneme_smt::SparseMerkleTree;
 use mneme_verify::RecallInput;
 use std::collections::BTreeMap;
 
-pub use semantic::{SemanticFixture, build_valid_semantic_recall, sample_procedure};
+pub use semantic::{
+    SemanticFixture, build_valid_semantic_recall, sample_procedure, sample_query_embedding,
+};
 
 /// Lightweight signed-root chain for checkpoint/root tamper tests (no SMT/DAG walk).
 pub struct RootChainFixture {

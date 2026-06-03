@@ -8,7 +8,7 @@ use mneme_cap::agent_cap;
 use mneme_core::{
     Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, TrustTier,
 };
-use mneme_crypto::{KeyPair, TrustConfig};
+use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
 use mneme_store::Store;
 use mneme_verify::verify_store;
 use std::fmt::Write as _;
@@ -29,6 +29,10 @@ struct Cli {
     /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; generated and stored on first use if absent
     #[arg(long, global = true, env = "MNEME_OPERATOR_SEED")]
     operator_seed: Option<String>,
+
+    /// Key vault backend: file (default) or envelope (uses MNEME_KMS_MASTER_KEY_HEX)
+    #[arg(long, global = true, env = "MNEME_KEY_VAULT", default_value = "file")]
+    vault: VaultArg,
 }
 
 #[derive(Subcommand)]
@@ -153,6 +157,12 @@ enum ForgetModeArg {
     Redact,
 }
 
+#[derive(Clone, Copy, ValueEnum)]
+enum VaultArg {
+    File,
+    Envelope,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliErrorKind {
     Usage,
@@ -190,7 +200,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             }
             std::fs::create_dir_all(&path).map_err(|_| CliErrorKind::Usage)?;
             let operator = load_or_generate_operator(&path, cli.operator_seed.as_deref())?;
-            Store::create(&path, operator).map_err(CliErrorKind::Kernel)?;
+            create_store(&path, operator, cli.vault)?;
             println!("initialized store at {}", path.display());
             Ok(())
         }
@@ -230,8 +240,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 Some(hex) => Some(parse_seed_hex(&hex)?),
                 None => None,
             };
-            let mut mneme_store =
-                Store::open_pinned(&store, operator.clone(), pin).map_err(CliErrorKind::Kernel)?;
+            let mut mneme_store = open_store_pinned(&store, operator.clone(), pin, cli.vault)?;
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             mneme_store
@@ -268,8 +277,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             }
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
-            let mut mneme_store =
-                Store::open(&store, operator.clone()).map_err(CliErrorKind::Kernel)?;
+            let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             let draft = Draft {
@@ -299,8 +307,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             }
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
-            let mut mneme_store =
-                Store::open(&store, operator.clone()).map_err(CliErrorKind::Kernel)?;
+            let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             let logical_key = parse_logical_key(&key);
@@ -326,13 +333,16 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 }
                 require_store_dir(&store)?;
                 let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
-                let mut mneme_store =
-                    Store::open(&store, operator).map_err(CliErrorKind::Kernel)?;
+                let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+                let cap = agent_cap(&operator, operator.public_key_bytes())
+                    .map_err(CliErrorKind::Kernel)?;
+                let cap_b64 = mnemed::cap_to_b64(&cap).map_err(CliErrorKind::Kernel)?;
                 let rt = tokio::runtime::Runtime::new().map_err(|_| CliErrorKind::Usage)?;
                 let fetched = rt
-                    .block_on(mnemed::sync_client::pull_canonical(
+                    .block_on(mnemed::sync_client::pull_canonical_with_cap(
                         &mut mneme_store,
                         &peer_url,
+                        &cap_b64,
                     ))
                     .map_err(CliErrorKind::Kernel)?;
                 let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
@@ -348,7 +358,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             require_store_dir(&store_a)?;
             require_store_dir(&store_b)?;
             let operator = load_or_generate_operator(&store_a, cli.operator_seed.as_deref())?;
-            let mut mneme_store = Store::open(&store_a, operator).map_err(CliErrorKind::Kernel)?;
+            let mut mneme_store = open_store(&store_a, operator, cli.vault)?;
             let root = mneme_store
                 .merge_from_path(&store_b)
                 .map_err(CliErrorKind::Kernel)?;
@@ -400,6 +410,40 @@ fn parse_logical_key(key: &str) -> LogicalKey {
         LogicalKey {
             namespace: "user".into(),
             name: key.into(),
+        }
+    }
+}
+
+fn create_store(path: &Path, operator: KeyPair, vault: VaultArg) -> Result<Store, CliErrorKind> {
+    match vault {
+        VaultArg::File => Store::create(path, operator).map_err(CliErrorKind::Kernel),
+        VaultArg::Envelope => {
+            let key_vault =
+                Box::new(EnvelopeKeyVault::from_env(path).map_err(CliErrorKind::Kernel)?);
+            Store::create_with_vault(path, operator, key_vault).map_err(CliErrorKind::Kernel)
+        }
+    }
+}
+
+fn open_store(path: &Path, operator: KeyPair, vault: VaultArg) -> Result<Store, CliErrorKind> {
+    open_store_pinned(path, operator, None, vault)
+}
+
+fn open_store_pinned(
+    path: &Path,
+    operator: KeyPair,
+    pinned_root: Option<[u8; 32]>,
+    vault: VaultArg,
+) -> Result<Store, CliErrorKind> {
+    match vault {
+        VaultArg::File => {
+            Store::open_pinned(path, operator, pinned_root).map_err(CliErrorKind::Kernel)
+        }
+        VaultArg::Envelope => {
+            let key_vault =
+                Box::new(EnvelopeKeyVault::from_env(path).map_err(CliErrorKind::Kernel)?);
+            Store::open_pinned_with_vault(path, operator, pinned_root, key_vault)
+                .map_err(CliErrorKind::Kernel)
         }
     }
 }

@@ -18,6 +18,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 OUT="${1:-out/xhost-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)}"
 rm -rf "$OUT"
 cargo run -q -p mneme-cli -- determinism foundation-gate \
@@ -28,7 +31,7 @@ echo "# host        : $(uname -srm)"
 echo "# commit      : $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "# report      : $REPORT"
 # Print the five digested fields of run_a, one per line, stable order.
-python3 - "$REPORT" <<'PY'
+"$(mneme_ci_python)" - "$REPORT" <<'PY'
 import json, sys
 a = json.load(open(sys.argv[1]))["run_a"]
 for k in ("head_bytes_hex","root_preimage_hex","receipt_digest_hex",

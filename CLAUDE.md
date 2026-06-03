@@ -1,6 +1,15 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the **canonical, universal** agent guidance for this
+repository. It is the single source of truth for build/test commands,
+architecture invariants, the §3 honesty boundary, and workspace layout.
+Every other agent guidance file (e.g. [`AGENTS.md`](AGENTS.md) for
+Codex CLI) must defer to this file for load-bearing content and only
+document tool-specific deltas.
+
+If you change a build command, an architecture invariant, or a §3
+honesty string: edit this file. Tool-specific deltas belong in the
+other file.
 
 ## What is MNEME
 
@@ -92,7 +101,7 @@ The `mneme-crossref` crate is an independent reimplementation of the Appendix B 
 
 1. **Authenticated ≠ true.** Signed entries verify even when content is false. MNEME proves integrity, provenance, authorization — not truth.
 2. **Verifiable retrieval proves procedure-faithfulness, not exact nearest neighbors.**
-3. The `commitment_binding` feature (`zk` alias) is a **tagged BLAKE3 envelope only** — not zero-knowledge, not a SNARK. The `plonky2_prover` feature (12-month milestone B3, off by default) is a **real transparent zero-knowledge proof**: Pedersen commitments + a Schnorr equality-of-openings NIZK over Ristretto (Fiat–Shamir, no trusted setup). It proves *faithful execution of a committed retrieval-match with witness privacy* — it is **not** Plonky2 and **not** a FRI/PLONK SNARK (Plonky2 1.x is nightly-only; the repo pins stable 1.86.0), and it still does **not** prove semantic truth or exact nearest neighbors.
+3. The `commitment_binding` feature is a **tagged BLAKE3 envelope only** — not zero-knowledge, not a SNARK. (A legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it implied zero-knowledge, which the BLAKE3 envelope is not.) The `pedersen_schnorr_zk` feature (12-month milestone B3, off by default; previously mis-named `plonky2_prover` and renamed for honesty) is a **real transparent zero-knowledge proof**: Pedersen commitments + a Schnorr equality-of-openings NIZK over Ristretto (Fiat–Shamir, no trusted setup). It proves *faithful execution of a committed retrieval-match with witness privacy* — it is **not** Plonky2 and **not** a FRI/PLONK SNARK (Plonky2 1.x is nightly-only; the repo pins stable 1.86.0), and it still does **not** prove semantic truth or exact nearest neighbors. The `B3_DEFERRAL_STATUS` string in `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
 
 These limits appear in `MnemeError` messages, MCP tool descriptions, and verifier exports. Never weaken or remove them.
 

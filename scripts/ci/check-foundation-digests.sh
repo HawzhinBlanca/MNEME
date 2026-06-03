@@ -5,6 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
 PINNED="$ROOT/proof/digests/foundation-gate.v1.json"
 REPORT="${1:-$ROOT/out/ci-foundation-gate/foundation.report.json}"
 
@@ -17,7 +20,7 @@ if [[ ! -f "$REPORT" ]]; then
   exit 1
 fi
 
-python3 - "$REPORT" <<'PY'
+"$(mneme_ci_python)" - "$REPORT" <<'PY'
 import json, sys
 from pathlib import Path
 
