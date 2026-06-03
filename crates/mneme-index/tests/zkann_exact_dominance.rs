@@ -59,3 +59,46 @@ fn zkann_reordered_result_fails_dominance() {
         Err(MnemeError::RetrievalDominanceFailed)
     );
 }
+
+/// ADVERSARIAL (red-team): the forgery the integration suite OMITTED. Drop the true
+/// nearest neighbor (a suffix leaf whose siblings' Merkle paths still validate), then set
+/// `committed_leaf_count` to the remaining candidate count — exactly what
+/// `verify_cognition_certificate_v1` passes. Before the root-binding fix the verifier
+/// returned `Ok(())` (hiding the real top match). It MUST fail closed.
+#[test]
+fn zkann_dropped_true_nearest_neighbor_must_be_rejected() {
+    let mut index = SemanticIndex::new();
+    let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
+    index // dist 25
+        .insert(oid(1), FixedPointEmbedding::new(2, 0, vec![5, 0]).unwrap())
+        .unwrap();
+    index // dist 64
+        .insert(oid(2), FixedPointEmbedding::new(2, 0, vec![8, 0]).unwrap())
+        .unwrap();
+    index // TRUE nearest (dist 1), highest ObjectId → last (suffix) leaf
+        .insert(oid(9), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
+        .unwrap();
+    let mut receipt = index
+        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .unwrap();
+
+    let vo = &mut receipt.verification_object;
+    let drop_commit: Vec<[u8; 32]> = vo
+        .candidates
+        .iter()
+        .filter(|(id, _, _)| *id == oid(9))
+        .map(|(id, emb, _)| mneme_index::hash_sem_leaf(id.as_bytes(), emb))
+        .collect();
+    vo.candidates.retain(|(id, _, _)| *id != oid(9));
+    vo.nodes.retain(|(commit, _)| !drop_commit.contains(commit));
+    vo.result_ids = vec![oid(1)];
+    let forged_count = vo.candidates.len();
+
+    let got = verify_zkann_attachment(&receipt, &proc(), forged_count);
+    assert_eq!(
+        got,
+        Err(MnemeError::RetrievalDominanceFailed),
+        "SOUNDNESS: dropping the true nearest neighbor with a self-supplied leaf count \
+         must fail closed, not accept (got {got:?})"
+    );
+}
