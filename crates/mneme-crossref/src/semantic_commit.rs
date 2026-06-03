@@ -193,7 +193,7 @@ fn rebuild_semantic_root(candidates: &[CandidateRow]) -> [u8; 32] {
     level[0]
 }
 
-/// Dominance over the declared visited neighborhood (HNSW audit-on-demand path).
+/// Dominance over prover-chosen authenticated members in `visited_order` (not graph replay).
 pub fn verify_hnsw_audit_on_demand(
     vo: &VerificationObject,
     proc: &Procedure,

@@ -171,7 +171,6 @@ fn e2e_provenance_scoped_recall_excludes_foreign_writer_poison() {
 /// `verify_semantic_recall` re-replays the UNFILTERED candidates against the post-filter
 /// `result_ids`. Un-ignore when the scoped path stops re-checking the unfiltered VO.
 #[test]
-#[ignore = "known functional gap: scoped recall fail-closes when poison outranks the trusted entry (docs/redteam/PHASE_I_PROVENANCE_SCOPED.md)"]
 fn e2e_provenance_scoped_returns_trusted_when_poison_outranks() {
     let dir = tempfile::tempdir().expect("tempdir");
     let operator = KeyPair::generate();

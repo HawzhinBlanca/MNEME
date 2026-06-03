@@ -54,3 +54,9 @@ do not duplicate them in the store. Mind the TCB ≤ 500-line budget.
 
 This is **safe today** (poison cannot leak — fail-closed). The gap is *availability* of the
 legitimate result under the real attack, not a soundness/leak bug.
+
+## Resolution (2026-06-03)
+
+**Fixed on `master`:** `verify_semantic_receipt` skips unfiltered VO replay when
+`receipt.provenance` is present (scoped path already verified zkANN + filtered replay).
+`e2e_provenance_scoped_returns_trusted_when_poison_outranks` is un-ignored and green.

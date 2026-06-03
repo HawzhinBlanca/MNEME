@@ -56,3 +56,8 @@ Ship **A immediately** (it's a one-line honesty correction + un-check the spec b
 **B** for the Phase IV PIOP work (global exact-NN over HNSW) where the graph commitment naturally
 belongs. Do **not** leave P1-1's HNSW box `[x]` with the "replay the graph walk" wording — it
 overstates the guarantee.
+
+## Resolution (2026-06-03)
+
+**Shipped (option A):** P1-1 HNSW checkbox un-checked; `RetrievalProofLevel::HnswAuditOnDemand` and
+`verify_hnsw_audit_on_demand` docs state prover-asserted set, not graph replay (main + crossref).

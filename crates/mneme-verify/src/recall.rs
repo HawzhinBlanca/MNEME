@@ -131,10 +131,7 @@ fn verify_not_forgotten(
     key_hash: &[u8; 32],
     key_index: &SparseMerkleTree,
 ) -> Result<(), MnemeError> {
-    if key_index.is_tombstoned(key_hash) {
-        return Err(MnemeError::Forgotten);
-    }
-    if key_index.get(key_hash) == Some(TOMBSTONE) {
+    if key_index.is_tombstoned(key_hash) || key_index.get(key_hash) == Some(TOMBSTONE) {
         return Err(MnemeError::Forgotten);
     }
     Ok(())

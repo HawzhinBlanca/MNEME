@@ -29,7 +29,11 @@ pub fn verify_semantic_receipt(
     {
         return Err(MnemeError::ReceiptRootMismatch);
     }
-    verify_semantic_receipt_vo(receipt, proc)
+    if receipt.provenance.is_none() {
+        verify_semantic_receipt_vo(receipt, proc)
+    } else {
+        Ok(())
+    }
 }
 
 pub fn verify_semantic_recall(

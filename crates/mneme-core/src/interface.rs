@@ -132,7 +132,7 @@ pub enum DistanceMetric {
 pub enum RetrievalProofLevel {
     /// True top-k dominance over the full committed vector set (flat / full-scan path).
     ExactDominance = 0,
-    /// Procedure-faithful HNSW walk + dominance over the visited neighborhood only.
+    /// Dominance over a prover-asserted set of authenticated members (`visited_order`); not graph replay.
     HnswAuditOnDemand = 1,
 }
 

@@ -33,10 +33,10 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
   establishes **dominance** — every returned top-k distance is ≤ every non-returned candidate's
   distance over the *committed* vector set, bound to the signed `semantic_commit`. Verifier
   rejects any reordered/truncated/padded result with a typed `MnemeError`.
-- [x] **HNSW path (approximate):** **audit-on-demand** (V3DB-style) — on challenge, replay the
-  declared graph walk against the committed snapshot and prove the returned set equals the walk's
-  output. Honestly labeled: this proves *procedure-faithful + reproducible*, upgraded to
-  *dominance over the visited neighborhood*, **not** global exact-NN (that needs the Phase-N PIOP).
+- [ ] **HNSW path (approximate):** **prover-asserted authenticated set** — `visited_order` is
+  checked for membership + top-k dominance over that set only; the verifier does **not** replay an
+  HNSW graph walk (adjacency is not committed). Honest level: *dominance over prover-chosen
+  authenticated members*, **not** global exact-NN (Phase IV PIOP / graph commitment).
 - [x] Default build remains non-ZK; honesty strings preserved in errors + exports (`ZK_BACKEND`).
 - [x] Forgery tests: reordered / dropped-better-neighbor / wrong-commit → typed rejection.
 
@@ -121,8 +121,9 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 
 1. **Authenticated ≠ true.** Unchanged.
 2. **zkANN-1 narrows, does not eliminate, the NN caveat.** The exact path proves **dominance over
-   the committed set** (true top-k for a flat index). The HNSW path proves **procedure-faithful +
-   reproducible + dominance over the visited neighborhood** — *not* global exact nearest neighbors.
+   the committed set** (true top-k for a flat index). The HNSW path proves **dominance over a
+   prover-asserted set of authenticated members** (`visited_order`) — *not* graph-walk replay and
+   *not* global exact nearest neighbors.
    Global succinct exact-NN over HNSW awaits the [zkRAG-style PIOP](https://eprint.iacr.org/2026/709)
    (later phase). Label the level achieved in the certificate (`retrieval_proof_level`).
 3. **Bi-temporal recall proves what was *authenticated* when — not what was *true* when.**
