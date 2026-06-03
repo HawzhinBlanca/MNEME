@@ -80,6 +80,7 @@ phases:
 
   - phase: Phase III — Accountability scaffolding
     status: partial
+    note: "Canonical wires + fail-closed verify on master; PHASE_III_GATE_OPEN false until real proofs."
     items:
       - id: P3-1
         title: Non-repudiation (ActionReceipt) gate closed
