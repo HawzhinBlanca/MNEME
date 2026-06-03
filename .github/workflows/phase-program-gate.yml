@@ -1,0 +1,71 @@
+# MNEME Phase Program Gate — automates phase checklists + targeted proofs.
+
+name: Phase Program Gate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "0 9 * * *" # daily full gate
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Gate level (quick|tamper|full)"
+        required: false
+        default: "full"
+
+concurrency:
+  group: phase-program-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+  RUST_TEST_THREADS: 4
+
+jobs:
+  phase-program-gate:
+    name: Phase program gate (quick + Phase I targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PHASE_GATE_LEVEL: quick
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/phase-program
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-phase-program
+
+      - name: Run phase-program gate (quick)
+        run: bash scripts/ci/phase-program-gate.sh
+
+  phase-program-gate-full:
+    name: Phase program gate (full)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      PHASE_GATE_LEVEL: ${{ github.event.inputs.level || 'full' }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/phase-program-full
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-phase-program-full
+
+      - name: Run phase-program gate (full/tamper)
+        run: bash scripts/ci/phase-program-gate.sh

@@ -1,0 +1,116 @@
+phases:
+  - phase: Phase I — Verifiable retrieval + Certificate v1
+    status: partial
+    items:
+      - id: P1-1
+        title: zkANN-1 dominance + HNSW audit-on-demand
+        status: partial
+        evidence:
+          - path: docs/PHASE_I_TASK_SPEC.md
+          - path: crates/mneme-index/tests/zkann_exact_dominance.rs
+          - path: crates/mneme-index/tests/semantic_zk_recall.rs
+      - id: P1-2
+        title: Bi-temporal recall (recall_verified_at)
+        status: partial
+        evidence:
+          - path: docs/PHASE_I_TASK_SPEC.md
+          - path: crates/mneme-store/src/recall_at.rs
+          - path: tests/e2e/phase_i_gates.rs
+      - id: P1-3
+        title: Provenance-scoped recall (poison-evidence)
+        status: partial
+        evidence:
+          - path: docs/PHASE_I_TASK_SPEC.md
+          - path: crates/mneme-store/src/provenance.rs
+          - path: tests/e2e/phase_i_gates.rs
+      - id: P1-4
+        title: Cognition Certificate v1 + offline verifier
+        status: partial
+        evidence:
+          - path: docs/PHASE_I_TASK_SPEC.md
+          - path: crates/mneme-index/tests/cognition_cert_v1.rs
+          - path: crates/mneme-cli/src/cert.rs
+      - id: P1-5
+        title: Proof obligations, tamper, fuzz, determinism docs
+        status: partial
+        evidence:
+          - path: docs/PHASE_I_TASK_SPEC.md
+          - path: scripts/ci/validation-lane.sh
+          - path: scripts/ci/cross-implementation-vectors.sh
+          - path: scripts/ci/phase-program-gate.sh
+          - path: .github/workflows/phase-program-gate.yml
+          - path: docs/phase-program/AUTOMATION.md
+
+  - phase: Phase II — Context Gate (software-only increment)
+    status: deferred
+    items:
+      - id: P2-3
+        title: Deterministic assembly tests (enclave-bound)
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+      - id: P2-4
+        title: CCA wire / context-consumption attestation
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+      - id: P2-5
+        title: Consumption attestation verifier tests (stub gate closed)
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+      - id: P2-6
+        title: mneme-gate / mneme-context wire stability (context_gate off by default)
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+
+  - phase: Phase III — Accountability scaffolding
+    status: deferred
+    items:
+      - id: P3-1
+        title: Non-repudiation (ActionReceipt) gate closed
+        status: partial
+        evidence:
+          - path: docs/PHASE_III_TASK_SPEC.md
+          - path: crates/mneme-account/src/lib.rs
+      - id: P3-2
+        title: Verifiable forgetting (ForgetProof) gate closed
+        status: partial
+        evidence:
+          - path: docs/PHASE_III_TASK_SPEC.md
+          - path: crates/mneme-account/src/lib.rs
+      - id: P3-3
+        title: Formal proof of verifier TCB
+        status: deferred
+        evidence:
+          - path: docs/PHASE_III_TASK_SPEC.md
+      - id: P3-4
+        title: Trust ops + pilot readiness
+        status: deferred
+        evidence:
+          - path: docs/PHASE_III_TASK_SPEC.md
+
+  - phase: Phase IV — Scale & standard
+    status: deferred
+    items:
+      - id: P4-1
+        title: Global exact-NN (zkRAG/PIOP path)
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+      - id: P4-2
+        title: Federated cognition certificates
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+      - id: P4-3
+        title: Open standardization + interop SDKs
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
+      - id: P4-4
+        title: Cost-to-default (performance + cost)
+        status: deferred
+        evidence:
+          - path: docs/ROADMAP.md
