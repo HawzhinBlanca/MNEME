@@ -349,6 +349,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-attest"
+version = "0.1.0"
+dependencies = [
+ "der",
+ "mneme-core",
+ "pem-rfc7468",
+]
+
+[[package]]
 name = "mneme-cap"
 version = "0.1.0"
 dependencies = [
@@ -418,6 +427,7 @@ name = "mneme-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "mneme-attest",
  "mneme-cap",
  "mneme-core",
  "mneme-crdt",
@@ -461,6 +471,15 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
+
+[[package]]
+name = "pem-rfc7468"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6305423e0e7738146434843d1694d621cce767262b2a86910beab705e4493d9"
+dependencies = [
+ "base64ct",
+]
 
 [[package]]
 name = "pkcs8"

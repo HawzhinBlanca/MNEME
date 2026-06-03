@@ -28,6 +28,10 @@ mod pedersen_schnorr_zk;
 #[cfg(feature = "pedersen_schnorr_zk")]
 mod semantic_zk;
 
+// Phase IV-A research seam — UNIMPLEMENTED, off by default, wired into no recall path.
+#[cfg(feature = "piop_research")]
+mod piop_research;
+
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
@@ -41,6 +45,9 @@ pub use receipt::ZkRetrievalAttachment;
 pub use semantic::SemanticIndex;
 pub use verify::{HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_vo};
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
+
+#[cfg(feature = "context_gate")]
+pub use verify::verify_consumption_attestation;
 
 #[cfg(feature = "commitment_binding")]
 pub use commitment_binding::{
@@ -58,6 +65,11 @@ pub use pedersen_schnorr_zk::{
 // *deferral* (Plonky2/FRI SNARK target not shipped), not the actual backend.
 #[cfg(feature = "pedersen_schnorr_zk")]
 pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
+
+// Phase IV-A research seam (UNIMPLEMENTED). Exported only so the honesty
+// constants are inspectable; `prove_exact_nn_piop` panics and proves nothing.
+#[cfg(feature = "piop_research")]
+pub use piop_research::{PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop};
 
 /// ADS backend enabled when the `ads` feature is on.
 /// Privacy path is `commitment_binding` only — a tagged BLAKE3 binding envelope,
@@ -168,6 +180,17 @@ mod tests {
             prove_pedersen_schnorr(&bad),
             Err(MnemeError::ZkProofInvalid)
         );
+    }
+
+    #[cfg(feature = "piop_research")]
+    #[test]
+    fn piop_research_seam_is_honest() {
+        use super::piop_research::{PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS};
+        // Research seam must never claim to prove anything.
+        assert!(PIOP_RESEARCH_HONESTY.contains("UNIMPLEMENTED"));
+        assert!(PIOP_RESEARCH_HONESTY.contains("proves NOTHING"));
+        assert!(PIOP_RESEARCH_HONESTY.contains("NOT a SNARK"));
+        assert!(PIOP_RESEARCH_STATUS.contains("UNIMPLEMENTED"));
     }
 
     #[cfg(feature = "commitment_binding")]

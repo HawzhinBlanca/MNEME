@@ -6,6 +6,7 @@ members = [
     "crates/mneme-smt",
     "crates/mneme-dag",
     "crates/mneme-index",
+    "crates/mneme-context",
     "crates/mneme-root",
     "crates/mneme-cap",
     "crates/mneme-attest",
@@ -13,6 +14,7 @@ members = [
     "crates/mneme-crdt",
     "crates/mneme-verify",
     "crates/mneme-store",
+    "crates/mneme-account",
     "crates/mneme-mcp",
     "crates/mneme-cli",
     "crates/mnemed",
@@ -42,7 +44,9 @@ mneme-cap = { path = "crates/mneme-cap" }
 mneme-attest = { path = "crates/mneme-attest" }
 mneme-verify = { path = "crates/mneme-verify" }
 mneme-store = { path = "crates/mneme-store" }
+mneme-account = { path = "crates/mneme-account" }
 mnemed = { path = "crates/mnemed" }
+mneme-context = { path = "crates/mneme-context" }
 
 blake3 = "1.8"
 ciborium = "0.2"

@@ -12,6 +12,8 @@ pub enum DomainTag {
     Cap,
     Ckpt,
     Rcpt,
+    ContextAssembled,
+    CertifiedMemorySet,
 }
 
 impl DomainTag {
@@ -26,6 +28,8 @@ impl DomainTag {
             Self::Cap => b"MNEME-cap-v1\x00",
             Self::Ckpt => b"MNEME-ckpt-v1\x00",
             Self::Rcpt => b"MNEME-receipt-v1\x00",
+            Self::ContextAssembled => b"MNEME-ctx-assembled-v1\x00",
+            Self::CertifiedMemorySet => b"MNEME-cms-v1\x00",
         }
     }
 }
@@ -91,6 +95,16 @@ pub fn hash_receipt_preimage(bytes: &[u8]) -> [u8; 32] {
     hash_domain(DomainTag::Rcpt, bytes)
 }
 
+/// Deterministic assembled-context digest (Phase II P2-3/4).
+pub fn hash_context_assembled(bytes: &[u8]) -> [u8; 32] {
+    *blake3::hash(bytes).as_bytes()
+}
+
+/// Certified memory-set digest (order-only on object ids).
+pub fn hash_certified_memory_set(bytes: &[u8]) -> [u8; 32] {
+    *blake3::hash(bytes).as_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +121,8 @@ mod tests {
             DomainTag::Cap,
             DomainTag::Ckpt,
             DomainTag::Rcpt,
+            DomainTag::ContextAssembled,
+            DomainTag::CertifiedMemorySet,
         ] {
             let b = tag.bytes();
             assert!(b.starts_with(b"MNEME-"));

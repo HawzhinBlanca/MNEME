@@ -1,0 +1,9 @@
+[package]
+name = "mneme-account"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Phase III accountability stubs: bind_action / prove_forget (gated, fail-closed)"
+
+[dependencies]
+mneme-core.workspace = true

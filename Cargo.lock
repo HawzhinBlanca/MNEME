@@ -1217,6 +1217,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-account"
+version = "0.1.0"
+dependencies = [
+ "mneme-core",
+]
+
+[[package]]
 name = "mneme-attest"
 version = "0.1.0"
 dependencies = [
@@ -1260,6 +1267,15 @@ dependencies = [
  "tempfile",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "mneme-context"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "hex",
+ "mneme-core",
 ]
 
 [[package]]

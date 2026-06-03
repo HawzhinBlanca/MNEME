@@ -93,6 +93,17 @@ fn context_hash_changes_with_payload() {
 fn golden_context_hash_v1() {
     let e = entry(b"golden", 99);
     let outcome = assemble_verified_context(&[e.id], &[e], ASSEMBLY_PROFILE_V1).unwrap();
+    if std::env::var("MNEME_DUMP_HASH").is_ok() {
+        println!("assembled_bytes={}", hex::encode(&outcome.assembled_bytes));
+        println!(
+            "plain_blake3={}",
+            hex::encode(blake3::hash(&outcome.assembled_bytes).as_bytes())
+        );
+        println!(
+            "certified_hash={}",
+            hex::encode(outcome.certified_memory_set_hash)
+        );
+    }
     // Frozen cross-run digest for foundation-gate style determinism checks.
     assert_eq!(
         hex::encode(outcome.context_hash),

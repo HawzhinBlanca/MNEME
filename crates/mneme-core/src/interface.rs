@@ -62,6 +62,24 @@ impl LogicalKey {
 }
 
 // ---------------------------------------------------------------------------
+// Context assembly (Phase II gate)
+// ---------------------------------------------------------------------------
+
+/// Frozen assembly profile id for deterministic prompt layouts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AssemblyProfile {
+    pub id: [u8; 32],
+}
+
+/// Attestation that the assembled context matched the certified memory set.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextConsumptionAttestation {
+    pub assembly_profile: AssemblyProfile,
+    pub context_hash: [u8; 32],
+    pub certified_memory_set_hash: [u8; 32],
+}
+
+// ---------------------------------------------------------------------------
 // SMT proof types (smt ↔ dag/root/verify)
 // ---------------------------------------------------------------------------
 
