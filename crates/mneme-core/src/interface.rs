@@ -127,6 +127,46 @@ pub enum DistanceMetric {
     CosineI64,
 }
 
+/// Phase I: level of retrieval proof bundled in a Cognition Certificate (§5 honesty).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetrievalProofLevel {
+    /// True top-k dominance over the full committed vector set (flat / full-scan path).
+    ExactDominance = 0,
+    /// Procedure-faithful HNSW walk + dominance over the visited neighborhood only.
+    HnswAuditOnDemand = 1,
+}
+
+/// Phase I bi-temporal anchor (transaction-time via signed root; valid-time in P1-2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AsOf {
+    RootSeq(u64),
+    /// Valid-time upper bound (wall ms): only objects with `valid_time_ms <= t` are eligible.
+    ValidTime(u64),
+}
+
+/// Phase I provenance filter for poison-evidence recall (P1-3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProvenanceFilter {
+    /// Expected `ObjectRecord.writer` (BLAKE3 of cap subject).
+    pub written_by: Option<[u8; 32]>,
+    /// HLC lower bound (inclusive): `record.hlc >= since`.
+    pub since: Option<[u8; 14]>,
+    pub min_tier: TrustTier,
+}
+
+/// Per-candidate provenance bound into a scoped recall receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CandidateProvenance {
+    pub object_id: ObjectId,
+    pub writer: [u8; 32],
+    pub trust_tier: u8,
+    pub hlc: [u8; 14],
+    pub valid_time_ms: Option<u64>,
+}
+
+/// Cognition Certificate schema version (Phase I v1 wire).
+pub const COGNITION_CERT_VERSION: u16 = 1;
+
 /// Authenticated verification object (§9.2, ADS backend).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerificationObject {
@@ -298,6 +338,8 @@ pub struct Draft {
     pub trust_tier: Option<TrustTier>,
     /// When set, object is indexed semantically under `embedding_commit` (§5.5).
     pub embedding: Option<crate::FixedPointEmbedding>,
+    /// Optional valid-time (world time), distinct from transaction-time (`hlc` at ingest).
+    pub valid_time_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug)]

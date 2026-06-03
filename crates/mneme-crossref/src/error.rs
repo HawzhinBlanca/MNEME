@@ -4,6 +4,10 @@ pub enum CrossrefError {
     SchemaDrift,
     SigInvalid,
     PathInvalid,
+    CertificateInvalid,
+    UnsupportedVersion,
+    ProcedureMismatch,
+    RetrievalDominanceFailed,
     CapDenied,
     CapExpired,
 }

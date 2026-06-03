@@ -1,12 +1,14 @@
 //! `mneme` CLI — adoption-layer fail-closed gate (blueprint §14.2).
 
 mod attest;
+mod cert;
 mod determinism;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
 use mneme_core::{
-    Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, TrustTier,
+    DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
+    ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
 };
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
 use mneme_store::Store;
@@ -14,9 +16,6 @@ use mneme_verify::verify_store;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-
-const PHASE_I_CERTIFY_VERSION: u16 = 1;
-const PHASE_I_VERIFY_CERT_VERSION: u16 = 1;
 
 #[derive(Parser)]
 #[command(
@@ -98,14 +97,28 @@ enum Commands {
     },
     /// Emit a Sigstore-signable attestation over a root (§15.2)
     Attest { root: PathBuf },
-    /// Phase I certificate scaffold (gate closed; fail-closed)
+    /// Emit Cognition Certificate v1 for a semantic recall (Phase I)
     Certify {
         store: PathBuf,
-        #[arg(long)]
-        output: PathBuf,
+        #[arg(long, default_value = "cert.cbor")]
+        out: PathBuf,
+        #[arg(long, default_value = "0,0")]
+        components: String,
+        #[arg(long, default_value_t = 2)]
+        dim: u16,
+        #[arg(long, default_value_t = 0)]
+        scale: i8,
+        #[arg(long = "proof-level", default_value = "exact-dominance")]
+        proof_level: ProofLevelArg,
     },
-    /// Phase I certificate verifier scaffold (gate closed; fail-closed)
-    VerifyCert { file: PathBuf },
+    /// Offline verify Cognition Certificate v1 (Phase I)
+    VerifyCert {
+        cert: PathBuf,
+        #[arg(long = "ef-search", default_value_t = 64)]
+        ef_search: u32,
+        #[arg(long, default_value_t = 1)]
+        k: u32,
+    },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
@@ -166,6 +179,22 @@ impl From<TrustTierArg> for TrustTier {
 enum ForgetModeArg {
     Shred,
     Redact,
+}
+
+#[derive(Clone, Copy, ValueEnum, Default)]
+enum ProofLevelArg {
+    #[default]
+    ExactDominance,
+    HnswAuditOnDemand,
+}
+
+impl From<ProofLevelArg> for RetrievalProofLevel {
+    fn from(v: ProofLevelArg) -> Self {
+        match v {
+            ProofLevelArg::ExactDominance => RetrievalProofLevel::ExactDominance,
+            ProofLevelArg::HnswAuditOnDemand => RetrievalProofLevel::HnswAuditOnDemand,
+        }
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -300,6 +329,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 session: [0xab; 16],
                 trust_tier: Some(TrustTier::Trusted),
                 embedding: None,
+                valid_time_ms: None,
             };
             let (id, root) = mneme_store
                 .remember(draft, &cap)
@@ -380,18 +410,54 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             Ok(())
         }
         Commands::Audit { root } => require_path_exists(&root, "root checkpoint"),
-        Commands::Certify { store, output } => {
+        Commands::Certify {
+            store,
+            out,
+            components,
+            dim,
+            scale,
+            proof_level,
+        } => {
             require_store_dir(&store)?;
-            let _ = output;
-            Err(CliErrorKind::Kernel(MnemeError::UnsupportedVersion {
-                got: PHASE_I_CERTIFY_VERSION,
-            }))
+            let comps = parse_i16_list(&components)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let trust = TrustConfig::new(operator.public_key_bytes());
+            let mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            let cap =
+                agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
+            cert::run_certify(
+                &mneme_store,
+                &trust,
+                &cap,
+                &comps,
+                dim,
+                scale,
+                proof_level.into(),
+                &out,
+            )
+            .map_err(CliErrorKind::VerifyFailed)?;
+            println!("cognition certificate v1 written to {}", out.display());
+            Ok(())
         }
-        Commands::VerifyCert { file } => {
-            require_file_exists(&file, "certificate")?;
-            Err(CliErrorKind::Kernel(MnemeError::UnsupportedVersion {
-                got: PHASE_I_VERIFY_CERT_VERSION,
-            }))
+        Commands::VerifyCert { cert, ef_search, k } => {
+            require_file_exists(&cert, "cognition certificate")?;
+            let pk = if let Some(ref seed) = cli.operator_seed {
+                let operator = KeyPair::from_seed(parse_seed_hex(seed)?);
+                operator.public_key_bytes()
+            } else {
+                return Err(CliErrorKind::Usage);
+            };
+            let trust = TrustConfig::new(pk);
+            let proc = Procedure {
+                algo: ProcedureAlgo::Hnsw,
+                ef_search,
+                k,
+                distance: DistanceMetric::SquaredL2I64,
+                seed: 0,
+            };
+            cert::run_verify_cert(&cert, &trust, &proc).map_err(CliErrorKind::VerifyFailed)?;
+            println!("verify-cert ok: cognition certificate v1 valid offline");
+            Ok(())
         }
         Commands::Attest { root } => {
             require_file_exists(&root, "root checkpoint")?;
@@ -498,6 +564,15 @@ fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], CliErrorKind> {
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&bytes);
     Ok(seed)
+}
+
+fn parse_i16_list(s: &str) -> Result<Vec<i16>, CliErrorKind> {
+    if s.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    s.split(',')
+        .map(|part| part.trim().parse::<i16>().map_err(|_| CliErrorKind::Usage))
+        .collect()
 }
 
 fn require_path_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {

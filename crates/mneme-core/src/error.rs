@@ -67,4 +67,12 @@ pub enum MnemeError {
     KeyVaultMissing,
     #[error("key vault corrupt")]
     KeyVaultCorrupt,
+    #[error("cognition certificate invalid")]
+    CertificateInvalid,
+    #[error("retrieval dominance proof failed")]
+    RetrievalDominanceFailed,
+    #[error("historical recall anchor invalid or not in verified checkpoint chain")]
+    HistoricalRecallInvalid,
+    #[error("provenance filter attestation violated")]
+    ProvenanceFilterViolation,
 }

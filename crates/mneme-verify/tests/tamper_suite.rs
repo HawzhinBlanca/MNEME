@@ -630,6 +630,7 @@ fn persisted_store_with_entry() -> (tempfile::TempDir, mneme_crypto::TrustConfig
                 session: [0x23; 16],
                 trust_tier: None,
                 embedding: None,
+                valid_time_ms: None,
             },
             &cap,
         )
@@ -800,6 +801,7 @@ fn tamper_verify_store_intermediate_checkpoint_fails_closed() {
                     session: [0x33; 16],
                     trust_tier: None,
                     embedding: None,
+                    valid_time_ms: None,
                 },
                 &cap,
             )
@@ -861,6 +863,7 @@ fn tamper_verify_store_missing_head_checkpoint_fails_closed() {
                 session: [0x43; 16],
                 trust_tier: None,
                 embedding: None,
+                valid_time_ms: None,
             },
             &cap,
         )

@@ -11,8 +11,11 @@ pub mod error;
 pub mod key;
 pub mod mst_merge;
 pub mod object_fixture;
+pub mod procedure;
+pub mod semantic_commit;
 pub mod smt;
 pub mod wire_cap;
+pub mod wire_cert;
 pub mod wire_root;
 
 pub use error::CrossrefError;

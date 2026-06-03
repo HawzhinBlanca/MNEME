@@ -68,6 +68,7 @@ impl MemoryService for GrpcMemoryService {
             session: [0xcd; 16],
             trust_tier: None,
             embedding: None,
+            valid_time_ms: None,
         };
         let (id, root) = store.remember(draft, &cap).map_err(grpc_status_mneme)?;
         Ok(Response::new(RememberResponse {

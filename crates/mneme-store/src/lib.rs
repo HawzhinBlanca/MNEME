@@ -4,11 +4,14 @@
 //! only. Untrusted recall assembly is `pub(crate)` inside this crate.
 
 mod atomic;
+mod certify;
 mod forget;
 mod layout;
 mod merge;
 mod pause;
 mod recall;
+mod recall_at;
+mod scoped_recall;
 
 use mneme_cap::Capability;
 use mneme_core::object::HlcWire;
@@ -49,9 +52,6 @@ struct RecallSessionCache {
     entries: HashMap<([u8; 32], u8), Vec<Entry>>,
 }
 
-const PHASE_I_BITEMPORAL_VERSION: u16 = 1;
-const PHASE_I_PROVENANCE_SCOPE_VERSION: u16 = 1;
-
 impl RecallSessionCache {
     fn lookup(&self, root_hash: &[u8; 32], key: &([u8; 32], u8)) -> Option<Vec<Entry>> {
         if &self.root_hash != root_hash {
@@ -71,6 +71,7 @@ impl RecallSessionCache {
 
 pub use layout::Tombstone;
 pub use merge::{SyncManifest, SyncSnapshot};
+pub use mneme_core::AsOf;
 pub use pause::{
     AFTER_APPEND_CHECKPOINT, AFTER_BEGIN_INCOMPLETE, AFTER_KEY_INDEX, AFTER_OBJECT_WRITE,
     AFTER_PERSIST_INDEX, AFTER_WRITE_HEAD, BEFORE_COMMIT_INCOMPLETE, test_clear_pause,
@@ -105,13 +106,6 @@ pub struct Recall {
     pub receipt: Option<mneme_core::Receipt>,
     pub semantic_receipt: Option<SemanticRecallReceipt>,
     pub root: Root,
-}
-
-/// Bi-temporal recall anchor (Phase I scaffold). Gate remains closed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AsOf {
-    RootSeq(u64),
-    ValidTime(u64),
 }
 
 impl Store {
@@ -329,6 +323,7 @@ impl Store {
                     session: [0x42; 16],
                     trust_tier: None,
                     embedding: None,
+                    valid_time_ms: None,
                 };
                 let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
                 ids.push(id);
@@ -441,6 +436,7 @@ impl Store {
                     session: [0x42; 16],
                     trust_tier: None,
                     embedding: Some(bench_embedding(i, dim)?),
+                    valid_time_ms: None,
                 };
                 let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
                 ids.push(id);
@@ -494,7 +490,7 @@ impl Store {
             payload_enc,
             embedding_commit: draft.embedding.as_ref().map(FixedPointEmbedding::commit),
             redaction_slot: None,
-            ext: None,
+            ext: draft.valid_time_ms.map(mneme_core::ext_map_with_valid_time),
         };
 
         let canonical = to_bytes_canonical(&record)?;
@@ -644,35 +640,6 @@ impl Store {
         self.recall_verified_default(query, cap)
     }
 
-    /// Phase I bi-temporal scaffold: gate stays closed until implemented.
-    pub fn recall_verified_at(
-        &self,
-        query: &Query,
-        _proc: &Procedure,
-        cap: &Capability,
-        as_of: AsOf,
-    ) -> Result<Vec<Entry>, MnemeError> {
-        let _ = as_of;
-        self.authorize_read(query, cap)?;
-        Err(MnemeError::UnsupportedVersion {
-            got: PHASE_I_BITEMPORAL_VERSION,
-        })
-    }
-
-    /// Phase I provenance-scoped recall scaffold: fail-closed placeholder.
-    pub fn provenance_scoped_recall(
-        &self,
-        query: &Query,
-        proc: &Procedure,
-        cap: &Capability,
-    ) -> Result<Vec<Entry>, MnemeError> {
-        let _ = proc;
-        self.authorize_read(query, cap)?;
-        Err(MnemeError::UnsupportedVersion {
-            got: PHASE_I_PROVENANCE_SCOPE_VERSION,
-        })
-    }
-
     pub fn promote(
         &mut self,
         id: &ObjectId,
@@ -690,7 +657,8 @@ impl Store {
             .cloned()
             .ok_or(MnemeError::ObjectTampered)?;
         let mut record: ObjectRecord = from_bytes_strict(&bytes)?;
-        if TrustTier::from_u8(record.trust_tier)? >= to {
+        let from_tier = record.trust_tier;
+        if TrustTier::from_u8(from_tier)? >= to {
             return self.current_root();
         }
         record.trust_tier = to.as_u8();
@@ -725,7 +693,20 @@ impl Store {
             layout::persist_embeddings(&self.path, self)?;
             self.rebuild_semantic_index()?;
             self.commit_root_inner()?;
-            self.current_root()
+            let root = self.current_root()?;
+            layout::append_promotion_event(
+                &self.path,
+                &layout::PromotionEvent {
+                    from_id: hex::encode(id_bytes),
+                    to_id: hex::encode(new_id_bytes),
+                    from_tier,
+                    to_tier: to.as_u8(),
+                    writer: hex::encode(cap.writer_hash()),
+                    hlc: hex::encode(self.hlc.to_bytes()),
+                    sequence: root.sequence,
+                },
+            )?;
+            Ok(root)
         })();
 
         match result {
@@ -830,16 +811,6 @@ impl Store {
         &self.object_keys
     }
 
-    pub(crate) fn prune_keyed_metadata_to_live_keys(&mut self) -> bool {
-        let live: std::collections::HashSet<[u8; 32]> =
-            self.key_to_object.values().copied().collect();
-        let before_object_keys = self.object_keys.len();
-        let before_embeddings = self.embeddings.len();
-        self.object_keys.retain(|id, _| live.contains(id));
-        self.embeddings.retain(|id, _| live.contains(id));
-        before_object_keys != self.object_keys.len() || before_embeddings != self.embeddings.len()
-    }
-
     fn decrypt_entries(&self, entries: &mut [Entry]) -> Result<(), MnemeError> {
         for entry in entries {
             let logical_key = self
@@ -912,6 +883,7 @@ impl Store {
         pause::checkpoint(pause::AFTER_APPEND_CHECKPOINT)?;
         layout::write_head(&self.path, &stored)?;
         pause::checkpoint(pause::AFTER_WRITE_HEAD)?;
+        layout::snapshot_key_index_at_seq(&self.path, self.sequence, self)?;
         Ok(())
     }
 

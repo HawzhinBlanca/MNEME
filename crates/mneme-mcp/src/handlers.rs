@@ -71,6 +71,7 @@ impl MemoryHandlers {
             session,
             trust_tier: None,
             embedding: None,
+            valid_time_ms: None,
         };
         let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
         let (id, root) = store.remember(draft, &self.write_cap)?;

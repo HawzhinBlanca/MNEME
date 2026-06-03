@@ -87,6 +87,30 @@ struct EmbeddingSidecar {
     entries: BTreeMap<String, EmbeddingSidecarEntry>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct PromotionEvent {
+    pub from_id: String,
+    pub to_id: String,
+    pub from_tier: u8,
+    pub to_tier: u8,
+    pub writer: String,
+    pub hlc: String,
+    pub sequence: u64,
+}
+
+pub fn append_promotion_event(path: &Path, event: &PromotionEvent) -> Result<(), MnemeError> {
+    let log = path.join("meta/promotions.log");
+    let line = serde_json::to_string(event).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .map_err(|e| io_err(&log, e))?;
+    writeln!(file, "{line}").map_err(|e| io_err(&log, e))?;
+    file.sync_all().map_err(|e| io_err(&log, e))?;
+    Ok(())
+}
+
 pub fn init_store(path: &Path) -> Result<(), MnemeError> {
     fs::create_dir_all(path.join("objects")).map_err(|e| io_err(path, e))?;
     fs::create_dir_all(path.join("roots")).map_err(|e| io_err(path, e))?;
@@ -203,6 +227,39 @@ pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
         .map_err(|_| MnemeError::SerializationNonCanonical)?;
     crate::atomic::atomic_write(&meta.join("key_index.json"), data.as_bytes())?;
     truncate_journal(path, "key_index.journal")
+}
+
+/// Per-checkpoint key-index snapshot for bi-temporal `recall_verified_at` (Phase I P1-2).
+pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result<(), MnemeError> {
+    let dir = path.join("meta/snapshots").join(seq.to_string());
+    fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
+    let mut sidecar = KeyIndexSidecar::default();
+    for (k, v) in store.key_to_object_ref() {
+        sidecar.entries.insert(hex_encode(k), hex_encode(v));
+    }
+    let mut tombstones: Vec<String> = store.tombstones_ref().iter().map(hex_encode).collect();
+    tombstones.sort();
+    sidecar.tombstones = tombstones;
+    let data = serde_json::to_string_pretty(&sidecar)
+        .map_err(|_| MnemeError::SerializationNonCanonical)?;
+    crate::atomic::atomic_write(&dir.join("key_index.json"), data.as_bytes())?;
+    Ok(())
+}
+
+/// Load a historical key index snapshot written at commit `seq`.
+pub fn load_key_index_at_seq(path: &Path, seq: u64) -> Result<KeyIndex, MnemeError> {
+    let snap = path
+        .join("meta/snapshots")
+        .join(seq.to_string())
+        .join("key_index.json");
+    if !snap.exists() {
+        return Err(MnemeError::HistoricalRecallInvalid);
+    }
+    let data = fs::read(&snap).map_err(|e| io_err(&snap, e))?;
+    let sidecar: KeyIndexSidecar =
+        serde_json::from_slice(&data).map_err(|_| MnemeError::SerializationNonCanonical)?;
+    let (_, key_index) = apply_sidecar(&sidecar);
+    Ok(key_index)
 }
 
 pub fn persist_key_index_upsert(

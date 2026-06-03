@@ -66,6 +66,7 @@ impl FaultStore {
             session: [0x01; 16],
             trust_tier: None,
             embedding: None,
+            valid_time_ms: None,
         };
         store.remember(draft, &cap).expect("seed remember");
         drop(store);

@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![deny(warnings)]
 
+mod cognition_cert;
 mod commit;
 mod distance;
 mod error;
@@ -14,10 +15,12 @@ mod hnsw_backend;
 mod key_index;
 mod key_index_load;
 mod procedure;
+mod provenance;
 mod receipt;
 mod semantic;
 mod verify;
 mod wire;
+mod zkann;
 
 #[cfg(feature = "commitment_binding")]
 mod commitment_binding;
@@ -40,12 +43,28 @@ pub use procedure::{
     IndexedEntry, PROC_DOMAIN, default_key_procedure, default_semantic_procedure,
     execute_procedure_p, is_key_index_procedure, procedure_id, replay_from_candidates,
 };
+pub use provenance::{
+    align_scoped_receipt_results, build_provenance_attestation, verify_provenance_attestation,
+};
 pub use receipt::SemanticRecallReceipt;
 pub use receipt::ZkRetrievalAttachment;
+pub use receipt::{ProvenanceAttestation, ZkannAttachment};
 pub use semantic::SemanticIndex;
-pub use verify::{HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_vo};
+pub use verify::{
+    HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_semantic_receipt_full, verify_semantic_receipt_vo,
+    verify_semantic_receipt_vo_zkann,
+};
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
+pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkann_attachment};
 
+#[cfg(feature = "context_gate")]
+pub use cognition_cert::{
+    CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
+    verify_cognition_certificate_v2_draft,
+};
+pub use cognition_cert::{
+    assemble_cognition_certificate_v1, fuzz_cognition_cert_wire, verify_cognition_certificate_v1,
+};
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::verify_consumption_attestation;
 

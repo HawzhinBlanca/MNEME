@@ -243,6 +243,41 @@ fn crossref_appendix_b_mst_convergence_byte_exact() {
 }
 
 #[test]
+fn crossref_cognition_cert_v1_byte_exact() {
+    use mneme_crossref::procedure::{DistanceMetric, Procedure, ProcedureAlgo};
+    use mneme_crossref::wire_cert;
+
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(vectors_root().join("certs/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    for entry in manifest["vectors"].as_array().unwrap() {
+        let name = entry["name"].as_str().unwrap();
+        let path = vectors_root()
+            .join("certs")
+            .join(entry["cbor_file"].as_str().unwrap());
+        let bytes = fs::read(&path).unwrap();
+        let proc_spec = &entry["procedure"];
+        let proc = Procedure {
+            algo: match proc_spec["algo"].as_str().unwrap() {
+                "hnsw" => ProcedureAlgo::Hnsw,
+                other => panic!("{name}: unknown algo {other}"),
+            },
+            ef_search: proc_spec["ef_search"].as_u64().unwrap() as u32,
+            k: proc_spec["k"].as_u64().unwrap() as u32,
+            distance: match proc_spec["distance"].as_str().unwrap() {
+                "squared_l2_i64" => DistanceMetric::SquaredL2I64,
+                other => panic!("{name}: unknown distance {other}"),
+            },
+            seed: proc_spec["seed"].as_u64().unwrap(),
+        };
+        let operator = read_hex32(entry["operator_pubkey_hex"].as_str().unwrap());
+        wire_cert::verify_committed_certificate(&bytes, &operator, &proc)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+    }
+}
+
+#[test]
 fn crossref_identity_digests_exclude_nondeterministic_inputs() {
     // Foundation-gate digests are pure functions of fixture crypto + logical content.
     // This guard fails if someone threads cwd/PID/time into hash inputs.

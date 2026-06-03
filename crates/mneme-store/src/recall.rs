@@ -73,7 +73,7 @@ impl Store {
 }
 
 impl Store {
-    fn enforce_min_tier(&self, query: &Query, id: &ObjectId) -> Result<(), MnemeError> {
+    pub(crate) fn enforce_min_tier(&self, query: &Query, id: &ObjectId) -> Result<(), MnemeError> {
         let bytes = self
             .objects
             .get(id.as_bytes())

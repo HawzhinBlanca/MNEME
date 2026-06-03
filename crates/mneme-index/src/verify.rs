@@ -58,6 +58,44 @@ pub fn verify_semantic_receipt_vo(
     Ok(())
 }
 
+/// Verify ADS VO plus zkANN-1 attachment (Phase I P1-1).
+pub fn verify_semantic_receipt_vo_zkann(
+    receipt: &SemanticRecallReceipt,
+    proc: &Procedure,
+    committed_leaf_count: usize,
+) -> Result<(), MnemeError> {
+    verify_ads_vo(&receipt.verification_object, &receipt.semantic_commit, proc)?;
+    if let Some(zk) = &receipt.zk_retrieval {
+        #[cfg(feature = "pedersen_schnorr_zk")]
+        {
+            crate::semantic_zk::verify_zk_retrieval_attachment(zk, &receipt.verification_object)?;
+        }
+        #[cfg(not(feature = "pedersen_schnorr_zk"))]
+        {
+            let _ = zk;
+            return Err(MnemeError::ZkProofInvalid);
+        }
+    }
+    if receipt.zkann.is_some() {
+        crate::zkann::verify_zkann_attachment(receipt, proc, committed_leaf_count)?;
+    }
+    Ok(())
+}
+
+/// Full semantic receipt verify: ADS + zkANN + optional provenance attestation (Phase I).
+pub fn verify_semantic_receipt_full(
+    receipt: &SemanticRecallReceipt,
+    proc: &Procedure,
+    committed_leaf_count: usize,
+    object_bytes: &std::collections::BTreeMap<[u8; 32], Vec<u8>>,
+) -> Result<(), MnemeError> {
+    verify_semantic_receipt_vo_zkann(receipt, proc, committed_leaf_count)?;
+    if receipt.provenance.is_some() {
+        crate::provenance::verify_provenance_attestation(receipt, proc, object_bytes)?;
+    }
+    Ok(())
+}
+
 /// Honesty guard: VO proves procedure-faithfulness, not exact-NN optimality (§3).
 pub const HONESTY_NOT_EXACT_NN: &str = "receipt proves faithful execution of procedure P over committed data, not true nearest neighbors";
 

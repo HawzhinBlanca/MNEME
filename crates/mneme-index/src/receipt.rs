@@ -1,12 +1,29 @@
 //! Semantic recall receipt bound to `semantic_commit` (blueprint §9.2, ADS backend).
 
-use mneme_core::{VerificationObject, hash_receipt_preimage};
+use mneme_core::{
+    CandidateProvenance, ProvenanceFilter, RetrievalProofLevel, VerificationObject,
+    hash_receipt_preimage,
+};
 
 /// Optional transparent ZK retrieval-match proof bytes (12-month `pedersen_schnorr_zk` feature).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ZkRetrievalAttachment {
     pub public_commit: [u8; 32],
     pub proof_bytes: Vec<u8>,
+}
+
+/// Phase I zkANN-1 attachment on a semantic receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZkannAttachment {
+    pub level: RetrievalProofLevel,
+    pub visited_order: Vec<mneme_core::ObjectId>,
+}
+
+/// Phase I provenance-scoped recall attestation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProvenanceAttestation {
+    pub filter: ProvenanceFilter,
+    pub candidates: Vec<CandidateProvenance>,
 }
 
 /// Receipt for semantic/ANN recall — lives in `mneme-index` (key `Receipt` remains key-index only).
@@ -21,6 +38,10 @@ pub struct SemanticRecallReceipt {
     /// When present, a real transparent ZK proof (`pedersen_schnorr_zk`) binds the top-1 result's
     /// embedding commit to the query commit without expanding the verifier TCB.
     pub zk_retrieval: Option<ZkRetrievalAttachment>,
+    /// Phase I zkANN-1 dominance / audit-on-demand proof level.
+    pub zkann: Option<ZkannAttachment>,
+    /// Phase I provenance-filter attestation (optional).
+    pub provenance: Option<ProvenanceAttestation>,
 }
 
 impl SemanticRecallReceipt {
@@ -34,6 +55,8 @@ impl SemanticRecallReceipt {
             semantic_commit,
             verification_object,
             zk_retrieval: None,
+            zkann: None,
+            provenance: None,
         }
     }
 

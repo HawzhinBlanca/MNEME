@@ -15,6 +15,7 @@ fn remember(store: &mut Store, ns: &str, name: &str, body: &[u8], cap: &mneme_ca
         session: [0x01; 16],
         trust_tier: None,
         embedding: None,
+        valid_time_ms: None,
     };
     store.remember(draft, cap).expect("remember");
 }

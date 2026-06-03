@@ -16,6 +16,7 @@ mneme-crypto.workspace = true
 mneme-cap.workspace = true
 mneme-store.workspace = true
 mneme-verify.workspace = true
+mneme-index.workspace = true
 mneme-smt.workspace = true
 mnemed = { path = "../mnemed" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
@@ -35,5 +36,6 @@ mneme-core.workspace = true
 mneme-crypto.workspace = true
 mneme-store.workspace = true
 mneme-verify.workspace = true
+mneme-index.workspace = true
 hex.workspace = true
 walkdir = "2.5"

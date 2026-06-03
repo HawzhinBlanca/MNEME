@@ -44,7 +44,6 @@ impl Store {
                         object_bytes: object_bytes.as_deref(),
                     })?;
                     self.key_to_object.remove(&key_hash);
-                    self.object_keys.remove(&object_id);
                     self.embeddings.remove(&object_id);
                 }
                 ForgetMode::Redact => {
@@ -72,7 +71,6 @@ impl Store {
             // leaves embeddings unchanged.
             if let ForgetMode::Shred = mode {
                 layout::persist_embeddings_remove(&self.path, &object_id)?;
-                layout::persist_object_keys(&self.path, self)?;
             }
             pause::checkpoint(pause::AFTER_PERSIST_INDEX)?;
             self.rebuild_semantic_index()?;

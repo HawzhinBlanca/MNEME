@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use mneme_cap::agent_cap;
-use mneme_core::{Draft, MemoryKind, MnemeError};
+use mneme_core::{Draft, FixedPointEmbedding, MemoryKind, MnemeError, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_store::{Store, test_clear_pause};
 use mneme_verify::{verify_signed_head_only, verify_store};
@@ -82,24 +82,56 @@ fn verify_missing_store_path_exits_usage() {
 }
 
 #[test]
-fn certify_is_fail_closed() {
+fn certify_and_verify_cert_succeeds() {
     let dir = tempdir().unwrap();
     let store = dir.path().join("store");
-    fs::create_dir_all(&store).unwrap();
-    Store::create(&store, KeyPair::generate()).unwrap();
-    let output = dir.path().join("cert.json");
+    let output = dir.path().join("cert.cbor");
+    let seed = [0x01; 32];
+    let seed_hex = hex::encode(seed);
+    let operator = KeyPair::from_seed(seed);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).unwrap();
+    {
+        let mut s = Store::create(&store, operator.clone()).unwrap();
+        s.trust_mut().authorized_writers.push(cap.subject);
+        let draft = Draft {
+            namespace: "cert".into(),
+            logical_name: "semantic".into(),
+            kind: MemoryKind::Semantic,
+            body: b"body".to_vec(),
+            parent_ids: vec![],
+            session: [0xab; 16],
+            trust_tier: Some(TrustTier::Trusted),
+            embedding: Some(FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap()),
+            valid_time_ms: None,
+        };
+        s.remember(draft, &cap).unwrap();
+    }
 
     mneme()
         .args([
             "certify",
             store.to_str().unwrap(),
-            "--output",
+            "--out",
             output.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
         ])
         .assert()
-        .failure()
-        .code(5)
-        .stderr(predicate::str::contains("unsupported version"));
+        .success();
+
+    mneme()
+        .args([
+            "verify-cert",
+            output.to_str().unwrap(),
+            "--ef-search",
+            "64",
+            "--k",
+            "1",
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -109,11 +141,20 @@ fn verify_cert_is_fail_closed() {
     fs::write(&cert, b"{\"version\":1}").unwrap();
 
     mneme()
-        .args(["verify-cert", cert.to_str().unwrap()])
+        .args([
+            "verify-cert",
+            cert.to_str().unwrap(),
+            "--ef-search",
+            "64",
+            "--k",
+            "1",
+            "--operator-seed",
+            &hex::encode([0x02; 32]),
+        ])
         .assert()
         .failure()
-        .code(5)
-        .stderr(predicate::str::contains("unsupported version"));
+        .code(4)
+        .stderr(predicate::str::contains("certificate invalid"));
 }
 
 #[test]
@@ -333,6 +374,7 @@ fn head_only_verify_misses_object_tamper_full_verify_and_cli_reject() {
         session: [0xab; 16],
         trust_tier: None,
         embedding: None,
+        valid_time_ms: None,
     };
     let (id, _) = store.remember(draft, &cap).unwrap();
     let (root, _) = store.head().unwrap();

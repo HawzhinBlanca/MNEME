@@ -160,6 +160,7 @@ async fn remember(
         session: [0xab; 16],
         trust_tier: None,
         embedding: None,
+        valid_time_ms: None,
     };
     let (id, root) = store.remember(draft, &cap).map_err(ApiError::from_mneme)?;
     Ok(Json(RememberResponse {

@@ -509,6 +509,25 @@ fn hash_field(name: &str) -> u16 {
     sum
 }
 
+/// Extension field: valid-time (world time) in milliseconds since epoch.
+pub const EXT_VALID_TIME_MS: u16 = 1;
+
+pub fn ext_map_with_valid_time(ms: u64) -> BTreeMap<u16, Vec<u8>> {
+    let mut m = BTreeMap::new();
+    m.insert(EXT_VALID_TIME_MS, ms.to_le_bytes().to_vec());
+    m
+}
+
+pub fn valid_time_from_ext(ext: &Option<BTreeMap<u16, Vec<u8>>>) -> Option<u64> {
+    let bytes = ext.as_ref()?.get(&EXT_VALID_TIME_MS)?;
+    if bytes.len() != 8 {
+        return None;
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(bytes);
+    Some(u64::from_le_bytes(arr))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

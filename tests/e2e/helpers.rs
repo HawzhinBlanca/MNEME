@@ -26,6 +26,7 @@ pub fn semantic_draft(namespace: &str, name: &str, body: &[u8]) -> Draft {
         session: [0x42; 16],
         trust_tier: None,
         embedding: None,
+        valid_time_ms: None,
     }
 }
 
@@ -44,6 +45,7 @@ pub fn semantic_draft_with_embedding(
         session: [0x42; 16],
         trust_tier: None,
         embedding: Some(embedding),
+        valid_time_ms: None,
     }
 }
 

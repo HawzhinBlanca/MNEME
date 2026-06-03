@@ -32,6 +32,7 @@ fn b1_verify_store_head_signature_only_full_verify_rejects_tamper() {
         session: [0x01; 16],
         trust_tier: Some(TrustTier::Working),
         embedding: None,
+        valid_time_ms: None,
     };
     let (id, _) = store.remember(draft, &cap).unwrap();
     let (root, _) = store.head().unwrap();
@@ -67,6 +68,7 @@ fn b2_recall_verified_blocks_oob_tamper_direct_recall_unavailable() {
         session: [0x02; 16],
         trust_tier: Some(TrustTier::Working),
         embedding: None,
+        valid_time_ms: None,
     };
     let (id, _) = store.remember(draft, &cap).unwrap();
     store.tamper_object_bytes(id.as_bytes()).unwrap();

@@ -32,6 +32,7 @@ fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capabilit
                 session: [0x01; 16],
                 trust_tier: None,
                 embedding: None,
+                valid_time_ms: None,
             },
             cap,
         )

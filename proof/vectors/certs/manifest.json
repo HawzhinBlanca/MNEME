@@ -1,0 +1,25 @@
+{
+  "generated_by": "cargo test -p mneme-index --test cognition_cert_v1 dump_cognition_cert_fixture -- --ignored --nocapture",
+  "phase_i_item": "P1-4",
+  "scope": "cross-validated: mneme-index cert verify + mneme-crossref wire_cert (Ed25519 + ADS replay + zkANN dominance)",
+  "status": "pass",
+  "vectors": [
+    {
+      "cbor_file": "cognition_cert_v1.cbor",
+      "level": "exact_dominance",
+      "name": "cognition_cert_v1",
+      "operator_pubkey_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "preimage_hash_hex": "0967fb6b4aee9912b9baacc179efc967e8007e14e7c852c137dd162ca2d9ebe5",
+      "procedure": {
+        "algo": "hnsw",
+        "distance": "squared_l2_i64",
+        "ef_search": 64,
+        "k": 1,
+        "seed": 0
+      },
+      "semantic_commit_hex": "53ced2ba9cb080bebb25e120c25baddbec8bbbf2da0b853cf410fb2646316057"
+    }
+  ],
+  "verified_by": "cargo test -p mneme-crossref --test appendix_b_crossref crossref_cognition_cert_v1_byte_exact",
+  "version": 1
+}

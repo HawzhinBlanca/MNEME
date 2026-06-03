@@ -371,6 +371,7 @@ fn bench_scale_ops() {
             session: [0x42; 16],
             trust_tier: None,
             embedding: None,
+            valid_time_ms: None,
         };
         let t = Instant::now();
         store.remember(draft, &cap).expect("remember");
@@ -412,6 +413,7 @@ fn bench_scale_ops() {
                     session: [0x7; 16],
                     trust_tier: None,
                     embedding: None,
+                    valid_time_ms: None,
                 };
                 peer.remember(draft, &cap).expect("peer remember");
             }
@@ -490,6 +492,7 @@ fn bench_concurrent_merge_contention() {
                             session: [0x7; 16],
                             trust_tier: None,
                             embedding: None,
+                            valid_time_ms: None,
                         };
                         peer.remember(draft, &cap).expect("peer remember");
                     }

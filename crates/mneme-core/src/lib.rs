@@ -28,9 +28,13 @@ pub use error::MnemeError;
 pub use hex::decode_hex32;
 pub use hlc::{Hlc, NodeId};
 pub use interface::{
-    AssemblyProfile, CONTRACT_VERSION, Capability, Caveat, ConsistencyProof,
-    ContextConsumptionAttestation, DistanceMetric, Draft, Entry, ForgetMode, ForgetTarget,
-    LogicalKey, MerkleProof, NonMembershipProof, ObjectId, ObjectRef, Procedure, ProcedureAlgo,
-    Query, Receipt, Root, RootPreimage, SyncMessage, TrustTier, VerificationObject,
+    AsOf, AssemblyProfile, COGNITION_CERT_VERSION, CONTRACT_VERSION, CandidateProvenance,
+    Capability, Caveat, ConsistencyProof, ContextConsumptionAttestation, DistanceMetric, Draft,
+    Entry, ForgetMode, ForgetTarget, LogicalKey, MerkleProof, NonMembershipProof, ObjectId,
+    ObjectRef, Procedure, ProcedureAlgo, ProvenanceFilter, Query, Receipt, RetrievalProofLevel,
+    Root, RootPreimage, SyncMessage, TrustTier, VerificationObject,
 };
-pub use object::{HlcWire, MemoryKind, OBJECT_VERSION, ObjectRecord, PayloadEnc};
+pub use object::{
+    EXT_VALID_TIME_MS, HlcWire, MemoryKind, OBJECT_VERSION, ObjectRecord, PayloadEnc,
+    ext_map_with_valid_time, valid_time_from_ext,
+};

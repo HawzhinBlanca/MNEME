@@ -163,6 +163,77 @@ impl SemanticIndex {
         Ok((vo.result_ids.clone(), vo))
     }
 
+    /// HNSW audit-on-demand: procedure replay over the visited neighborhood only (Phase I).
+    pub fn search_deterministic_on_visited(
+        &self,
+        proc: &Procedure,
+        query: &FixedPointEmbedding,
+    ) -> Result<(Vec<ObjectId>, VerificationObject), IndexError> {
+        use std::collections::HashSet;
+        let visited = self
+            .hnsw
+            .approximate_search(query, proc.k as usize, proc.ef_search as usize);
+        if visited.is_empty() {
+            return Err(IndexError::ObjectNotIndexed);
+        }
+        let visited_set: HashSet<ObjectId> = visited.iter().copied().collect();
+        let entries: Vec<IndexedEntry> = self
+            .sorted_entries()
+            .into_iter()
+            .filter(|e| visited_set.contains(&e.object_id))
+            .collect();
+        let (result_ids, candidates) = execute_procedure_p(proc, query, &entries);
+        let mut nodes = Vec::new();
+        for (i, entry) in self.sorted_entries().iter().enumerate() {
+            if !visited_set.contains(&entry.object_id) {
+                continue;
+            }
+            let commit = self
+                .merkle
+                .leaf_hash(i)
+                .ok_or(IndexError::ObjectNotIndexed)?;
+            let path = self
+                .merkle
+                .merkle_path(i)
+                .ok_or(IndexError::ObjectNotIndexed)?;
+            nodes.push((commit, path));
+        }
+        let vo = VerificationObject {
+            nodes,
+            candidates,
+            procedure_id: procedure_id(proc),
+            query_commit: query.commit(),
+            result_ids,
+        };
+        Ok((visited, vo))
+    }
+
+    /// Build receipt with zkANN-1 attachment (exact dominance or HNSW audit-on-demand).
+    pub fn recall_receipt_zkann(
+        &self,
+        proc: &Procedure,
+        query: &FixedPointEmbedding,
+        root_bound: [u8; 32],
+        level: mneme_core::RetrievalProofLevel,
+    ) -> Result<SemanticRecallReceipt, IndexError> {
+        use crate::receipt::ZkannAttachment;
+        let (visited_order, vo) = match level {
+            mneme_core::RetrievalProofLevel::ExactDominance => {
+                let (ids, vo) = self.search_deterministic(proc, query)?;
+                (ids, vo)
+            }
+            mneme_core::RetrievalProofLevel::HnswAuditOnDemand => {
+                self.search_deterministic_on_visited(proc, query)?
+            }
+        };
+        let mut receipt = SemanticRecallReceipt::new(root_bound, self.semantic_commit(), vo);
+        receipt.zkann = Some(ZkannAttachment {
+            level,
+            visited_order,
+        });
+        Ok(receipt)
+    }
+
     /// Build receipt bound to signed root + `semantic_commit`.
     pub fn recall_receipt(
         &self,
