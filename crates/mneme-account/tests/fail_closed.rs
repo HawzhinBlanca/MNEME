@@ -4,10 +4,14 @@
 //! with `UnsupportedVersion`, never returning a fabricated receipt or proof —
 //! and they reject *even when* a cert v2 commit is supplied.
 
-use mneme_account::{PHASE_III_GATE_OPEN, bind_action, prove_forget};
+use mneme_account::{
+    PHASE_III_GATE_OPEN, bind_action, prove_forget, verify_action_receipt_wire,
+    verify_forget_proof_wire,
+};
 use mneme_core::{
-    ACTION_RECEIPT_VERSION, Capability, FORGET_PROOF_VERSION, ForgetMode, ForgetTarget, LogicalKey,
-    MnemeError, ObjectId, Root,
+    ACTION_RECEIPT_VERSION, ActionReceipt, Capability, FORGET_PROOF_VERSION, ForgetMode,
+    ForgetProof, ForgetTarget, LogicalKey, MnemeError, ObjectId, Root, encode_action_receipt,
+    encode_forget_proof,
 };
 
 fn sample_capability() -> Capability {
@@ -106,4 +110,71 @@ fn prove_forget_fails_closed_for_redact_and_with_cert() {
             got: FORGET_PROOF_VERSION
         })
     ));
+}
+
+fn sample_action_receipt_wire(cert: Option<[u8; 32]>) -> Vec<u8> {
+    let receipt = ActionReceipt {
+        version: ACTION_RECEIPT_VERSION,
+        action_commit: [0x21; 32],
+        capability_commit: [0x22; 32],
+        sanctioner: [0x23; 32],
+        root_bound: [0x24; 32],
+        hlc: [0x25; 14],
+        cognition_cert_commit: cert,
+        signature: vec![0xAA; 8],
+    };
+    encode_action_receipt(&receipt).expect("receipt wire")
+}
+
+fn sample_forget_proof_wire(cert: Option<[u8; 32]>) -> Vec<u8> {
+    let proof = ForgetProof {
+        version: FORGET_PROOF_VERSION,
+        target_commit: [0x31; 32],
+        mode: ForgetMode::Shred,
+        shred_commit: [0x32; 32],
+        absence_path: vec![[0x33; 32]],
+        root_bound: [0x34; 32],
+        cognition_cert_commit: cert,
+    };
+    encode_forget_proof(&proof).expect("forget proof wire")
+}
+
+#[test]
+fn verify_action_receipt_wire_fails_closed_but_parses() {
+    let wire = sample_action_receipt_wire(Some([0xCC; 32]));
+    let err = verify_action_receipt_wire(&wire).unwrap_err();
+    assert_eq!(
+        err,
+        MnemeError::UnsupportedVersion {
+            got: ACTION_RECEIPT_VERSION
+        }
+    );
+}
+
+#[test]
+fn verify_action_receipt_wire_rejects_malformed_wire() {
+    let mut wire = sample_action_receipt_wire(None);
+    wire.truncate(wire.len().saturating_sub(5));
+    let err = verify_action_receipt_wire(&wire).unwrap_err();
+    assert_eq!(err, MnemeError::SchemaDrift);
+}
+
+#[test]
+fn verify_forget_proof_wire_fails_closed_but_parses() {
+    let wire = sample_forget_proof_wire(None);
+    let err = verify_forget_proof_wire(&wire).unwrap_err();
+    assert_eq!(
+        err,
+        MnemeError::UnsupportedVersion {
+            got: FORGET_PROOF_VERSION
+        }
+    );
+}
+
+#[test]
+fn verify_forget_proof_wire_rejects_malformed_wire() {
+    let mut wire = sample_forget_proof_wire(Some([0xDD; 32]));
+    wire.truncate(wire.len().saturating_sub(17));
+    let err = verify_forget_proof_wire(&wire).unwrap_err();
+    assert_eq!(err, MnemeError::SchemaDrift);
 }

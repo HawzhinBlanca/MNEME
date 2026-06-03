@@ -40,11 +40,15 @@ the Phase III types reference it through an **optional** `cognition_cert_commit`
   identity; an action is refused without a valid certificate.
 - [ ] `bind_action` produces a signed `ActionReceipt` bound to the signed root
   and (when present) the cert v2 commit; forged/altered receipts fail closed.
+- [x] Wire skeleton + canonical encode/decode gated by `ACTION_RECEIPT_VERSION`
+  (gate closed; no signer/verifier yet).
 
 ### P3-2 — Verifiable forgetting (P0)
 - [ ] `prove_forget` folds crypto-shred + proof-of-absence into the certificate
   (prove deleted **and** not-served-after), A-REPLAY safe.
 - [ ] Tamper tests: resurrected/over-retained target → typed rejection.
+- [x] Wire skeleton + canonical encode/decode gated by `FORGET_PROOF_VERSION`
+  (gate closed; no shred witness / non-membership proof yet).
 
 ### P3-3 — Formal proof (P0)
 - [ ] Mechanize the verifier's fail-closed property in Lean/F* (seL4-style); TCB
@@ -97,6 +101,7 @@ pilot sign-off; external audit passed.
 | 2026-06-03 | `mneme-core::accountability`: `ActionReceipt` + `ForgetProof` wire skeletons, `ACTION_RECEIPT_VERSION` / `FORGET_PROOF_VERSION = 3`, optional `cognition_cert_commit`, deterministic `signable_preimage` / `encode_payload` | **Landed (skeleton)** |
 | 2026-06-03 | `mneme-account` crate: `bind_action` / `prove_forget` fail closed with `UnsupportedVersion`; `PHASE_III_GATE_OPEN = false` | **Landed (gated stub)** |
 | 2026-06-03 | Fail-closed tests (core unit + `mneme-account` integration, incl. cert-supplied rejection) | **Landed** |
+| 2026-06-03 | Canonical dCBOR encode/decode for `ActionReceipt` / `ForgetProof`, version-gated; malformed-wire tests; wire verifiers remain gate-closed | **Landed (wire-only)** |
 | — | Real signer/verifier for `ActionReceipt` (P3-1) | **Deferred** (Phase III gate) |
 | — | Real crypto-shred witness + SMT non-membership prover for `ForgetProof` (P3-2) | **Deferred** (Phase III gate) |
 | — | Freeze `ActionReceipt` / `ForgetProof` into the §20.3 interface + pin domain tags | **Deferred** (post-review) |

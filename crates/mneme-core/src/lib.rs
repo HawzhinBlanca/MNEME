@@ -14,6 +14,7 @@ pub mod types;
 
 pub use accountability::{
     ACTION_RECEIPT_VERSION, ActionReceipt, FORGET_PROOF_VERSION, ForgetProof,
+    decode_action_receipt, decode_forget_proof, encode_action_receipt, encode_forget_proof,
 };
 pub use context::{
     CONTEXT_ATTESTATION_VERSION, decode_context_consumption_attestation,

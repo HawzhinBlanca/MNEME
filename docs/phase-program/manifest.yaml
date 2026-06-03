@@ -79,20 +79,24 @@ phases:
           - path: crates/mneme-context/tests/deterministic_assembly.rs
 
   - phase: Phase III — Accountability scaffolding
-    status: deferred
+    status: partial
     items:
       - id: P3-1
         title: Non-repudiation (ActionReceipt) gate closed
         status: partial
         evidence:
           - path: docs/PHASE_III_TASK_SPEC.md
+          - path: crates/mneme-core/src/accountability.rs
           - path: crates/mneme-account/src/lib.rs
+          - path: crates/mneme-account/tests/fail_closed.rs
       - id: P3-2
         title: Verifiable forgetting (ForgetProof) gate closed
         status: partial
         evidence:
           - path: docs/PHASE_III_TASK_SPEC.md
+          - path: crates/mneme-core/src/accountability.rs
           - path: crates/mneme-account/src/lib.rs
+          - path: crates/mneme-account/tests/fail_closed.rs
       - id: P3-3
         title: Formal proof of verifier TCB
         status: deferred

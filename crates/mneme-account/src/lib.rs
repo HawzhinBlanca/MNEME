@@ -24,7 +24,7 @@
 
 use mneme_core::{
     ACTION_RECEIPT_VERSION, ActionReceipt, Capability, FORGET_PROOF_VERSION, ForgetMode,
-    ForgetProof, ForgetTarget, MnemeError, Root,
+    ForgetProof, ForgetTarget, MnemeError, Root, decode_action_receipt, decode_forget_proof,
 };
 
 /// Phase III gate. Flipped to `true` only when `bind_action` / `prove_forget`
@@ -70,4 +70,30 @@ pub fn prove_forget(
     Err(MnemeError::UnsupportedVersion {
         got: FORGET_PROOF_VERSION,
     })
+}
+
+/// Parse and (once implemented) verify an [`ActionReceipt`] wire. **Gate is
+/// closed:** returns [`MnemeError::UnsupportedVersion`] after parsing so
+/// malformed wires still fail closed with their parse error.
+pub fn verify_action_receipt_wire(bytes: &[u8]) -> Result<(), MnemeError> {
+    let receipt = decode_action_receipt(bytes)?;
+    if !PHASE_III_GATE_OPEN {
+        return Err(MnemeError::UnsupportedVersion {
+            got: receipt.version,
+        });
+    }
+    let _ = receipt;
+    Ok(())
+}
+
+/// Parse and (once implemented) verify a [`ForgetProof`] wire. **Gate is
+/// closed:** returns [`MnemeError::UnsupportedVersion`] after parsing so
+/// malformed wires still fail closed with their parse error.
+pub fn verify_forget_proof_wire(bytes: &[u8]) -> Result<(), MnemeError> {
+    let proof = decode_forget_proof(bytes)?;
+    if !PHASE_III_GATE_OPEN {
+        return Err(MnemeError::UnsupportedVersion { got: proof.version });
+    }
+    let _ = proof;
+    Ok(())
 }
