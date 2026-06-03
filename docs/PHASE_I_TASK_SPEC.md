@@ -29,16 +29,16 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
 ## 1. Exit criteria (Phase I = done when all green)
 
 ### P1-1 — zkANN-1: proven-correct retrieval (P0)
-- [ ] **Exact path (flat/brute-force index):** a recall returns `(entries, proof)` where the proof
+- [x] **Exact path (flat/brute-force index):** a recall returns `(entries, proof)` where the proof
   establishes **dominance** — every returned top-k distance is ≤ every non-returned candidate's
   distance over the *committed* vector set, bound to the signed `semantic_commit`. Verifier
   rejects any reordered/truncated/padded result with a typed `MnemeError`.
-- [ ] **HNSW path (approximate):** **audit-on-demand** (V3DB-style) — on challenge, replay the
+- [x] **HNSW path (approximate):** **audit-on-demand** (V3DB-style) — on challenge, replay the
   declared graph walk against the committed snapshot and prove the returned set equals the walk's
   output. Honestly labeled: this proves *procedure-faithful + reproducible*, upgraded to
   *dominance over the visited neighborhood*, **not** global exact-NN (that needs the Phase-N PIOP).
-- [ ] Default build remains non-ZK; honesty strings preserved in errors + exports (`ZK_BACKEND`).
-- [ ] Forgery tests: reordered / dropped-better-neighbor / wrong-commit → typed rejection.
+- [x] Default build remains non-ZK; honesty strings preserved in errors + exports (`ZK_BACKEND`).
+- [x] Forgery tests: reordered / dropped-better-neighbor / wrong-commit → typed rejection.
 
 ### P1-2 — Bi-temporal verifiable recall (P0)
 - [ ] `Draft` gains an optional **valid-time** (when the fact is true in the world), distinct from

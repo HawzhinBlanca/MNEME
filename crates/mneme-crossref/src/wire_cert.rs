@@ -160,13 +160,14 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
         }
     }
 
-    let (nodes, candidates) = vo_body.ok_or(CrossrefError::CertificateInvalid)?;
+    let (nodes, candidates, leaf_indices) = vo_body.ok_or(CrossrefError::CertificateInvalid)?;
     Ok(SemanticReceipt {
         root_bound: root_bound.ok_or(CrossrefError::CertificateInvalid)?,
         semantic_commit: semantic_commit.ok_or(CrossrefError::CertificateInvalid)?,
         vo: VerificationObject {
             nodes,
             candidates,
+            leaf_indices,
             procedure_id: procedure_id.ok_or(CrossrefError::CertificateInvalid)?,
             query_commit: query_commit.ok_or(CrossrefError::CertificateInvalid)?,
             result_ids: result_ids.ok_or(CrossrefError::CertificateInvalid)?,
@@ -176,23 +177,28 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
 }
 
 type NodeRow = ([u8; 32], Vec<[u8; 32]>);
-type VoBody = (Vec<NodeRow>, Vec<CandidateRow>);
+type VoBody = (Vec<NodeRow>, Vec<CandidateRow>, Vec<usize>);
 
 fn decode_vo_body(value: &CborValue) -> Result<VoBody, CrossrefError> {
     let map = value.as_map().ok_or(CrossrefError::SchemaDrift)?;
     let mut nodes = None;
     let mut candidates = None;
+    let mut leaf_indices = None;
     for (k, v) in map {
         match field_key(k)? {
             1 => nodes = Some(decode_nodes(v)?),
             2 => candidates = Some(decode_candidates(v)?),
+            3 => leaf_indices = Some(decode_leaf_indices(v)?),
             _ => return Err(CrossrefError::SchemaDrift),
         }
     }
-    Ok((
-        nodes.ok_or(CrossrefError::CertificateInvalid)?,
-        candidates.ok_or(CrossrefError::CertificateInvalid)?,
-    ))
+    let nodes = nodes.ok_or(CrossrefError::CertificateInvalid)?;
+    let candidates = candidates.ok_or(CrossrefError::CertificateInvalid)?;
+    let leaf_indices = leaf_indices.unwrap_or_else(|| (0..nodes.len()).collect());
+    if leaf_indices.len() != nodes.len() || leaf_indices.len() != candidates.len() {
+        return Err(CrossrefError::CertificateInvalid);
+    }
+    Ok((nodes, candidates, leaf_indices))
 }
 
 fn decode_nodes(value: &CborValue) -> Result<Vec<NodeRow>, CrossrefError> {
@@ -223,6 +229,16 @@ fn decode_candidates(value: &CborValue) -> Result<Vec<CandidateRow>, CrossrefErr
         let emb = parse_fixed32(&row[1])?;
         let dist = row[2].as_i64().ok_or(CrossrefError::SchemaDrift)?;
         out.push((id, emb, dist));
+    }
+    Ok(out)
+}
+
+fn decode_leaf_indices(value: &CborValue) -> Result<Vec<usize>, CrossrefError> {
+    let arr = value.as_array().ok_or(CrossrefError::SchemaDrift)?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let n = item.as_u64().ok_or(CrossrefError::SchemaDrift)?;
+        out.push(usize::try_from(n).map_err(|_| CrossrefError::CertificateInvalid)?);
     }
     Ok(out)
 }

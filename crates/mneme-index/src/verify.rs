@@ -3,7 +3,8 @@
 use crate::commit::{SemanticMerkleTree, hash_sem_leaf};
 use crate::procedure::replay_from_candidates;
 use crate::receipt::SemanticRecallReceipt;
-use mneme_core::{MnemeError, ObjectId, Procedure, VerificationObject};
+use mneme_core::{MnemeError, Procedure, VerificationObject};
+use std::collections::{HashMap, HashSet};
 
 /// Verify ADS backend VO: Merkle paths + deterministic procedure replay.
 pub fn verify_ads_vo(
@@ -14,20 +15,31 @@ pub fn verify_ads_vo(
     if vo.procedure_id != crate::procedure::procedure_id(proc) {
         return Err(MnemeError::ProcedureMismatch);
     }
+    if vo.nodes.len() != vo.leaf_indices.len() || vo.candidates.len() != vo.leaf_indices.len() {
+        return Err(MnemeError::IndexPathInvalid);
+    }
 
-    let mut sorted_ids: Vec<ObjectId> = vo.candidates.iter().map(|(id, _, _)| *id).collect();
-    sorted_ids.sort();
+    let mut seen_indices = HashSet::with_capacity(vo.leaf_indices.len());
+    let mut commit_to_path: HashMap<[u8; 32], (usize, &Vec<[u8; 32]>)> =
+        HashMap::with_capacity(vo.nodes.len());
+    for ((commit, path), leaf_index) in vo.nodes.iter().zip(vo.leaf_indices.iter()) {
+        if !seen_indices.insert(*leaf_index) {
+            return Err(MnemeError::IndexPathInvalid);
+        }
+        if commit_to_path
+            .insert(*commit, (*leaf_index, path))
+            .is_some()
+        {
+            return Err(MnemeError::IndexPathInvalid);
+        }
+    }
 
-    for (commit, path) in &vo.nodes {
-        let leaf_index = sorted_ids
-            .iter()
-            .position(|id| {
-                vo.candidates
-                    .iter()
-                    .any(|(cid, emb, _)| cid == id && hash_sem_leaf(id.as_bytes(), emb) == *commit)
-            })
-            .ok_or(MnemeError::IndexPathInvalid)?;
-        SemanticMerkleTree::verify_path_with_index(leaf_index, commit, path, semantic_commit)?;
+    for (id, emb, _) in &vo.candidates {
+        let commit = hash_sem_leaf(id.as_bytes(), emb);
+        let Some((leaf_index, path)) = commit_to_path.get(&commit) else {
+            return Err(MnemeError::IndexPathInvalid);
+        };
+        SemanticMerkleTree::verify_path_with_index(*leaf_index, &commit, path, semantic_commit)?;
     }
 
     let replayed = replay_from_candidates(proc, &vo.candidates);
@@ -145,9 +157,11 @@ mod tests {
                 (commit, path)
             })
             .collect();
+        let leaf_indices = (0..tree.leaf_count()).collect();
         let vo = VerificationObject {
             nodes,
             candidates,
+            leaf_indices,
             procedure_id: procedure_id(&proc),
             query_commit: query.commit(),
             result_ids,

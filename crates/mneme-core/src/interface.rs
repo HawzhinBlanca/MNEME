@@ -172,6 +172,10 @@ pub const COGNITION_CERT_VERSION: u16 = 1;
 pub struct VerificationObject {
     pub nodes: Vec<([u8; 32], Vec<[u8; 32]>)>,
     pub candidates: Vec<(ObjectId, [u8; 32], i64)>,
+    /// True leaf indices in the **full** semantic Merkle tree (not the subset), parallel to
+    /// `candidates` / `nodes`. Required for HNSW audit-on-demand so membership paths verify
+    /// against the committed tree rather than a prover-supplied subset.
+    pub leaf_indices: Vec<usize>,
     pub procedure_id: [u8; 32],
     pub query_commit: [u8; 32],
     pub result_ids: Vec<ObjectId>,

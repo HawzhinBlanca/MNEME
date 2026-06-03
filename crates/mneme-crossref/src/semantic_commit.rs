@@ -6,7 +6,7 @@
 use crate::domain::{hash_sem_internal, hash_sem_leaf};
 use crate::error::CrossrefError;
 use crate::procedure::{CandidateRow, Procedure, procedure_id, replay_from_candidates};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// zkANN-1 retrieval proof level (tags match `RetrievalProofLevel`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +22,8 @@ pub struct VerificationObject {
     pub nodes: Vec<([u8; 32], Vec<[u8; 32]>)>,
     /// Examined candidates: `(object_id, embedding_commit, integer_distance)`.
     pub candidates: Vec<CandidateRow>,
+    /// True leaf indices in the full semantic tree (parallel to `nodes` / `candidates`).
+    pub leaf_indices: Vec<usize>,
     pub procedure_id: [u8; 32],
     pub query_commit: [u8; 32],
     pub result_ids: Vec<[u8; 32]>,
@@ -66,20 +68,31 @@ pub fn verify_ads_vo(
     if vo.procedure_id != procedure_id(proc) {
         return Err(CrossrefError::ProcedureMismatch);
     }
+    if vo.nodes.len() != vo.leaf_indices.len() || vo.candidates.len() != vo.leaf_indices.len() {
+        return Err(CrossrefError::PathInvalid);
+    }
 
-    let mut sorted_ids: Vec<[u8; 32]> = vo.candidates.iter().map(|(id, _, _)| *id).collect();
-    sorted_ids.sort();
+    let mut seen_indices = HashSet::with_capacity(vo.leaf_indices.len());
+    let mut commit_to_path: HashMap<[u8; 32], (usize, &Vec<[u8; 32]>)> =
+        HashMap::with_capacity(vo.nodes.len());
+    for ((commit, path), leaf_index) in vo.nodes.iter().zip(vo.leaf_indices.iter()) {
+        if !seen_indices.insert(*leaf_index) {
+            return Err(CrossrefError::PathInvalid);
+        }
+        if commit_to_path
+            .insert(*commit, (*leaf_index, path))
+            .is_some()
+        {
+            return Err(CrossrefError::PathInvalid);
+        }
+    }
 
-    for (commit, path) in &vo.nodes {
-        let leaf_index = sorted_ids
-            .iter()
-            .position(|id| {
-                vo.candidates
-                    .iter()
-                    .any(|(cid, emb, _)| cid == id && hash_sem_leaf(id, emb) == *commit)
-            })
-            .ok_or(CrossrefError::PathInvalid)?;
-        verify_path_with_index(leaf_index, commit, path, semantic_commit)?;
+    for (id, emb, _) in &vo.candidates {
+        let commit = hash_sem_leaf(id, emb);
+        let Some((leaf_index, path)) = commit_to_path.get(&commit) else {
+            return Err(CrossrefError::PathInvalid);
+        };
+        verify_path_with_index(*leaf_index, &commit, path, semantic_commit)?;
     }
 
     if replay_from_candidates(proc, &vo.candidates) != vo.result_ids {

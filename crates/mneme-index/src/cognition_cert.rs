@@ -474,13 +474,14 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
             }
         }
     }
-    let (nodes, candidates) = vo_body.ok_or(MnemeError::CertificateInvalid)?;
+    let (nodes, candidates, leaf_indices) = vo_body.ok_or(MnemeError::CertificateInvalid)?;
     Ok(SemanticRecallReceipt {
         root_bound: root_bound.ok_or(MnemeError::CertificateInvalid)?,
         semantic_commit: semantic_commit.ok_or(MnemeError::CertificateInvalid)?,
         verification_object: mneme_core::VerificationObject {
             nodes,
             candidates,
+            leaf_indices,
             procedure_id: procedure_id.ok_or(MnemeError::CertificateInvalid)?,
             query_commit: query_commit.ok_or(MnemeError::CertificateInvalid)?,
             result_ids: result_ids.ok_or(MnemeError::CertificateInvalid)?,
@@ -495,29 +496,36 @@ fn encode_vo_body(
     enc: &mut Encoder,
     vo: &mneme_core::VerificationObject,
 ) -> Result<(), MnemeError> {
-    enc.begin_map(2)?;
+    enc.begin_map(3)?;
     enc.encode_unsigned(1)?;
     encode_vo_nodes(enc, &vo.nodes)?;
     enc.encode_unsigned(2)?;
     encode_candidates(enc, &vo.candidates)?;
+    enc.encode_unsigned(3)?;
+    encode_leaf_indices(enc, &vo.leaf_indices)?;
     Ok(())
 }
 
-fn decode_vo_body(value: &CborValue) -> Result<(VoNodes, VoCandidates), MnemeError> {
+fn decode_vo_body(value: &CborValue) -> Result<(VoNodes, VoCandidates, Vec<usize>), MnemeError> {
     let map = value.as_map().ok_or(MnemeError::CertificateInvalid)?;
     let mut nodes = None;
     let mut candidates = None;
+    let mut leaf_indices = None;
     for (k, v) in map {
         match parse_u64_field_key(k)? {
             1 => nodes = Some(decode_vo_nodes(v)?),
             2 => candidates = Some(decode_candidates(v)?),
+            3 => leaf_indices = Some(decode_leaf_indices(v)?),
             _ => return Err(MnemeError::UnknownField { field: 0 }),
         }
     }
-    Ok((
-        nodes.ok_or(MnemeError::CertificateInvalid)?,
-        candidates.ok_or(MnemeError::CertificateInvalid)?,
-    ))
+    let nodes = nodes.ok_or(MnemeError::CertificateInvalid)?;
+    let candidates = candidates.ok_or(MnemeError::CertificateInvalid)?;
+    let leaf_indices = leaf_indices.unwrap_or_else(|| (0..nodes.len()).collect());
+    if leaf_indices.len() != nodes.len() || leaf_indices.len() != candidates.len() {
+        return Err(MnemeError::CertificateInvalid);
+    }
+    Ok((nodes, candidates, leaf_indices))
 }
 
 fn level_tag(level: RetrievalProofLevel) -> u64 {
@@ -614,6 +622,24 @@ fn decode_vo_nodes(value: &CborValue) -> Result<VoNodes, MnemeError> {
         let path_arr = pair[1].as_array().ok_or(MnemeError::CertificateInvalid)?;
         let path: Result<Vec<_>, _> = path_arr.iter().map(parse_fixed32).collect();
         out.push((commit, path?));
+    }
+    Ok(out)
+}
+
+fn encode_leaf_indices(enc: &mut Encoder, leaves: &[usize]) -> Result<(), MnemeError> {
+    enc.begin_array(leaves.len() as u64)?;
+    for idx in leaves {
+        enc.encode_unsigned(u64::try_from(*idx).map_err(|_| MnemeError::CertificateInvalid)?)?;
+    }
+    Ok(())
+}
+
+fn decode_leaf_indices(value: &CborValue) -> Result<Vec<usize>, MnemeError> {
+    let arr = value.as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let mut out = Vec::with_capacity(arr.len());
+    for v in arr {
+        let n = parse_u64(v)?;
+        out.push(usize::try_from(n).map_err(|_| MnemeError::CertificateInvalid)?);
     }
     Ok(out)
 }

@@ -4,7 +4,7 @@ phases:
     items:
       - id: P1-1
         title: zkANN-1 dominance + HNSW audit-on-demand
-        status: partial
+        status: done
         evidence:
           - path: docs/PHASE_I_TASK_SPEC.md
           - path: crates/mneme-index/tests/zkann_exact_dominance.rs

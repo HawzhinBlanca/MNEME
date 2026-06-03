@@ -139,6 +139,7 @@ impl SemanticIndex {
         let entries = self.sorted_entries();
         let (result_ids, candidates) = execute_procedure_p(proc, query, &entries);
 
+        let mut leaf_indices = Vec::with_capacity(self.merkle.leaf_count());
         let nodes: Vec<([u8; 32], Vec<[u8; 32]>)> = (0..self.merkle.leaf_count())
             .map(|i| {
                 let commit = self
@@ -149,6 +150,7 @@ impl SemanticIndex {
                     .merkle
                     .merkle_path(i)
                     .ok_or(IndexError::ObjectNotIndexed)?;
+                leaf_indices.push(i);
                 Ok((commit, path))
             })
             .collect::<Result<_, IndexError>>()?;
@@ -156,6 +158,7 @@ impl SemanticIndex {
         let vo = VerificationObject {
             nodes,
             candidates,
+            leaf_indices,
             procedure_id: procedure_id(proc),
             query_commit: query.commit(),
             result_ids,
@@ -184,6 +187,7 @@ impl SemanticIndex {
             .collect();
         let (result_ids, candidates) = execute_procedure_p(proc, query, &entries);
         let mut nodes = Vec::new();
+        let mut leaf_indices = Vec::new();
         for (i, entry) in self.sorted_entries().iter().enumerate() {
             if !visited_set.contains(&entry.object_id) {
                 continue;
@@ -197,10 +201,12 @@ impl SemanticIndex {
                 .merkle_path(i)
                 .ok_or(IndexError::ObjectNotIndexed)?;
             nodes.push((commit, path));
+            leaf_indices.push(i);
         }
         let vo = VerificationObject {
             nodes,
             candidates,
+            leaf_indices,
             procedure_id: procedure_id(proc),
             query_commit: query.commit(),
             result_ids,

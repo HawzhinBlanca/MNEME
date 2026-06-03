@@ -90,7 +90,22 @@ fn zkann_dropped_true_nearest_neighbor_must_be_rejected() {
         .map(|(id, emb, _)| mneme_index::hash_sem_leaf(id.as_bytes(), emb))
         .collect();
     vo.candidates.retain(|(id, _, _)| *id != oid(9));
-    vo.nodes.retain(|(commit, _)| !drop_commit.contains(commit));
+    let mut kept_nodes = Vec::new();
+    let mut kept_leaf_indices = Vec::new();
+    for ((commit, path), leaf_index) in vo
+        .nodes
+        .clone()
+        .into_iter()
+        .zip(vo.leaf_indices.clone().into_iter())
+    {
+        if drop_commit.contains(&commit) {
+            continue;
+        }
+        kept_nodes.push((commit, path));
+        kept_leaf_indices.push(leaf_index);
+    }
+    vo.nodes = kept_nodes;
+    vo.leaf_indices = kept_leaf_indices;
     vo.result_ids = vec![oid(1)];
     let forged_count = vo.candidates.len();
 
@@ -100,5 +115,89 @@ fn zkann_dropped_true_nearest_neighbor_must_be_rejected() {
         Err(MnemeError::RetrievalDominanceFailed),
         "SOUNDNESS: dropping the true nearest neighbor with a self-supplied leaf count \
          must fail closed, not accept (got {got:?})"
+    );
+}
+
+#[test]
+fn zkann_hnsw_audit_roundtrip_uses_true_leaf_indices() {
+    let mut index = SemanticIndex::new();
+    let q = FixedPointEmbedding::new(2, 0, vec![2, 2]).unwrap();
+    index
+        .insert(oid(1), FixedPointEmbedding::new(2, 0, vec![10, 0]).unwrap())
+        .unwrap();
+    index
+        .insert(oid(3), FixedPointEmbedding::new(2, 0, vec![0, 3]).unwrap())
+        .unwrap();
+    index
+        .insert(oid(5), FixedPointEmbedding::new(2, 0, vec![1, 1]).unwrap())
+        .unwrap();
+    let proc = Procedure {
+        algo: ProcedureAlgo::Hnsw,
+        ef_search: 2,
+        k: 1,
+        distance: DistanceMetric::SquaredL2I64,
+        seed: 42,
+    };
+    let receipt = index
+        .recall_receipt_zkann(
+            &proc,
+            &q,
+            [0xcd; 32],
+            RetrievalProofLevel::HnswAuditOnDemand,
+        )
+        .unwrap();
+    assert!(
+        !receipt.verification_object.leaf_indices.is_empty(),
+        "audit-on-demand receipt must carry true leaf indices"
+    );
+    verify_semantic_receipt_vo_zkann(
+        &receipt,
+        &proc,
+        receipt.verification_object.candidates.len(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn zkann_hnsw_audit_rejects_wrong_leaf_indices() {
+    let mut index = SemanticIndex::new();
+    let q = FixedPointEmbedding::new(2, 0, vec![2, 2]).unwrap();
+    index
+        .insert(oid(1), FixedPointEmbedding::new(2, 0, vec![10, 0]).unwrap())
+        .unwrap();
+    index
+        .insert(oid(3), FixedPointEmbedding::new(2, 0, vec![0, 3]).unwrap())
+        .unwrap();
+    index
+        .insert(oid(5), FixedPointEmbedding::new(2, 0, vec![1, 1]).unwrap())
+        .unwrap();
+    let proc = Procedure {
+        algo: ProcedureAlgo::Hnsw,
+        ef_search: 8,
+        k: 2,
+        distance: DistanceMetric::SquaredL2I64,
+        seed: 7,
+    };
+    let mut receipt = index
+        .recall_receipt_zkann(
+            &proc,
+            &q,
+            [0xee; 32],
+            RetrievalProofLevel::HnswAuditOnDemand,
+        )
+        .unwrap();
+    assert!(
+        receipt.verification_object.leaf_indices.len() >= 2,
+        "test requires multiple visited nodes to meaningfully check leaf indices"
+    );
+    receipt.verification_object.leaf_indices.reverse();
+    assert_eq!(
+        verify_semantic_receipt_vo_zkann(
+            &receipt,
+            &proc,
+            receipt.verification_object.candidates.len()
+        ),
+        Err(MnemeError::IndexPathInvalid),
+        "forged leaf indices must fail-closed (membership paths bound to true indices)"
     );
 }

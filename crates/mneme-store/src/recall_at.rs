@@ -90,9 +90,23 @@ impl Store {
             let entries = self.recall_verified(query, proc, cap)?;
             return Ok(filter_entries_valid_time(entries, bound_ms));
         }
+        // Valid-time is a *content attribute*, not a signed checkpoint — there is no
+        // "signed root at valid-time t". So this is a fully VERIFIED semantic recall over
+        // the current signed root (the receipt binds to `root.semantic_commit`), followed
+        // by a post-filter on the verified entries by valid_time. The previous approach
+        // rebuilt a valid-time-filtered sub-index whose commit never matched the signed
+        // root, so `verify_semantic_receipt` always failed closed — non-functional. This
+        // version is both sound (entries are receipt-verified) and functional.
         let previous = self.session_previous_root();
-        let semantic = self.semantic_valid_time(bound_ms);
-        self.recall_semantic_at_index(query, proc, cap, &root, &semantic, previous.as_ref())
+        let entries = self.recall_semantic_at_index(
+            query,
+            proc,
+            cap,
+            &root,
+            &self.semantic,
+            previous.as_ref(),
+        )?;
+        Ok(filter_entries_valid_time(entries, bound_ms))
     }
 
     fn recall_verified_bound_to_root(
@@ -232,22 +246,6 @@ impl Store {
             return Err(MnemeError::HistoricalRecallInvalid);
         }
         Ok(index)
-    }
-
-    fn semantic_valid_time(&self, bound_ms: u64) -> SemanticIndex {
-        let mut index = SemanticIndex::new();
-        for (id, bytes) in &self.objects {
-            let Ok(record) = from_bytes_strict::<ObjectRecord>(bytes) else {
-                continue;
-            };
-            if valid_time_from_ext(&record.ext).is_some_and(|t| t > bound_ms) {
-                continue;
-            }
-            if let Some(emb) = self.embeddings.get(id) {
-                let _ = index.insert(ObjectId(*id), emb.clone());
-            }
-        }
-        index
     }
 }
 
