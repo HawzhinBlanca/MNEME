@@ -63,6 +63,7 @@ fn run_semantic_receipt(f: &SemanticFixture) -> Result<(), MnemeError> {
         &f.procedure,
         &f.trust,
         f.previous_root.as_ref(),
+        None,
     )
 }
 

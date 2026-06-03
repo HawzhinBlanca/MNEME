@@ -141,6 +141,7 @@ fn forgery_semantic_receipt_binds_to_alien_semantic_commit() {
             &f.procedure,
             &f.trust,
             f.previous_root.as_ref(),
+            None,
         )
         .unwrap_err(),
         MnemeError::ReceiptRootMismatch

@@ -1,5 +1,3 @@
-//! Semantic ADS receipt gate (§9.3 step 3).
-
 use crate::recall::{RecallContext, verify_provenance, verify_writer_and_tier};
 use crate::root::verify_root;
 use mneme_core::{
@@ -7,7 +5,7 @@ use mneme_core::{
     object::OBJECT_VERSION,
 };
 use mneme_crypto::TrustConfig;
-use mneme_index::{HONESTY_NOT_EXACT_NN, SemanticRecallReceipt, verify_semantic_receipt_vo};
+use mneme_index::{HONESTY_NOT_EXACT_NN, SemanticRecallReceipt, verify_semantic_receipt_tcb_gate};
 
 pub const HONESTY_PROCEDURE: &str = HONESTY_NOT_EXACT_NN;
 
@@ -22,6 +20,7 @@ pub fn verify_semantic_receipt(
     proc: &Procedure,
     trust: &TrustConfig,
     previous: Option<&Root>,
+    object_bytes: Option<&std::collections::BTreeMap<[u8; 32], Vec<u8>>>,
 ) -> Result<(), MnemeError> {
     verify_root(root, trust, previous)?;
     if receipt.root_bound != root.preimage_hash
@@ -29,11 +28,7 @@ pub fn verify_semantic_receipt(
     {
         return Err(MnemeError::ReceiptRootMismatch);
     }
-    if receipt.provenance.is_none() {
-        verify_semantic_receipt_vo(receipt, proc)
-    } else {
-        Ok(())
-    }
+    verify_semantic_receipt_tcb_gate(receipt, proc, object_bytes)
 }
 
 pub fn verify_semantic_recall(
@@ -43,7 +38,8 @@ pub fn verify_semantic_recall(
     trust: &TrustConfig,
     ctx: &RecallContext<'_>,
 ) -> Result<Vec<Entry>, MnemeError> {
-    verify_semantic_receipt(&input.receipt, &input.root, proc, trust, ctx.previous_root)?;
+    #[rustfmt::skip]
+    verify_semantic_receipt(&input.receipt, &input.root, proc, trust, ctx.previous_root, Some(ctx.objects))?;
     let emb = query
         .embedding
         .as_ref()
