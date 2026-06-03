@@ -1,6 +1,7 @@
 phases:
   - phase: Phase I — Verifiable retrieval + Certificate v1
     status: partial
+    note: "Software-complete on master (749d9e1); Phase I tag + dedicated red-team signoff still pending (P1-5)."
     items:
       - id: P1-1
         title: zkANN-1 dominance + HNSW audit-on-demand
@@ -11,30 +12,32 @@ phases:
           - path: crates/mneme-index/tests/semantic_zk_recall.rs
       - id: P1-2
         title: Bi-temporal recall (recall_verified_at)
-        status: partial
+        status: done
         evidence:
           - path: docs/PHASE_I_TASK_SPEC.md
           - path: crates/mneme-store/src/recall_at.rs
           - path: tests/e2e/phase_i_gates.rs
       - id: P1-3
         title: Provenance-scoped recall (poison-evidence)
-        status: partial
+        status: done
         evidence:
           - path: docs/PHASE_I_TASK_SPEC.md
-          - path: crates/mneme-store/src/provenance.rs
+          - path: crates/mneme-store/src/scoped_recall.rs
           - path: tests/e2e/phase_i_gates.rs
       - id: P1-4
         title: Cognition Certificate v1 + offline verifier
-        status: partial
+        status: done
         evidence:
           - path: docs/PHASE_I_TASK_SPEC.md
           - path: crates/mneme-index/tests/cognition_cert_v1.rs
           - path: crates/mneme-cli/src/cert.rs
+          - path: crates/mneme-crossref/src/wire_cert.rs
       - id: P1-5
         title: Proof obligations, tamper, fuzz, determinism docs
         status: partial
         evidence:
           - path: docs/PHASE_I_TASK_SPEC.md
+          - path: docs/redteam/PHASE_I_ZKANN_SOUNDNESS.md
           - path: scripts/ci/validation-lane.sh
           - path: scripts/ci/cross-implementation-vectors.sh
           - path: scripts/ci/phase-program-gate.sh
