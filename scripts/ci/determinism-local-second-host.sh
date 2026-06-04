@@ -16,14 +16,22 @@ TS="${MNEME_DETERMINISM_TS:-1970-01-01T00:00:00Z}"
 OUT_A="$ROOT/out/ci-foundation-gate"
 OUT_B="$ROOT/out/ci-foundation-gate-2"
 
-if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+_mneme_foundation_gate() {
+  if [[ -n "${CARGO_TARGET_DIR:-}" && -x "${CARGO_TARGET_DIR}/debug/mneme" ]]; then
+    "${CARGO_TARGET_DIR}/debug/mneme" determinism foundation-gate "$@"
+  else
+    cargo run -p mneme-cli -- determinism foundation-gate "$@"
+  fi
+}
+
+if ! _mneme_foundation_gate --help &>/dev/null; then
   echo "determinism-local-second-host: mneme-cli foundation-gate unavailable — failing closed." >&2
   exit 1
 fi
 
 mneme_ci_clean_foundation_gate_dirs "$ROOT"
-cargo run -p mneme-cli -- determinism foundation-gate --out "$OUT_A" --timestamp "$TS"
-cargo run -p mneme-cli -- determinism foundation-gate --out "$OUT_B" --timestamp "$TS"
+_mneme_foundation_gate --out "$OUT_A" --timestamp "$TS"
+_mneme_foundation_gate --out "$OUT_B" --timestamp "$TS"
 
 export OUT_A OUT_B
 "$(mneme_ci_python)" - <<'PY'
