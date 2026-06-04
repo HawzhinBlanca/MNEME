@@ -79,6 +79,13 @@ pub struct ContextConsumptionAttestation {
     pub certified_memory_set_hash: [u8; 32],
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputBinding {
+    pub context_hash: [u8; 32],
+    pub output_hash: [u8; 32],
+    pub model_identity: [u8; 32],
+}
+
 // ---------------------------------------------------------------------------
 // SMT proof types (smt ↔ dag/root/verify)
 // ---------------------------------------------------------------------------

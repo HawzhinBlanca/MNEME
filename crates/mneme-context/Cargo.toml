@@ -11,3 +11,4 @@ mneme-core.workspace = true
 [dev-dependencies]
 hex.workspace = true
 blake3.workspace = true
+mneme-gate.workspace = true

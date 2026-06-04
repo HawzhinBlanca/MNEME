@@ -14,6 +14,7 @@ pub enum DomainTag {
     Rcpt,
     ContextAssembled,
     CertifiedMemorySet,
+    ModelOutput,
 }
 
 impl DomainTag {
@@ -30,6 +31,7 @@ impl DomainTag {
             Self::Rcpt => b"MNEME-receipt-v1\x00",
             Self::ContextAssembled => b"MNEME-ctx-assembled-v1\x00",
             Self::CertifiedMemorySet => b"MNEME-cms-v1\x00",
+            Self::ModelOutput => b"MNEME-model-output-v1\x00",
         }
     }
 }
@@ -105,6 +107,10 @@ pub fn hash_certified_memory_set(bytes: &[u8]) -> [u8; 32] {
     hash_domain(DomainTag::CertifiedMemorySet, bytes)
 }
 
+pub fn hash_model_output(bytes: &[u8]) -> [u8; 32] {
+    hash_domain(DomainTag::ModelOutput, bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +129,7 @@ mod tests {
             DomainTag::Rcpt,
             DomainTag::ContextAssembled,
             DomainTag::CertifiedMemorySet,
+            DomainTag::ModelOutput,
         ] {
             let b = tag.bytes();
             assert!(b.starts_with(b"MNEME-"));

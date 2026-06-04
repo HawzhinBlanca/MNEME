@@ -14,7 +14,8 @@ mod assembly;
 
 pub use assembly::{
     ASSEMBLY_PROFILE_V1, AssemblyOutcome, assemble_verified_context, certified_memory_set_payload,
-    encode_assembled_prompt_v1,
+    consumption_attestation_from_assembly, encode_assembled_prompt_v1,
+    output_binding_from_assembly,
 };
 
 #[cfg(test)]

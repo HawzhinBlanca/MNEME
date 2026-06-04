@@ -1,7 +1,8 @@
 //! Deterministic context assembly (Phase II P2-3).
 
 use mneme_core::{
-    AssemblyProfile, Entry, MnemeError, ObjectId, hash_certified_memory_set, hash_context_assembled,
+    AssemblyProfile, ContextConsumptionAttestation, Entry, MnemeError, ObjectId, OutputBinding,
+    hash_certified_memory_set, hash_context_assembled, hash_model_output,
 };
 
 /// Frozen assembly profile v1: canonical prompt layout `MNEME-CTX-ASM-v1`.
@@ -88,6 +89,28 @@ pub fn assemble_verified_context(
         certified_memory_set_hash,
         profile,
     })
+}
+
+pub fn consumption_attestation_from_assembly(
+    outcome: &AssemblyOutcome,
+) -> ContextConsumptionAttestation {
+    ContextConsumptionAttestation {
+        assembly_profile: outcome.profile,
+        context_hash: outcome.context_hash,
+        certified_memory_set_hash: outcome.certified_memory_set_hash,
+    }
+}
+
+pub fn output_binding_from_assembly(
+    outcome: &AssemblyOutcome,
+    model_output: &[u8],
+    model_identity: [u8; 32],
+) -> OutputBinding {
+    OutputBinding {
+        context_hash: outcome.context_hash,
+        output_hash: hash_model_output(model_output),
+        model_identity,
+    }
 }
 
 #[cfg(test)]
