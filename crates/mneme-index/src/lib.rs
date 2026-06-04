@@ -8,6 +8,8 @@
 #![deny(warnings)]
 
 mod cognition_cert;
+#[cfg(feature = "context_gate")]
+mod context_gate;
 mod commit;
 mod distance;
 mod error;
@@ -58,6 +60,8 @@ pub use verify::{
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkann_attachment};
 
+#[cfg(feature = "context_gate")]
+pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
 #[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,

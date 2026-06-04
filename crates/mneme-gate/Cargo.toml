@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "Context gate attestation verifier (fail-closed digest guard)"
 
+[features]
+default = []
+phase_ii_gate_open = []
+
 [dependencies]
 mneme-core.workspace = true
 mneme-context.workspace = true

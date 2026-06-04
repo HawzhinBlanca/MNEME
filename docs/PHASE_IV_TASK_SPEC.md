@@ -22,13 +22,14 @@
 - [x] Research seam scaffolded: `piop_research` flag off-by-default; `prove_exact_nn_piop` returns `UnsupportedVersion` (fail-closed `Err`, not panic) and is not on any recall/receipt/verify path.
 - [x] Formal exact-NN statement + threat model sketch (`docs/research/PHASE_IV_A_PIOP_STATEMENT.md`, spike §6 Step 1).
 - [x] Stable-toolchain survey of succinct-argument stacks (`docs/research/PHASE_IV_A_PIOP_TOOLCHAIN_MATRIX.md`, spike §6 Step 2; no nightly pin).
-- [ ] Field-friendly commitment sidecar spike + determinism cost (BLAKE3 bridge) with measured overhead.
-- [ ] Out-of-TCB prototype prover/verifier on a tiny flat index with honest prover/verify/size numbers (labeled hardware + |V| + dim).
+- [x] Field-friendly sidecar lab microbench (scripts/piop-flat-prototype/; not on recall path).
+- [x] Out-of-TCB flat-index baseline; piop prover/verifier/proof_bytes remain NOT_MEASURED.
 - [x] Threat model + certificate integration design (fail-closed degradation rule in statement doc §4.4; `retrieval_proof_level` naming TBD until prototype).
 
 ### P4-2 — Federated cognition certificates
 - [x] Cross-org wire sketch: `federation_cert.rs` types + fail-closed decode/verify (`UnsupportedVersion` while gate closed).
 - [x] Verify-sketch fuzz + forgery unit tests (`federation_cert_parse`, `federation_cert_verify`; red-team doc).
+- [x] Merge-head binding sketch (FederationMergeHeadSketch; gate still closed).
 - [ ] CRDT merge binding proof + honest trust-surface write-up (keys, revocation, replay protection).
 
 ### P4-3 — Open standardization + interop SDKs
