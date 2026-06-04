@@ -32,6 +32,7 @@ as `mneme-core` / `mneme-index`, not wrappers around the store kernel.
 - `decode_federation_cognition_cert_wire(bytes)` — parse-only.
 - `verify_federation_cognition_cert_wire(bytes)` — returns `UnsupportedVersion` while
   `PHASE_IV_FEDERATION_GATE_OPEN == false` (fail-closed sketch).
+- `verify_federation_cognition_cert_wire_with_merge_head(bytes, sketch)` — merge-head binding; gate still closed.
 
 ### 2.2 TypeScript / Go / Python (external repos)
 

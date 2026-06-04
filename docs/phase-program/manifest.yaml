@@ -170,7 +170,7 @@ phases:
 
   - phase: Phase IV — Scale & standard
     status: partial
-    note: "Research-only slice; piop_research off-by-default returns UnsupportedVersion (Err); no PIOP/FRI prover shipped."
+    note: "Research-only; piop_research UnsupportedVersion; flat-index lab scripts/piop-flat-prototype/ (out of TCB)."
     items:
       - id: P4-1
         title: Global exact-NN (zkRAG/PIOP path)

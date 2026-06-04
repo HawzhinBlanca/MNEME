@@ -1,0 +1,12 @@
+[package]
+name = "piop-flat-prototype"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[lib]
+path = "src/lib.rs"
+[dependencies]
+blake3 = "1.8"
+[[bin]]
+name = "piop-flat-microbench"
+path = "src/main.rs"

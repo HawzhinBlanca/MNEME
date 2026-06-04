@@ -68,8 +68,10 @@ pub use cognition_cert::{
 };
 pub use federation_cert::{
     FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
-    PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
+    FederationMergeHeadSketch, PHASE_IV_FEDERATION_GATE_OPEN,
+    decode_federation_cognition_cert_wire, digest_federation_merge_head_sketch,
     fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
+    verify_federation_cognition_cert_wire_with_merge_head,
 };
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::{
