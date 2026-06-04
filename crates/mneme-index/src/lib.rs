@@ -11,6 +11,7 @@ mod cognition_cert;
 mod commit;
 mod distance;
 mod error;
+mod federation_cert;
 mod hnsw_backend;
 mod key_index;
 mod key_index_load;
@@ -65,6 +66,11 @@ pub use cognition_cert::{
 pub use cognition_cert::{
     assemble_cognition_certificate_v1, fuzz_cognition_cert_wire, verify_cognition_certificate_v1,
 };
+pub use federation_cert::{
+    FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
+    PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
+    fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
+};
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::verify_consumption_attestation;
 
@@ -86,9 +92,11 @@ pub use pedersen_schnorr_zk::{
 pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
 
 // Phase IV-A research seam (UNIMPLEMENTED). Exported only so the honesty
-// constants are inspectable; `prove_exact_nn_piop` panics and proves nothing.
+// constants are inspectable; `prove_exact_nn_piop` fails closed and proves nothing.
 #[cfg(feature = "piop_research")]
-pub use piop_research::{PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop};
+pub use piop_research::{
+    PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, PIOP_RESEARCH_VERSION, prove_exact_nn_piop,
+};
 
 /// ADS backend enabled when the `ads` feature is on.
 /// Privacy path is `commitment_binding` only — a tagged BLAKE3 binding envelope,

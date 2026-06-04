@@ -9,7 +9,7 @@
 ## 0. Scope and honesty (non-goals)
 
 - No PIOP/FRI/Plonky2 prover or verifier lands in `mneme-verify` or the recall path.
-- `piop_research` feature is **off by default**, wired to no recall/receipt path, and its entry point **panics** (fail-closed) if ever called; it proves nothing.
+- `piop_research` feature is **off by default**, wired to no recall/receipt path, and its entry point returns **`UnsupportedVersion`** (fail-closed) if ever called; it proves nothing.
 - Honest level remains **dominance over the committed/visited set**; global exact-NN is a research target only.
 - Hardware/TEE, federated deployments, and interop SDKs are **not** implemented in this slice.
 
@@ -19,18 +19,18 @@
 
 ### P4-1 — Global exact-NN (zkRAG/PIOP path)
 - [x] Research memo captured (`docs/research/PHASE_IV_A_PIOP_SPIKE.md`), explicitly author-reported numbers only.
-- [x] Research seam scaffolded: `piop_research` flag off-by-default; `prove_exact_nn_piop` panics and is not on any recall/receipt/verify path.
+- [x] Research seam scaffolded: `piop_research` flag off-by-default; `prove_exact_nn_piop` returns `UnsupportedVersion` and is not on any recall/receipt/verify path.
 - [ ] Stable-toolchain survey of succinct-argument stacks (no nightly pin; transparency + dependency weight recorded).
 - [ ] Field-friendly commitment sidecar spike + determinism cost (BLAKE3 bridge) with measured overhead.
 - [ ] Out-of-TCB prototype prover/verifier on a tiny flat index with honest prover/verify/size numbers (labeled hardware + |V| + dim).
 - [ ] Threat model + certificate integration design: `retrieval_proof_level` upgrade path; fail-closed degradation rule (PIOP absent/invalid → current honest level).
 
 ### P4-2 — Federated cognition certificates
-- [ ] Cross-org / multi-agent certificate format draft; binding to existing CRDT merge.
-- [ ] Honest trust-surface write-up (keys, revocation, replay protection) — no code yet.
+- [x] Cross-org wire sketch: `federation_cert.rs` types + fail-closed decode (`UnsupportedVersion` while gate closed).
+- [ ] CRDT merge binding proof + honest trust-surface write-up (keys, revocation, replay protection).
 
 ### P4-3 — Open standardization + interop SDKs
-- [ ] Draft standard text + verifier SDK surface sketches (multi-language) aligned to the certificate schema.
+- [x] Interop SDK surface stub (`docs/phase-program/INTEROP_SDK_STUB.md`); full standard text still open.
 - [ ] External verifier implementation proof point (independent of MNEME repo).
 
 ### P4-4 — Cost-to-default
