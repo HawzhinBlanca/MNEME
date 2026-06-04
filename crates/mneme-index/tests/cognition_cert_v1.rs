@@ -11,11 +11,16 @@ use mneme_index::{
 use mneme_root::StoredRoot;
 
 #[cfg(feature = "context_gate")]
+use mneme_context::{
+    ASSEMBLY_PROFILE_V1, assemble_verified_context, consumption_attestation_from_assembly,
+};
+#[cfg(feature = "context_gate")]
 use mneme_core::{Decoder, Encoder};
 #[cfg(feature = "context_gate")]
 use mneme_index::{
-    ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
-    verify_cognition_certificate_v2_draft,
+    CONTEXT_GATE_STRICT_STATUS, ContextAttestationDraft, apply_context_gate_strict,
+    assemble_cognition_certificate_v2_draft, verify_cognition_certificate_v2_draft,
+    verify_cognition_certificate_v2_draft_strict,
 };
 
 fn oid(b: u8) -> ObjectId {
@@ -175,4 +180,54 @@ fn cognition_cert_v2_status_mismatch_rejects() {
         err,
         MnemeError::CertificateInvalid | MnemeError::RootSigInvalid
     ));
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_strict_injection_rejects() {
+    use mneme_core::object::{MemoryKind, OBJECT_VERSION, ObjectRecord, PayloadEnc, TrustTier};
+    use mneme_core::{
+        ContextConsumptionAttestation, Entry, HlcWire, hash_context_assembled, hash_obj,
+        to_bytes_canonical,
+    };
+    fn se(b: &[u8]) -> Entry {
+        let r = ObjectRecord {
+            version: OBJECT_VERSION,
+            kind: MemoryKind::Episodic.as_u8(),
+            parent_ids: vec![],
+            writer: [0x44; 32],
+            session: [0x55; 16],
+            hlc: HlcWire {
+                wall_ms: 42,
+                counter: 0,
+                node_id: [0x66; 16],
+            },
+            trust_tier: TrustTier::Working.as_u8(),
+            payload_enc: PayloadEnc {
+                alg: 0,
+                key_id: None,
+                nonce: None,
+                body: b.to_vec(),
+            },
+            embedding_commit: None,
+            redaction_slot: None,
+            ext: None,
+        };
+        Entry {
+            id: ObjectId(hash_obj(&to_bytes_canonical(&r).unwrap())),
+            record: r,
+            plaintext: b.to_vec(),
+        }
+    }
+    let e = se(b"a");
+    let ids = vec![e.id];
+    let es = vec![e];
+    let mut f: ContextConsumptionAttestation = consumption_attestation_from_assembly(
+        &assemble_verified_context(&ids, &es, ASSEMBLY_PROFILE_V1).unwrap(),
+    );
+    f.context_hash = hash_context_assembled(b"MNEME-CTX-ASM-v1\nINJECTED");
+    assert_eq!(
+        apply_context_gate_strict(&ids, &es, &f, None, None, None),
+        Err(MnemeError::ProvenanceBroken)
+    );
 }

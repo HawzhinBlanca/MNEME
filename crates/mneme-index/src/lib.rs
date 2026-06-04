@@ -9,6 +9,8 @@
 
 mod cognition_cert;
 mod commit;
+#[cfg(feature = "context_gate")]
+mod context_gate;
 mod distance;
 mod error;
 mod federation_cert;
@@ -61,11 +63,13 @@ pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkan
 #[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
-    verify_cognition_certificate_v2_draft,
+    verify_cognition_certificate_v2_draft, verify_cognition_certificate_v2_draft_strict,
 };
 pub use cognition_cert::{
     assemble_cognition_certificate_v1, fuzz_cognition_cert_wire, verify_cognition_certificate_v1,
 };
+#[cfg(feature = "context_gate")]
+pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
 pub use federation_cert::{
     FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
     PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,

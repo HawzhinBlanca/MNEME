@@ -49,12 +49,10 @@ authenticated entry set; bytes-only `verify_output_binding` documents the same l
 CCA bytes-only gate. Tests: `phase_ii_strict_output_binding_rejects_injected_context_hash`.
 
 **Re-exports:** `mneme-index` with `--features context_gate` exposes
-`verify_consumption_attestation_strict` and `verify_output_binding_strict` for future cert v2 /
-mnemed wiring.
+`verify_consumption_attestation_strict` and `verify_output_binding_strict` for cert v2 /
+store/mnemed wiring (see `docs/phase-program/PHASE_II_ENABLE_PATH.md`).
 
 ## Still pending (honest)
 
-- **Wire strict gates into live flows** (store/cert/mnemed) once Phase II opens — today
-  `PHASE_II_GATE_OPEN = false` and recall paths do not depend on CCA verification.
 - **Real GPU-TEE remote attestation** (enclave report) — external hardware/vendor RA
   (`docs/redteam/PHASE_II_TEE_DEFERRED.md`). Enclave-report verifier remains fail-closed.

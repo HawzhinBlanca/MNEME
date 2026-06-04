@@ -38,6 +38,7 @@ mneme-core.workspace = true
 mneme-crypto.workspace = true
 mneme-cap.workspace = true
 mneme-store.workspace = true
+mneme-gate = { workspace = true, optional = true }
 mneme-crdt.workspace = true
 mneme-smt.workspace = true
 serde.workspace = true
@@ -69,3 +70,7 @@ tonic-build = "0.13"
 # Self-sufficient protoc: vendored binary so the build never depends on a
 # system `protoc` being installed (fixes CI/e2e-daemon + fresh local checkouts).
 protoc-bin-vendored = "3"
+
+[features]
+default = []
+context_gate = ["mneme-store/context_gate", "dep:mneme-gate"]

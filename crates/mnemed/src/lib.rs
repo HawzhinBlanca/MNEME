@@ -7,6 +7,9 @@ pub mod sync;
 pub mod sync_client;
 pub mod unix;
 
+#[cfg(feature = "context_gate")]
+pub mod context_gate;
+
 pub use grpc::pb;
 pub use state::AppState;
 

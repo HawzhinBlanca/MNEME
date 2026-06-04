@@ -88,6 +88,8 @@ run_phase_two_three_four_redteam() {
   section "Phase II/III/IV red-team (new surfaces)"
   run_step "Output binding forgery (mneme-core + mneme-gate)" \
     bash -c 'cargo test -p mneme-core output:: -- --nocapture && cargo test -p mneme-gate forgery -- --nocapture'
+  run_step "Phase II strict context gate (context_gate feature)" \
+    bash -c 'cargo test -p mneme-gate gate_closed_by_default -- --nocapture && cargo test -p mneme-index --features context_gate cognition_cert_v2_strict -- --nocapture && cargo test -p mneme-store --features context_gate --test phase_ii_context_gate -- --nocapture'
   run_step "ActionReceipt + ForgetProof (mneme-account, phase_iii_verify + gate-off)" \
     bash -c 'cargo test -p mneme-account --features phase_iii_verify redteam -- --nocapture && cargo test -p mneme-account --features phase_iii_verify redteam_forget -- --nocapture && cargo test -p mneme-account --features phase_iii_verify --test prove_forget -- --nocapture && cargo test -p mneme-account --features phase_iii_bind_action --test bind_action -- --nocapture && cargo test -p mneme-account --test fail_closed -- --nocapture'
   run_step "Store bind_external_action (gate-off + phase_iii_bind)" \

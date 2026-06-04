@@ -10,6 +10,9 @@ use mneme_core::{
     hash_certified_memory_set, hash_context_assembled, hash_model_output,
 };
 
+#[cfg(feature = "phase_ii_gate_open")]
+pub const PHASE_II_GATE_OPEN: bool = true;
+#[cfg(not(feature = "phase_ii_gate_open"))]
 pub const PHASE_II_GATE_OPEN: bool = false;
 
 pub const CONTEXT_GATE_STATUS: &str =
@@ -155,6 +158,11 @@ mod tests {
             certified_memory_set_hash: hash_certified_memory_set(&certified),
         };
         (assembled, certified, profile, attestation)
+    }
+
+    #[test]
+    fn gate_closed_by_default() {
+        assert!(!PHASE_II_GATE_OPEN);
     }
 
     #[test]
