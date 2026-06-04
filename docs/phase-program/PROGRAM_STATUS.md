@@ -1,6 +1,6 @@
 # MNEME Phase Program — Status (master)
 
-**Date:** 2026-06-04 • **Branch:** `master` @ `f1cdeb0` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
+**Date:** 2026-06-04 • **Branch:** `master` @ `6cd5d55` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
 **Integrator (2026-06-04):** Merged `origin/cursor/phase-ii-max` → `origin/cursor/phase-iii-max` → `origin/cursor/phase-iv-max` on master (ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`). `PHASE_GATE_LEVEL=full` green post-merge; `mneme-verify` TCB 494/500 lines.
 
@@ -13,7 +13,7 @@
 | **I** — Verifiable retrieval + Certificate v1 | 5/5 | 0 | 0 | **100%** | Software-complete; red-team #3/#5 closed; TCB fail-open fixed @ `a494fe0`. |
 | **II** — Context Gate (software-only) | 6/8 | 0 | 2 | **75%** | P2-3..P2-8 done; P2-1 TEE + P2-2 enclave verify deferred (`PHASE_II_TEE_DEFERRED.md`). |
 | **III** — Accountability scaffolding | 0/4 | 2/4 | 2/4 | **~25%** | ActionReceipt Ed25519 verify behind `phase_iii_verify` (default off); ForgetProof stubbed; P3-3/P3-4 deferred. |
-| **IV** — Scale & standard (research) | 0/4 | 3/4 | 1/4 | **~25%** | Federation wire sketch + interop stub doc; `piop_research` off-by-default; no prover/verifier/SDK shipped. |
+| **IV** — Scale & standard (research) | 0/4 | 3/4 | 1/4 | **~38%** | Federation wire sketch + interop stub doc; `piop_research` off-by-default; no prover/verifier/SDK shipped. |
 | **Program total** | 11/21 | 5/21 | 5/21 | **~52% done** | Excludes hardware/TEE/PIOP delivery; partial items count as half in phase % only. |
 
 ---
