@@ -21,5 +21,17 @@ thiserror.workspace = true
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
+[features]
+default = []
+phase_iii_bind = [
+    "mneme-store/phase_iii_bind",
+    "mneme-store/phase_iii_verify",
+]
+
 [dev-dependencies]
 tempfile.workspace = true
+
+[[test]]
+name = "phase_iii_mcp"
+path = "tests/phase_iii_mcp.rs"
+required-features = ["phase_iii_bind"]

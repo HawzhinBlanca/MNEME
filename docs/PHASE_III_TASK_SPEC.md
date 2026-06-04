@@ -36,8 +36,10 @@ the Phase III types reference it through an **optional** `cognition_cert_commit`
 ## 1. Exit criteria (Phase III = done when all green)
 
 ### P3-1 — Non-repudiation (P0)
-- [ ] Every external action binds to a capability **and** the sanctioning human
-  identity; an action is refused without a valid certificate.
+- [x] Every external action binds to a capability **and** the sanctioning human
+  identity when `phase_iii_require_action` is enabled on `mneme-store` (default **off**);
+  `remember_with_action` / `forget_with_action` / `promote_with_action` refuse without a
+  valid `ActionReceipt` under that policy.
 - [x] `bind_action` produces a signed `ActionReceipt` bound to the signed root
   and (when present) the cert v2 commit when `phase_iii_bind_action` is enabled;
   forged/altered receipts fail closed (`phase_iii_verify`); default build rejects.
@@ -54,7 +56,9 @@ the Phase III types reference it through an **optional** `cognition_cert_commit`
 - [x] Tamper tests: resurrected key, tampered path/shred commit, wrong root → typed rejection.
 - [x] Wire skeleton + canonical encode/decode gated by `FORGET_PROOF_VERSION`.
 - [x] Optional cert v2 commit on wire; red-team `docs/redteam/PHASE_III_FORGET_PROOF.md`.
-- [ ] Store-path mandatory forget receipts + A-REPLAY binding on every forget (separate task).
+- [x] Store-path shred forget emits + verifies `ForgetProof` when `phase_iii_prove_forget`
+  (+ `phase_iii_verify`) on `mneme-store` (default **off**); `root_bound` tied to post-commit
+  root with monotonic `sequence` (A-REPLAY safe binding).
 
 ### P3-3 — Formal proof (P0)
 - [ ] Mechanize the verifier's fail-closed property in Lean/F* (seL4-style); TCB
@@ -111,7 +115,8 @@ pilot sign-off; external audit passed.
 | 2026-06-04 | `mneme-account`: `phase_iii_verify` feature — ActionReceipt Ed25519 verify + `mint_action_receipt`; ForgetProof witness/absence stubbed | **Landed (verify slice)** |
 | 2026-06-04 | Store-path `bind_action` / `Store::bind_external_action` with Ed25519 mint behind `phase_iii_bind_action` (default off) | **Landed (P3-1 slice)** |
 | 2026-06-04 | P3-2: `shred_witness_commit`, `prove_forget`/`mint_forget_proof` (`phase_iii_prove_forget`), `verify_forget_proof*` (`phase_iii_verify`); red-team doc | **Landed (P3-2 slice)** |
-| — | Store-path mandatory forget proof on every `Store::forget` | **Deferred** (separate task) |
+| 2026-06-04 | Store-path mandatory `ActionReceipt` (`phase_iii_require_action`; default off); MCP optional bind (`mneme-mcp/phase_iii_bind`) | **Landed (P3-1 store slice)** |
+| 2026-06-04 | Store-path shred forget `ForgetProof` emit+verify (`phase_iii_prove_forget`; default off) | **Landed (P3-2 store slice)** |
 | — | Freeze `ActionReceipt` / `ForgetProof` into the §20.3 interface + pin domain tags | **Deferred** (post-review) |
 | — | Bind cert v2 commit once Phase II finalizes cert v2 layout | **Deferred** (depends on Phase II) |
 | — | Lean/F* mechanized fail-closed proof (P3-3) | **Deferred** |

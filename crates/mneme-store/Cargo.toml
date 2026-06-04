@@ -30,6 +30,9 @@ libc = "0.2"
 [features]
 default = []
 phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
+phase_iii_verify = ["mneme-account/phase_iii_verify"]
+phase_iii_prove_forget = ["mneme-account/phase_iii_prove_forget", "phase_iii_verify"]
+phase_iii_require_action = ["phase_iii_verify"]
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -59,3 +62,13 @@ harness = true
 [[test]]
 name = "phase_iii_bind"
 path = "tests/phase_iii_bind.rs"
+
+[[test]]
+name = "phase_iii_forget"
+path = "tests/phase_iii_forget.rs"
+required-features = ["phase_iii_prove_forget", "phase_iii_verify"]
+
+[[test]]
+name = "phase_iii_policy"
+path = "tests/phase_iii_policy.rs"
+required-features = ["phase_iii_bind", "phase_iii_require_action"]

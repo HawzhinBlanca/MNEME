@@ -74,7 +74,10 @@ impl MemoryHandlers {
             valid_time_ms: None,
         };
         let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
-        let (id, root) = store.remember(draft, &self.write_cap)?;
+        let action_receipt =
+            Self::optional_action_receipt_for_remember(&store, &draft, &self.write_cap)?;
+        let (id, root) =
+            store.remember_with_action(draft, &self.write_cap, action_receipt.as_ref())?;
         Ok(RememberResult {
             object_id_hex: hex::encode(id.as_bytes()),
             root_hash_hex: hex::encode(root.preimage_hash),
@@ -109,10 +112,63 @@ impl MemoryHandlers {
             name: name.to_string(),
         });
         let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
-        let (_, root) = store.forget(target, &self.read_cap, ForgetMode::Shred)?;
+        let action_receipt = Self::optional_action_receipt_for_forget(
+            &store,
+            &target,
+            ForgetMode::Shred,
+            &self.read_cap,
+        )?;
+        let (_, root) = store.forget_with_action(
+            target,
+            &self.read_cap,
+            ForgetMode::Shred,
+            action_receipt.as_ref(),
+        )?;
         Ok(ForgetResult {
             root_hash_hex: hex::encode(root.preimage_hash),
         })
+    }
+
+    #[cfg(feature = "phase_iii_bind")]
+    fn optional_action_receipt_for_remember(
+        store: &Store,
+        draft: &Draft,
+        cap: &Capability,
+    ) -> Result<Option<mneme_core::ActionReceipt>, MnemeError> {
+        let commit = mneme_store::action_commit_remember(draft);
+        let receipt = store.bind_external_action(commit, cap, store.operator_keypair(), None)?;
+        Ok(Some(receipt))
+    }
+
+    #[cfg(not(feature = "phase_iii_bind"))]
+    fn optional_action_receipt_for_remember(
+        _store: &Store,
+        _draft: &Draft,
+        _cap: &Capability,
+    ) -> Result<Option<mneme_core::ActionReceipt>, MnemeError> {
+        Ok(None)
+    }
+
+    #[cfg(feature = "phase_iii_bind")]
+    fn optional_action_receipt_for_forget(
+        store: &Store,
+        target: &ForgetTarget,
+        mode: ForgetMode,
+        cap: &Capability,
+    ) -> Result<Option<mneme_core::ActionReceipt>, MnemeError> {
+        let commit = mneme_store::action_commit_forget(target, mode);
+        let receipt = store.bind_external_action(commit, cap, store.operator_keypair(), None)?;
+        Ok(Some(receipt))
+    }
+
+    #[cfg(not(feature = "phase_iii_bind"))]
+    fn optional_action_receipt_for_forget(
+        _store: &Store,
+        _target: &ForgetTarget,
+        _mode: ForgetMode,
+        _cap: &Capability,
+    ) -> Result<Option<mneme_core::ActionReceipt>, MnemeError> {
+        Ok(None)
     }
 }
 
