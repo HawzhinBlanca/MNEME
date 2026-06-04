@@ -4,7 +4,7 @@
 *"novel verifiable memory"* toward *Proof-Carrying Cognition* (see
 [`VISION_PROOF_CARRYING_COGNITION.md`](VISION_PROOF_CARRYING_COGNITION.md)).
 
-**Status:** Active build spec (draft). **Baseline:** v0 kernel + MNEME 2.0 on `master`, CI green.
+**Status:** Done (software-complete on `master`; release tag pending). **Baseline:** v0 kernel + MNEME 2.0 on `master`, CI green.
 **Language:** Rust 1.86.0 (stable). **Prime directive unchanged:** fail-closed verified recall only;
 TCB ≤ 500 lines; authenticated ≠ true; procedure-faithful ≠ exact-NN (Phase I narrows this — see §5).
 
@@ -33,42 +33,44 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
   establishes **dominance** — every returned top-k distance is ≤ every non-returned candidate's
   distance over the *committed* vector set, bound to the signed `semantic_commit`. Verifier
   rejects any reordered/truncated/padded result with a typed `MnemeError`.
-- [ ] **HNSW path (approximate):** **prover-asserted authenticated set** — `visited_order` is
+- [x] **HNSW path (approximate):** **prover-asserted authenticated set** — `visited_order` is
   checked for membership + top-k dominance over that set only; the verifier does **not** replay an
   HNSW graph walk (adjacency is not committed). Honest level: *dominance over prover-chosen
-  authenticated members*, **not** global exact-NN (Phase IV PIOP / graph commitment).
+  authenticated members* (`RetrievalProofLevel::HnswAuditOnDemand`), **not** global exact-NN
+  (Phase IV PIOP / graph commitment). Red-team #5 resolved (`docs/redteam/PHASE_I_HNSW_AUDIT_OVERCLAIM.md`).
 - [x] Default build remains non-ZK; honesty strings preserved in errors + exports (`ZK_BACKEND`).
 - [x] Forgery tests: reordered / dropped-better-neighbor / wrong-commit → typed rejection.
 
 ### P1-2 — Bi-temporal verifiable recall (P0)
-- [ ] `Draft` gains an optional **valid-time** (when the fact is true in the world), distinct from
+- [x] `Draft` gains an optional **valid-time** (when the fact is true in the world), distinct from
   transaction-time (HLC ingest). Both recorded; neither enters a *current* recall by default.
-- [ ] `Store::recall_verified_at(query, proc, cap, AsOf::{RootSeq(n) | ValidTime(t)})` returns a
+- [x] `Store::recall_verified_at(query, proc, cap, AsOf::{RootSeq(n) | ValidTime(t)})` returns a
   receipt bound to the **historical signed root** at that point (membership *or* non-membership).
-- [ ] A-REPLAY safe: historical recall cannot be served from a root not in the verified checkpoint chain.
-- [ ] Test: "what did trusted memory hold at seq N / valid-time T" reconstructs deterministically;
+- [x] A-REPLAY safe: historical recall cannot be served from a root not in the verified checkpoint chain.
+- [x] Test: "what did trusted memory hold at seq N / valid-time T" reconstructs deterministically;
   a backdated/forged history fails closed.
 
 ### P1-3 — Poison-evidence (provenance-scoped recall) (P1)
-- [ ] A recall procedure may declare a **provenance filter** (`written_by: cap_subject`, `since: t`,
+- [x] A recall procedure may declare a **provenance filter** (`written_by: cap_subject`, `since: t`,
   `min_tier`). The recall receipt **proves the filter was honored** — i.e. proves every returned
   entry's write-provenance satisfies it, and (fail-closed) that no excluded entry leaked in.
-- [ ] Quarantine-by-default already holds; add an **auditable promotion event** record.
-- [ ] Test (anti-[MINJA](https://arxiv.org/html/2604.16548v1)): inject a memory via a low/untrusted
+- [x] Quarantine-by-default already holds; add an **auditable promotion event** record.
+- [x] Test (anti-[MINJA](https://arxiv.org/html/2604.16548v1)): inject a memory via a low/untrusted
   cap → a trusted, provenance-scoped recall provably excludes it; the receipt shows the exclusion.
+  Red-team #3 resolved (`docs/redteam/PHASE_I_PROVENANCE_SCOPED.md`); TCB fail-open fixed (`docs/redteam/PHASE_I_TCB_FAILOPEN_PROVENANCE.md`).
 
 ### P1-4 — Cognition Certificate v1 + offline verifier SDK (P0)
-- [ ] A `CognitionCertificate` schema (dCBOR, versioned) binds: signed root + recall receipt(s) +
+- [x] A `CognitionCertificate` schema (dCBOR, versioned) binds: signed root + recall receipt(s) +
   zkANN-1 proof + bi-temporal anchor + provenance-filter attestation.
-- [ ] `mneme certify` (CLI) emits a certificate for a recall; `mneme verify-cert FILE` checks it
+- [x] `mneme certify` (CLI) emits a certificate for a recall; `mneme verify-cert FILE` checks it
   **offline** with no store access beyond the public root — fail-closed, typed errors.
-- [ ] The verifier path stays inside / adjacent to the TCB budget; no new trust assumptions.
-- [ ] Cross-impl: the `mneme-crossref` reference verifier can check a Certificate v1 (independent reimpl).
+- [x] The verifier path stays inside / adjacent to the TCB budget; no new trust assumptions.
+- [x] Cross-impl: the `mneme-crossref` reference verifier can check a Certificate v1 (independent reimpl).
 
 ### P1-5 — Proof obligations & docs (P1)
 - [x] `validation-lane.sh full` green; new generative tamper cases for each proof; fuzz target for the certificate wire (`cognition_cert_parse`).
-- [ ] Determinism foundation-gate unaffected (proofs are off the signed-root preimage path) — byte-identical ×2.
-- [ ] README + `REMAINING_ITEMS.md` updated; honesty boundary section for zkANN-1 (dominance vs global-NN).
+- [x] Determinism foundation-gate unaffected (proofs are off the signed-root preimage path) — byte-identical ×2.
+- [x] README + `REMAINING_ITEMS.md` updated; honesty boundary section for zkANN-1 (dominance vs global-NN).
 
 ---
 
@@ -104,9 +106,9 @@ schema; the HNSW audit-on-demand path (P1-1b) can land after the exact path prov
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings        # incl. --features plonky2_prover
+cargo clippy --workspace --all-targets -- -D warnings        # incl. --features pedersen_schnorr_zk
 scripts/ci/verify-tcb-guard.sh                                # mneme-verify ≤ 500 lines
-cargo test -p mneme-index --features plonky2_prover -- zkann --nocapture
+cargo test -p mneme-index --features pedersen_schnorr_zk -- zkann --nocapture
 cargo test -p mneme-store recall_verified_at -- --nocapture
 cargo test -p mneme-store provenance_scoped -- --nocapture
 cargo test -p mneme-cli certify -- --nocapture
@@ -137,7 +139,8 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 |---|---|---|
 | 2026-06-03 | Phase I spec authored (from `VISION_PROOF_CARRYING_COGNITION.md`) | Done |
 | 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, `mneme certify`, and `mneme verify-cert`; all fail closed with tests. | **Landed (initial gated scaffold; superseded by full integration on `master`)** |
-| 2026-06-03 | Phase I full integration (`7b19c13`): zkANN-1 dominance + audit-on-demand path gated; bi-temporal `recall_verified_at`; provenance-scoped recall; Cognition Certificate v1 (`mneme certify` / `verify-cert`); `mneme-crossref` vectors exercised; CLI certify path wired. | **Landed (on `master`; `validation-lane full` green; red-team + tag pending)** |
+| 2026-06-03 | Phase I full integration (`7b19c13`): zkANN-1 dominance + HNSW prover-asserted-set path; bi-temporal `recall_verified_at`; provenance-scoped recall; Cognition Certificate v1 (`mneme certify` / `verify-cert`); `mneme-crossref` vectors exercised; CLI certify path wired. | **Landed** |
+| 2026-06-04 | Red-team #3 (provenance-scoped) + #5 (HNSW honesty) closed @ `d433999`; TCB fail-open (provenance skip) @ `a494fe0`; `validation-lane full` + `cognition_cert_parse` fuzz green @ `9462a04`. | **Done (software-complete; `phase-i` release tag pending)** |
 
 ---
 

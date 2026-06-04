@@ -15,7 +15,7 @@ fail closed.
 | Phase | Goal | Unlocks (the new proof) | Exit gate | ~Effort | Spec |
 |---|---|---|---|---|---|
 | **0 ✅** | Verifiable memory | integrity · provenance · authorization of stored memory | `master` green; cross-OS determinism proven | shipped | `READINESS.md`, `MNEME_2.0_TASK_SPEC.md` |
-| **I** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team; offline `verify-cert` — implementation on `master`; red-team/tag pending | ~3 mo | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
+| **I ✅** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team closed @ `d433999` (`9462a04`); offline `verify-cert`; **`phase-i` git tag pending** | shipped | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
 | **II** | The **Context Gate** (the kernel) | the model consumed *exactly* the certified context | end-to-end PCC on one model in a TEE, offline-verifiable — software slice on `master`; TEE/RA pending | ~3–5 mo | [`PHASE_II_TASK_SPEC.md`](PHASE_II_TASK_SPEC.md) |
 | **III** | **Accountability** complete | who sanctioned the action · what was forgotten · machine-checked TCB | NIST 4-dim met; Lean/F* proof; regulated pilot + 3rd-party audit — wire slice on `master`; gate closed | ~4 mo | [`PHASE_III_TASK_SPEC.md`](PHASE_III_TASK_SPEC.md) |
 | **IV** | **Scale & standard** | global exact-NN; federated certificates; open spec | certificate is an interop standard; cost ≈ "default tier" — PIOP research only | ongoing | [`PHASE_IV_TASK_SPEC.md`](PHASE_IV_TASK_SPEC.md) |
@@ -25,7 +25,7 @@ retrieval → **II** + attested model & sealed context → **III** + authorized 
 forgetting & proven core → **IV** + global-NN & cross-org federation.
 
 ```
-Phase 0 ✅ ──▶ Phase I ──▶ Phase II ──▶ Phase III ──▶ Phase IV
+Phase 0 ✅ ──▶ Phase I ✅ ──▶ Phase II ──▶ Phase III ──▶ Phase IV
  memory       retrieval     cognition     accountability   standard
  receipt      certificate   certificate   certificate      everywhere
 ```

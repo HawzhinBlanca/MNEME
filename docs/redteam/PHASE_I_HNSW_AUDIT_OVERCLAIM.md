@@ -59,5 +59,6 @@ overstates the guarantee.
 
 ## Resolution (2026-06-03)
 
-**Shipped (option A):** P1-1 HNSW checkbox un-checked; `RetrievalProofLevel::HnswAuditOnDemand` and
+**Shipped (option A):** P1-1 HNSW checkbox `[x]` with honest *prover-asserted authenticated set*
+wording (no graph-replay claim); `RetrievalProofLevel::HnswAuditOnDemand` and
 `verify_hnsw_audit_on_demand` docs state prover-asserted set, not graph replay (main + crossref).

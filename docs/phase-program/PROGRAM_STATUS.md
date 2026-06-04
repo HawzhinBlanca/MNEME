@@ -1,8 +1,8 @@
 # MNEME Phase Program — Status (master)
 
-**Date:** 2026-06-04 • **Branch:** `master` (P3-2 landing) • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
+**Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** P3-1 `bind_action` + store hook @ `946021e`; P3-2 ForgetProof shred witness + SMT absence verify behind `phase_iii_prove_forget` / `phase_iii_verify` (default closed). Red-team `PHASE_III_FORGET_PROOF.md`. Store mandatory forget receipts **out of scope**. Prior slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
+**Integrator (2026-06-04):** Phase I **closed in docs** — P1-1..P1-5 match `docs/phase-program/manifest.yaml`; HNSW labeled *prover-asserted authenticated set* (not graph replay / not global exact-NN). Red-team #3/#5 @ `d433999`; lane+fuzz @ `9462a04`. **`git tag phase-i` still pending** (integrator owns tag + `PROGRAM_STATUS` tip bump). Phase III: P3-1 `bind_action` @ `946021e`; P3-2 ForgetProof shred witness + SMT absence verify behind `phase_iii_prove_forget` / `phase_iii_verify` (default closed). Red-team `PHASE_III_FORGET_PROOF.md`. Store mandatory forget receipts **out of scope**. Prior slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
 
 ---
 
