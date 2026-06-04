@@ -72,7 +72,10 @@ pub use federation_cert::{
     fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
 };
 #[cfg(feature = "context_gate")]
-pub use mneme_gate::verify_consumption_attestation;
+pub use mneme_gate::{
+    verify_consumption_attestation, verify_consumption_attestation_strict,
+    verify_output_binding_strict,
+};
 
 #[cfg(feature = "commitment_binding")]
 pub use commitment_binding::{

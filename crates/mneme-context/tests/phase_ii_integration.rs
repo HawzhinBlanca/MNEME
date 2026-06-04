@@ -15,7 +15,7 @@ use mneme_core::{
 };
 use mneme_gate::{
     verify_consumption_attestation, verify_consumption_attestation_strict,
-    verify_enclave_report_placeholder, verify_output_binding,
+    verify_enclave_report_placeholder, verify_output_binding, verify_output_binding_strict,
 };
 
 fn sample_entry(body: &[u8]) -> Entry {
@@ -74,11 +74,45 @@ fn phase_ii_assembly_to_cca_to_gate_verify_roundtrip() {
 #[test]
 fn phase_ii_output_binding_binds_model_output_to_context() {
     let entry = sample_entry(b"context-body");
-    let outcome = assemble_verified_context(&[entry.id], &[entry], ASSEMBLY_PROFILE_V1).unwrap();
+    let id = entry.id;
+    let outcome = assemble_verified_context(&[id], &[entry], ASSEMBLY_PROFILE_V1).unwrap();
     let model_out = b"generated tokens";
     let model_id = [0x77; 32];
     let binding = output_binding_from_assembly(&outcome, model_out, model_id);
     verify_output_binding(&binding, &outcome.assembled_bytes, model_out, &model_id).unwrap();
+    let entry2 = sample_entry(b"context-body");
+    verify_output_binding_strict(
+        &binding,
+        &[id],
+        &[entry2],
+        model_out,
+        &model_id,
+        &ASSEMBLY_PROFILE_V1,
+    )
+    .unwrap();
+}
+
+#[test]
+fn phase_ii_strict_output_binding_rejects_injected_context_hash() {
+    let entry = sample_entry(b"context-body");
+    let id = entry.id;
+    let outcome = assemble_verified_context(&[id], &[entry], ASSEMBLY_PROFILE_V1).unwrap();
+    let model_out = b"generated tokens";
+    let model_id = [0x77; 32];
+    let mut binding = output_binding_from_assembly(&outcome, model_out, model_id);
+    binding.context_hash = hash_context_assembled(b"MNEME-CTX-ASM-v1\nINJECTED");
+    let entry2 = sample_entry(b"context-body");
+    assert_eq!(
+        verify_output_binding_strict(
+            &binding,
+            &[id],
+            &[entry2],
+            model_out,
+            &model_id,
+            &ASSEMBLY_PROFILE_V1,
+        ),
+        Err(MnemeError::ProvenanceBroken)
+    );
 }
 
 #[test]

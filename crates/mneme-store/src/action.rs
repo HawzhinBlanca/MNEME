@@ -15,6 +15,7 @@ fn target_commit(target: &ForgetTarget) -> [u8; 32] {
     }
 }
 
+/// Deterministic action commit for `Store::remember` (pre-signing preimage input).
 pub fn action_commit_remember(draft: &Draft) -> [u8; 32] {
     let key = LogicalKey {
         namespace: draft.namespace.clone(),
@@ -27,6 +28,7 @@ pub fn action_commit_remember(draft: &Draft) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
+/// Deterministic action commit for `Store::forget`.
 pub fn action_commit_forget(target: &ForgetTarget, mode: ForgetMode) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
     h.update(b"MNEME-action-forget-v1\x00");
@@ -35,6 +37,7 @@ pub fn action_commit_forget(target: &ForgetTarget, mode: ForgetMode) -> [u8; 32]
     *h.finalize().as_bytes()
 }
 
+/// Deterministic action commit for `Store::promote`.
 pub fn action_commit_promote(id: &ObjectId, to: TrustTier) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
     h.update(b"MNEME-action-promote-v1\x00");
@@ -43,6 +46,7 @@ pub fn action_commit_promote(id: &ObjectId, to: TrustTier) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
+/// Enforce optional/mandatory `ActionReceipt` on external store paths (P3-1).
 pub fn enforce_external_action(
     receipt: Option<&ActionReceipt>,
     action_commit: [u8; 32],

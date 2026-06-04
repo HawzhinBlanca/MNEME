@@ -46,7 +46,14 @@ cargo test -p mneme-gate forgery -- --nocapture
 Matching digests prove **hash equality**, not that a model executed, nor that outputs are
 true or safe. See `docs/redteam/PHASE_II_TEE_DEFERRED.md` for enclave deferral.
 
+## Strict context re-derivation (2026-06-04)
+
+`verify_output_binding` trusts prover-supplied assembled context bytes (same injection class as the
+bytes-only CCA gate). `verify_output_binding_strict(binding, result_ids, entries, model_output,
+model_identity, profile)` re-derives `context_hash` via `assemble_verified_context` before checking
+output and model digests. See `docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md`.
+
 ## Status
 
-**Mitigated (software slice):** all listed forgeries fail closed with typed errors; no
-accept path without matching digests.
+**Mitigated (software slice):** digest forgeries fail closed; strict gate closes injected-context
+forgery on the binding's `context_hash` when entries are the verified recall set.

@@ -18,6 +18,7 @@ trust surface exists yet.
 | Wire tamper | Truncate CBOR, flip cognition cert payload | `CertificateInvalid` |
 | Elevated status | `status = "verified"` instead of draft label | `CertificateInvalid` |
 | Empty embed | `cognition_cert_bytes` empty | `CertificateInvalid` |
+| Oversized embed | `cognition_cert_bytes` > 4 MiB sketch cap | `CertificateInvalid` |
 | Zero issuer | `issuer_org_id` all-zero | `CertificateInvalid` |
 | Zero merge head | `merge_head_digest` all-zero | `CertificateInvalid` |
 | Wrong version | `version != 1` | `UnsupportedVersion` |
@@ -52,4 +53,4 @@ and trust-surface work lands.
 ## Status
 
 **Mitigated (wire sketch):** hostile wires fail closed; gate closed rejects all verify;
-fuzz entry decodes without panic.
+4 MiB embed cap rejects oversized cognition cert blobs; fuzz entry decodes without panic.

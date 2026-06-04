@@ -19,6 +19,9 @@ pub const FEDERATION_CERT_DRAFT_STATUS: &str = "unverified_until_phase_iv_federa
 /// Phase IV federation gate. Remains `false` until cross-org verification exists.
 pub const PHASE_IV_FEDERATION_GATE_OPEN: bool = false;
 
+/// Sketch-only bound on embedded cognition cert bytes (DoS guard; not a trust claim).
+pub const FEDERATION_MAX_COGNITION_CERT_BYTES: usize = 4 * 1024 * 1024;
+
 const F_VERSION: u64 = 1;
 const F_STATUS: u64 = 2;
 const F_ISSUER_ORG: u64 = 3;
@@ -55,7 +58,9 @@ pub fn verify_federation_cognition_cert_wire(bytes: &[u8]) -> Result<(), MnemeEr
     if wire.status != FEDERATION_CERT_DRAFT_STATUS {
         return Err(MnemeError::CertificateInvalid);
     }
-    if wire.cognition_cert_bytes.is_empty() {
+    if wire.cognition_cert_bytes.is_empty()
+        || wire.cognition_cert_bytes.len() > FEDERATION_MAX_COGNITION_CERT_BYTES
+    {
         return Err(MnemeError::CertificateInvalid);
     }
     if wire.issuer_org_id == [0u8; 32] {
@@ -282,6 +287,23 @@ mod tests {
             let tampered = &bytes[..bytes.len().saturating_sub(trim)];
             assert!(verify_federation_cognition_cert_wire(tampered).is_err());
         }
+    }
+
+    /// Oversized embedded cognition cert (DoS sketch guard).
+    #[test]
+    fn forgery_oversized_cognition_cert_embed_rejects() {
+        let wire = FederationCognitionCertWire {
+            version: FEDERATION_COGNITION_CERT_VERSION,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0x01; 32],
+            cognition_cert_bytes: vec![0u8; FEDERATION_MAX_COGNITION_CERT_BYTES + 1],
+            merge_head_digest: [0x02; 32],
+        };
+        let bytes = to_bytes_canonical(&wire).expect("encode");
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::CertificateInvalid)
+        );
     }
 
     /// Wire tamper: flip cognition_cert payload byte after decode.

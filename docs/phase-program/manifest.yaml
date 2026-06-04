@@ -50,7 +50,7 @@ phases:
 
   - phase: Phase II — Context Gate (software-only increment)
     status: done
-    note: "Software slice complete; gate closed, no enclave claims. P2-1/P2-2 hardware deferred."
+    note: "Software slice complete; strict CCA/output binding (no-injection re-derivation); gate closed; P2-1/P2-2 hardware deferred."
     items:
       - id: P2-1
         title: TEE / GPU confidential compute (enclave verify)
@@ -87,7 +87,9 @@ phases:
         evidence:
           - path: docs/ROADMAP.md
           - path: docs/PHASE_II_TASK_SPEC.md
+          - path: docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md
           - path: crates/mneme-gate/src/lib.rs
+          - path: crates/mneme-context/tests/phase_ii_integration.rs
       - id: P2-6
         title: mneme-gate / mneme-context wire stability (context_gate off by default)
         status: done
@@ -105,6 +107,7 @@ phases:
           - path: crates/mneme-core/src/output.rs
           - path: crates/mneme-core/src/domain.rs
           - path: crates/mneme-gate/src/lib.rs
+          - path: docs/redteam/PHASE_II_OUTPUT_BINDING.md
           - path: crates/mneme-context/tests/phase_ii_integration.rs
       - id: P2-8
         title: Certificate v2 draft + enclave-report placeholder (fail-closed)
@@ -125,6 +128,7 @@ phases:
         status: done
         evidence:
           - path: docs/PHASE_III_TASK_SPEC.md
+          - path: docs/phase-program/PHASE_III_ENABLE_PATH.md
           - path: docs/redteam/PHASE_III_ACTION_RECEIPT.md
           - path: crates/mneme-core/src/accountability.rs
           - path: crates/mneme-account/src/lib.rs

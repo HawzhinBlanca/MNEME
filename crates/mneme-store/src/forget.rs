@@ -11,6 +11,7 @@ use mneme_forget::{
     object_id_for_key,
 };
 
+/// Outcome of a verified shred forget when P3-2 store features are enabled.
 #[cfg(feature = "phase_iii_prove_forget")]
 pub struct ForgetProven {
     pub tombstone: layout::Tombstone,
@@ -39,6 +40,7 @@ impl Store {
         Ok((outcome.tombstone, outcome.root))
     }
 
+    /// Shred forget with a returned `ForgetProof` when `phase_iii_prove_forget` is enabled.
     #[cfg(feature = "phase_iii_prove_forget")]
     pub fn forget_with_proof(
         &mut self,

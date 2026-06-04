@@ -261,6 +261,7 @@ impl Store {
         self.remember_with_action(draft, cap, None)
     }
 
+    /// Remember with optional Phase III `ActionReceipt` (see `phase_iii_require_action`).
     pub fn remember_with_action(
         &mut self,
         draft: Draft,

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Merged docs→p3→p4 on `master`; pushed `0c8e04c`→`a6f0237` (9 commits) then CI tip `cd9f1b5` on `origin/master`. `PHASE_GATE_LEVEL=full` + `phase-program-gate` green. Phase I **closed in docs**; **`phase-i`** @ `cd9f1b5` (`phase-i-software` @ `58b13fa` unchanged). P3-1/P3-2 store paths feature-gated (default off). P4 research slice: PIOP docs, federation verify sketch, interop/crossref, cost harness — no prover/SDK. P3-3 Lean + P3-4 trust-ops deferred; P2-1/P2-2 TEE deferred.
+**Integrator (2026-06-04):** Phase II no-injection binding: `verify_consumption_attestation_strict` + `verify_output_binding_strict` (re-derive context from verified recall entries); red-team `PHASE_II_CONTEXT_GATE_NO_INJECTION.md`. P3 enable-path doc `PHASE_III_ENABLE_PATH.md`. Federation sketch: 4 MiB embed cap. Prior tip `cd9f1b5`; see git log for merge SHA after this push.
 
 ---
 
@@ -21,8 +21,8 @@
 ## On master (software slices)
 
 - **Phase I:** zkANN-1 + bi-temporal + provenance + Certificate v1 + proof obligations **done** (P1-1..P1-5). Red-team **#3** / **#5** at `d433999`; TCB fail-open (provenance skip) fixed at `a494fe0`.
-- **Phase II:** Context Gate **software slice done** (P2-3..P2-8 @ `14a87df`). Output binding forgery surface documented + tested (`docs/redteam/PHASE_II_OUTPUT_BINDING.md`). Enclave-report placeholder (verify always fail-closed), Certificate v2 draft behind `context_gate` (off by default).
-- **Phase III:** Accountability scaffolding **partial** — P3-1 store/MCP `ActionReceipt` policy (`phase_iii_require_action` / `phase_iii_bind`; default off). P3-2 store shred `forget_with_proof` (`phase_iii_prove_forget`; default off). P3-3 machine-checked verifier proof + P3-4 trust-ops pilot **deferred**.
+- **Phase II:** Context Gate **software slice done** (P2-3..P2-8). **No-injection / strict binding:** CCA and output binding re-derive `context_hash` from authenticated entries (`verify_*_strict` in `mneme-gate`); bytes-only gates documented as unsound alone (`docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md`, `PHASE_II_OUTPUT_BINDING.md`). Enclave-report placeholder fail-closed; cert v2 draft behind `context_gate` (off by default).
+- **Phase III:** Accountability scaffolding **partial** — P3-1 store/MCP `ActionReceipt` policy (`phase_iii_require_action` / `phase_iii_bind`; default off; enable path `docs/phase-program/PHASE_III_ENABLE_PATH.md`). P3-2 store shred `forget_with_proof` (`phase_iii_prove_forget`; default off). P3-3 Lean + P3-4 trust-ops **deferred**.
 - **Phase IV:** **Research slice** @ `1bedd6e` — PIOP statement + toolchain matrix (`docs/research/PHASE_IV_A_PIOP_*`); federation cert verify sketch + `federation_cert_verify` fuzz; interop stub + crossref notes; P4-4 cost-report harness (no production numbers). `piop_research` off-by-default. No global exact-NN prover, no cross-org verifier, no shipped interop SDK.
 
 Approx. program progress (software ceiling): **~62% done (13/21)**, **~19% partial (4/21)**, **~19% deferred (4/21)** — honest, excluding hardware/TEE/PIOP prover/Lean delivery.
@@ -66,7 +66,9 @@ Approx. program progress (software ceiling): **~62% done (13/21)**, **~19% parti
 - `scripts/ci/phase-iv-cost-report.sh`
 - `crates/mneme-index/src/federation_cert.rs`
 - `docs/redteam/PHASE_II_TEE_DEFERRED.md`
+- `docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md`
 - `docs/redteam/PHASE_II_OUTPUT_BINDING.md`
+- `docs/phase-program/PHASE_III_ENABLE_PATH.md`
 - `docs/redteam/PHASE_III_ACTION_RECEIPT.md`
 - `docs/redteam/PHASE_III_FORGET_PROOF.md`
 - `docs/redteam/PHASE_IV_FEDERATION_WIRE.md`

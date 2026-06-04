@@ -44,10 +44,17 @@ no-injection on its own and pointing callers to the strict gate.
 - `phase_ii_bytes_only_gate_misses_injection_strict_catches_it` — pins the contrast: bytes-only
   accepts the forge, strict rejects it.
 
+**Output binding (P2-7):** `verify_output_binding_strict` re-derives `context_hash` from the same
+authenticated entry set; bytes-only `verify_output_binding` documents the same limitation as the
+CCA bytes-only gate. Tests: `phase_ii_strict_output_binding_rejects_injected_context_hash`.
+
+**Re-exports:** `mneme-index` with `--features context_gate` exposes
+`verify_consumption_attestation_strict` and `verify_output_binding_strict` for future cert v2 /
+mnemed wiring.
+
 ## Still pending (honest)
 
-- **Wire the strict gate into the live flows** (store/cert/mnemed) so they use
-  `verify_consumption_attestation_strict` rather than the bytes-only form. (Phase II gate remains
-  closed — `PHASE_II_GATE_OPEN = false` — so no production path depends on it yet.)
-- **Real GPU-TEE remote attestation** (the enclave report) — separately external-gated (needs real
-  H100/Blackwell + vendor RA service). The enclave-report verifier still fails closed by design.
+- **Wire strict gates into live flows** (store/cert/mnemed) once Phase II opens — today
+  `PHASE_II_GATE_OPEN = false` and recall paths do not depend on CCA verification.
+- **Real GPU-TEE remote attestation** (enclave report) — external hardware/vendor RA
+  (`docs/redteam/PHASE_II_TEE_DEFERRED.md`). Enclave-report verifier remains fail-closed.

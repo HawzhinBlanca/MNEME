@@ -76,6 +76,11 @@ pub fn verify_consumption_attestation_strict(
     Ok(())
 }
 
+/// Bind an `OutputBinding` to caller-supplied assembled context bytes (digest consistency only).
+///
+/// Like [`verify_consumption_attestation`], this does **not** prove no-injection: a forged
+/// `assembled_context` can match `binding.context_hash` while diverging from the certified
+/// recall set. Use [`verify_output_binding_strict`] for the offline proof.
 pub fn verify_output_binding(
     binding: &OutputBinding,
     assembled_context: &[u8],
@@ -83,6 +88,29 @@ pub fn verify_output_binding(
     model_identity: &[u8; 32],
 ) -> Result<(), MnemeError> {
     if binding.context_hash != hash_context_assembled(assembled_context) {
+        return Err(MnemeError::ProvenanceBroken);
+    }
+    if binding.output_hash != hash_model_output(model_output) {
+        return Err(MnemeError::ProvenanceBroken);
+    }
+    if binding.model_identity != *model_identity {
+        return Err(MnemeError::SchemaDrift);
+    }
+    Ok(())
+}
+
+/// SOUND output binding: re-derive `context_hash` from authenticated entries; verify output digest
+/// and model identity against caller-supplied values (output bytes are not re-derived here).
+pub fn verify_output_binding_strict(
+    binding: &OutputBinding,
+    result_ids: &[ObjectId],
+    entries: &[Entry],
+    model_output: &[u8],
+    model_identity: &[u8; 32],
+    expected_profile: &AssemblyProfile,
+) -> Result<(), MnemeError> {
+    let outcome = assemble_verified_context(result_ids, entries, *expected_profile)?;
+    if binding.context_hash != outcome.context_hash {
         return Err(MnemeError::ProvenanceBroken);
     }
     if binding.output_hash != hash_model_output(model_output) {
