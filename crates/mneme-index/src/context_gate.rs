@@ -2,7 +2,9 @@
 
 use mneme_context::ASSEMBLY_PROFILE_V1;
 use mneme_core::{ContextConsumptionAttestation, Entry, MnemeError, ObjectId, OutputBinding};
-use mneme_gate::{PHASE_II_GATE_OPEN, verify_consumption_attestation_strict, verify_output_binding_strict};
+use mneme_gate::{
+    PHASE_II_GATE_OPEN, verify_consumption_attestation_strict, verify_output_binding_strict,
+};
 
 pub const CONTEXT_GATE_STRICT_STATUS: &str = "strict_context_gate_v1";
 
