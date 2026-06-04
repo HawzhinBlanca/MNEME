@@ -29,6 +29,10 @@ const F_STORED_ROOT: u64 = 4;
 const F_SEMANTIC_RECEIPT: u64 = 5;
 #[cfg(feature = "context_gate")]
 const F_CONTEXT_ATTESTATION: u64 = 6;
+#[cfg(feature = "context_gate")]
+const F_CCA: u64 = 4;
+#[cfg(feature = "context_gate")]
+const F_OUTPUT_BINDING: u64 = 5;
 
 #[cfg(feature = "context_gate")]
 pub const CONTEXT_GATE_DRAFT_STATUS: &str = "unverified_until_phase_ii_gate";
