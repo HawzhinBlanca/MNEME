@@ -212,4 +212,91 @@ mod tests {
         let bytes = enc.finish();
         assert!(decode_federation_cognition_cert_wire(&bytes).is_err());
     }
+
+    fn sample_wire_bytes() -> Vec<u8> {
+        let wire = FederationCognitionCertWire {
+            version: FEDERATION_COGNITION_CERT_VERSION,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0x01; 32],
+            cognition_cert_bytes: vec![0x99, 0xAA, 0xBB],
+            merge_head_digest: [0x02; 32],
+        };
+        to_bytes_canonical(&wire).expect("encode")
+    }
+
+    /// Replay: resubmitting identical wire must stay fail-closed (no accept on replay).
+    #[test]
+    fn forgery_replayed_wire_stays_fail_closed() {
+        let bytes = sample_wire_bytes();
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::UnsupportedVersion {
+                got: FEDERATION_COGNITION_CERT_VERSION
+            })
+        );
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::UnsupportedVersion {
+                got: FEDERATION_COGNITION_CERT_VERSION
+            })
+        );
+    }
+
+    /// Bad merge head: tampered digest decodes but verify rejects (gate closed).
+    #[test]
+    fn forgery_bad_merge_head_rejects() {
+        let mut bytes = sample_wire_bytes();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        if decode_federation_cognition_cert_wire(&bytes).is_ok() {
+            assert_eq!(
+                verify_federation_cognition_cert_wire(&bytes),
+                Err(MnemeError::UnsupportedVersion {
+                    got: FEDERATION_COGNITION_CERT_VERSION
+                })
+            );
+        } else {
+            assert_eq!(
+                verify_federation_cognition_cert_wire(&bytes),
+                Err(MnemeError::CertificateInvalid)
+            );
+        }
+    }
+
+    /// Wire tamper: truncate federated cert bytes.
+    #[test]
+    fn forgery_truncated_wire_rejects() {
+        let bytes = sample_wire_bytes();
+        for trim in 1..=12 {
+            let tampered = &bytes[..bytes.len().saturating_sub(trim)];
+            assert!(verify_federation_cognition_cert_wire(tampered).is_err());
+        }
+    }
+
+    /// Wire tamper: flip cognition_cert payload byte after decode.
+    #[test]
+    fn forgery_tampered_cognition_cert_payload_rejects() {
+        let mut bytes = sample_wire_bytes();
+        if let Some(pos) = bytes.iter().position(|&b| b == 0x99) {
+            bytes[pos] ^= 0x01;
+        }
+        assert!(verify_federation_cognition_cert_wire(&bytes).is_err());
+    }
+
+    /// Wire tamper: empty cognition cert rejected before gate check.
+    #[test]
+    fn forgery_empty_cognition_cert_rejects() {
+        let wire = FederationCognitionCertWire {
+            version: FEDERATION_COGNITION_CERT_VERSION,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0x01; 32],
+            cognition_cert_bytes: vec![],
+            merge_head_digest: [0x02; 32],
+        };
+        let bytes = to_bytes_canonical(&wire).expect("encode");
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::CertificateInvalid)
+        );
+    }
 }

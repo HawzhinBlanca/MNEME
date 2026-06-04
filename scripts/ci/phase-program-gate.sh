@@ -84,6 +84,16 @@ run_phase_one_targets() {
     bash scripts/ci/cross-implementation-vectors.sh
 }
 
+run_phase_two_three_four_redteam() {
+  section "Phase II/III/IV red-team (new surfaces)"
+  run_step "Output binding forgery (mneme-core + mneme-gate)" \
+    bash -c 'cargo test -p mneme-core output:: -- --nocapture && cargo test -p mneme-gate forgery -- --nocapture'
+  run_step "ActionReceipt forgery (mneme-account, phase_iii_verify + gate-off)" \
+    bash -c 'cargo test -p mneme-account --features phase_iii_verify redteam -- --nocapture && cargo test -p mneme-account --test fail_closed -- --nocapture'
+  run_step "Federation cert forgery (mneme-index)" \
+    cargo test -p mneme-index forgery -- --nocapture
+}
+
 section "Phase program gate (level=$LEVEL)"
 print_checkboxes "$SPEC_PHASE_I" "Phase I"
 print_checkboxes "$SPEC_PHASE_II" "Phase II"
@@ -108,6 +118,8 @@ case "$LEVEL" in
 esac
 
 run_phase_one_targets
+
+run_phase_two_three_four_redteam
 
 echo
 echo "phase-program-gate ($LEVEL): OK"

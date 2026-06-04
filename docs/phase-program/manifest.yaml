@@ -101,6 +101,7 @@ phases:
         status: done
         evidence:
           - path: docs/PHASE_II_TASK_SPEC.md
+          - path: docs/redteam/PHASE_II_OUTPUT_BINDING.md
           - path: crates/mneme-core/src/output.rs
           - path: crates/mneme-core/src/domain.rs
           - path: crates/mneme-gate/src/lib.rs
@@ -124,6 +125,7 @@ phases:
         status: partial
         evidence:
           - path: docs/PHASE_III_TASK_SPEC.md
+          - path: docs/redteam/PHASE_III_ACTION_RECEIPT.md
           - path: crates/mneme-core/src/accountability.rs
           - path: crates/mneme-account/src/lib.rs
           - path: crates/mneme-account/src/verify.rs
@@ -165,6 +167,9 @@ phases:
         status: deferred
         evidence:
           - path: docs/PHASE_IV_TASK_SPEC.md
+          - path: docs/redteam/PHASE_IV_FEDERATION_WIRE.md
+          - path: crates/mneme-index/src/federation_cert.rs
+          - path: fuzz/fuzz_targets/federation_cert_parse.rs
       - id: P4-3
         title: Open standardization + interop SDKs
         status: deferred

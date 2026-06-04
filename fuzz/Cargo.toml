@@ -71,3 +71,10 @@ path = "fuzz_targets/cognition_cert_parse.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "federation_cert_parse"
+path = "fuzz_targets/federation_cert_parse.rs"
+test = false
+doc = false
+bench = false

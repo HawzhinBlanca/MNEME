@@ -9,6 +9,8 @@ use mneme_account::PHASE_III_GATE_OPEN;
 use mneme_account::{
     bind_action, prove_forget, verify_action_receipt_wire, verify_forget_proof_wire,
 };
+#[cfg(not(feature = "phase_iii_verify"))]
+use mneme_core::decode_action_receipt;
 use mneme_core::{
     ACTION_RECEIPT_VERSION, ActionReceipt, Capability, FORGET_PROOF_VERSION, ForgetMode,
     ForgetProof, ForgetTarget, LogicalKey, MnemeError, ObjectId, Root, encode_action_receipt,
@@ -148,6 +150,36 @@ fn verify_action_receipt_wire_fails_closed_but_parses() {
     let err = verify_action_receipt_wire(&wire).unwrap_err();
     assert_eq!(
         err,
+        MnemeError::UnsupportedVersion {
+            got: ACTION_RECEIPT_VERSION
+        }
+    );
+}
+
+/// Gate-off bypass: a forged receipt with non-empty signature must not verify when
+/// `phase_iii_verify` is disabled — decode succeeds, verify fails closed.
+#[cfg(not(feature = "phase_iii_verify"))]
+#[test]
+fn gate_off_forged_receipt_with_signature_cannot_bypass() {
+    let wire = sample_action_receipt_wire(Some([0xCC; 32]));
+    assert!(decode_action_receipt(&wire).is_ok());
+    assert_eq!(
+        verify_action_receipt_wire(&wire).unwrap_err(),
+        MnemeError::UnsupportedVersion {
+            got: ACTION_RECEIPT_VERSION
+        }
+    );
+}
+
+/// Gate-off bypass: minted-looking receipt bytes must not unlock bind_action.
+#[cfg(not(feature = "phase_iii_verify"))]
+#[test]
+fn gate_off_bind_action_stays_closed_despite_forged_wire() {
+    let cap = sample_capability();
+    let root = sample_root();
+    let _wire = sample_action_receipt_wire(Some([0xCC; 32]));
+    assert_eq!(
+        bind_action([0xAA; 32], &cap, [0xBB; 32], &root, Some([0xCC; 32])).unwrap_err(),
         MnemeError::UnsupportedVersion {
             got: ACTION_RECEIPT_VERSION
         }

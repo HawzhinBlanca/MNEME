@@ -118,4 +118,78 @@ mod tests {
         let wire = encode_output_binding(&binding).unwrap();
         verify_output_binding(&decode_output_binding(&wire).unwrap(), assembled, out, &id).unwrap();
     }
+
+    fn honest_binding(assembled: &[u8], out: &[u8], id: [u8; 32]) -> OutputBinding {
+        OutputBinding {
+            context_hash: hash_context_assembled(assembled),
+            output_hash: hash_model_output(out),
+            model_identity: id,
+        }
+    }
+
+    /// Forgery: bind output hash from a different model output (hash swap).
+    #[test]
+    fn forgery_output_hash_swap_rejects() {
+        let assembled = b"assembled-context";
+        let honest_out = b"honest-output";
+        let forged_out = b"forged-output";
+        let id = [0x77; 32];
+        let mut binding = honest_binding(assembled, honest_out, id);
+        binding.output_hash = hash_model_output(forged_out);
+        assert_eq!(
+            verify_output_binding(&binding, assembled, honest_out, &id),
+            Err(MnemeError::ProvenanceBroken)
+        );
+    }
+
+    /// Forgery: bind context hash from a different assembled prompt.
+    #[test]
+    fn forgery_context_hash_swap_rejects() {
+        let honest_ctx = b"honest-context";
+        let forged_ctx = b"injected-context";
+        let out = b"model-output";
+        let id = [0x88; 32];
+        let mut binding = honest_binding(honest_ctx, out, id);
+        binding.context_hash = hash_context_assembled(forged_ctx);
+        assert_eq!(
+            verify_output_binding(&binding, honest_ctx, out, &id),
+            Err(MnemeError::ProvenanceBroken)
+        );
+    }
+
+    /// Forgery: claim a different model identity than the one that produced output.
+    #[test]
+    fn forgery_model_identity_mismatch_rejects() {
+        let assembled = b"ctx";
+        let out = b"out";
+        let honest_id = [0x11; 32];
+        let forged_id = [0x22; 32];
+        let binding = honest_binding(assembled, out, forged_id);
+        assert_eq!(
+            verify_output_binding(&binding, assembled, out, &honest_id),
+            Err(MnemeError::SchemaDrift)
+        );
+    }
+
+    /// Forgery: splice an honest context hash with a forged output hash.
+    #[test]
+    fn forgery_spliced_binding_fields_reject() {
+        let ctx_a = b"context-a";
+        let ctx_b = b"context-b";
+        let out_a = b"output-a";
+        let out_b = b"output-b";
+        let id = [0x99; 32];
+        let mut spliced = honest_binding(ctx_a, out_a, id);
+        spliced.output_hash = hash_model_output(out_b);
+        assert_eq!(
+            verify_output_binding(&spliced, ctx_a, out_a, &id),
+            Err(MnemeError::ProvenanceBroken)
+        );
+        spliced = honest_binding(ctx_a, out_a, id);
+        spliced.context_hash = hash_context_assembled(ctx_b);
+        assert_eq!(
+            verify_output_binding(&spliced, ctx_a, out_a, &id),
+            Err(MnemeError::ProvenanceBroken)
+        );
+    }
 }
