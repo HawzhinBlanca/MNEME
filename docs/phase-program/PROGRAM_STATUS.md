@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` @ `11379e8` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Red-team adversarial coverage for Phase II/III/IV new surfaces landed @ `11379e8`. `PHASE_GATE_LEVEL=full` green on clean master. **Guardian review pending** before treating P3-1 / federation verify as closed. Prior phase slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
+**Integrator (2026-06-04):** P3-1 store-path `bind_action` + `bind_external_action` landed (feature-gated signing; default fail-closed). Red-team @ `11379e8` extended for bind path. **Guardian review pending** for P3-1 exit. Prior slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
 
 ---
 
@@ -12,7 +12,7 @@
 |---|---:|---:|---:|---:|---|
 | **I** — Verifiable retrieval + Certificate v1 | 5/5 | 0 | 0 | **100%** | Software-complete; red-team #3/#5 closed; TCB fail-open fixed @ `a494fe0`. |
 | **II** — Context Gate (software-only) | 6/8 | 0 | 2 | **75%** | P2-3..P2-8 done; P2-1 TEE + P2-2 enclave verify deferred (`PHASE_II_TEE_DEFERRED.md`). |
-| **III** — Accountability scaffolding | 0/4 | 2/4 | 2/4 | **~25%** | ActionReceipt Ed25519 verify behind `phase_iii_verify` (default off); ForgetProof stubbed; P3-3/P3-4 deferred. |
+| **III** — Accountability scaffolding | 0/4 | 3/4 | 1/4 | **~38%** | P3-1 bind+verify gated (`phase_iii_bind_action` / `phase_iii_verify`); store hook; ForgetProof stubbed (P3-2); P3-3/P3-4 deferred. |
 | **IV** — Scale & standard (research) | 0/4 | 3/4 | 1/4 | **~38%** | Federation wire sketch + interop stub doc; `piop_research` off-by-default; no prover/verifier/SDK shipped. |
 | **Program total** | 11/21 | 5/21 | 5/21 | **~52% done** | Excludes hardware/TEE/PIOP delivery; partial items count as half in phase % only. |
 
@@ -22,7 +22,7 @@
 
 - **Phase I:** zkANN-1 + bi-temporal + provenance + Certificate v1 + proof obligations **done** (P1-1..P1-5). Red-team **#3** / **#5** at `d433999`; TCB fail-open (provenance skip) fixed at `a494fe0`.
 - **Phase II:** Context Gate **software slice done** (P2-3..P2-8 @ `14a87df`). Output binding forgery surface documented + tested (`docs/redteam/PHASE_II_OUTPUT_BINDING.md`). Enclave-report placeholder (verify always fail-closed), Certificate v2 draft behind `context_gate` (off by default).
-- **Phase III:** Accountability scaffolding **partial** @ `bfda439` — ActionReceipt forgery surface documented + tested (`docs/redteam/PHASE_III_ACTION_RECEIPT.md`); Ed25519 verify behind `phase_iii_verify` (default off). ForgetProof shred/absence stubbed. P3-1 production path / TEE **not started**; formal proof and trust-ops **deferred** (P3-3, P3-4).
+- **Phase III:** Accountability scaffolding **partial** — P3-1 `bind_action` + `Store::bind_external_action` mint signed `ActionReceipt` behind `phase_iii_bind_action` (default off); Ed25519 verify behind `phase_iii_verify`. Red-team `docs/redteam/PHASE_III_ACTION_RECEIPT.md`. ForgetProof crypto **deferred** (P3-2). Formal proof + trust-ops **deferred** (P3-3, P3-4).
 - **Phase IV:** **Research slice** @ `c8368d8` — federation cert wire forgery surface documented + tested (`docs/redteam/PHASE_IV_FEDERATION_WIRE.md`); decode-only, gate closed. `piop_research` off-by-default. No global exact-NN prover, no cross-org verifier, no shipped interop SDK.
 
 Approx. program progress by item count: **~52% done (11/21)**, **~24% partial (5/21)**, **~24% deferred (5/21)** — honest, excluding hardware/TEE/PIOP delivery.

@@ -1431,6 +1431,7 @@ dependencies = [
  "ciborium",
  "hex",
  "libc",
+ "mneme-account",
  "mneme-cap",
  "mneme-core",
  "mneme-crdt",

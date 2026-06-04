@@ -118,19 +118,23 @@ phases:
 
   - phase: Phase III — Accountability scaffolding
     status: partial
-    note: "ActionReceipt Ed25519 verify behind phase_iii_verify (default off); ForgetProof shred/absence stubbed; PHASE_III_GATE_OPEN false in default builds."
+    note: "ActionReceipt bind_action + store bind_external_action behind phase_iii_bind_action (default off); wire verify behind phase_iii_verify; ForgetProof stubbed."
     items:
       - id: P3-1
-        title: Non-repudiation (ActionReceipt) verify behind phase_iii_verify
+        title: Non-repudiation (ActionReceipt) bind + verify behind feature gates
         status: partial
         evidence:
           - path: docs/PHASE_III_TASK_SPEC.md
           - path: docs/redteam/PHASE_III_ACTION_RECEIPT.md
           - path: crates/mneme-core/src/accountability.rs
           - path: crates/mneme-account/src/lib.rs
+          - path: crates/mneme-account/src/sign.rs
           - path: crates/mneme-account/src/verify.rs
+          - path: crates/mneme-account/tests/bind_action.rs
           - path: crates/mneme-account/tests/fail_closed.rs
           - path: crates/mneme-account/tests/verify_crypto.rs
+          - path: crates/mneme-store/src/action.rs
+          - path: crates/mneme-store/tests/phase_iii_bind.rs
       - id: P3-2
         title: Verifiable forgetting (ForgetProof) witness stub + wire verify
         status: partial

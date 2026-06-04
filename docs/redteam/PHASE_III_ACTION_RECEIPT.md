@@ -42,7 +42,10 @@ Run:
 
 ```bash
 cargo test -p mneme-account --features phase_iii_verify redteam -- --nocapture
-cargo test -p mneme-account fail_closed gate_off -- --nocapture
+cargo test -p mneme-account --features phase_iii_bind_action --test bind_action -- --nocapture
+cargo test -p mneme-account --test fail_closed gate_off -- --nocapture
+cargo test -p mneme-store --test phase_iii_bind bind_external_action_fail_closed -- --nocapture
+cargo test -p mneme-store --features phase_iii_bind --test phase_iii_bind -- --nocapture
 ```
 
 ## Honesty boundary
@@ -52,5 +55,18 @@ was wise or its premises true (CLAUDE.md §honesty).
 
 ## Status
 
-**Mitigated (verify slice):** crypto forgeries fail closed; default build gate-off bypass
-tests pin `UnsupportedVersion`. Store-path `bind_action` signer integration remains open.
+**Mitigated (P3-1 software slice):** crypto forgeries fail closed; default build gate-off
+bypass tests pin `UnsupportedVersion`. Store-path `bind_external_action` → `bind_action`
+mints signed receipts only with `phase_iii_bind_action` / `phase_iii_verify` (or store
+`phase_iii_bind` feature); production default remains closed.
+
+## Store path
+
+| Surface | Gate | Default |
+|---|---|---|
+| `Store::bind_external_action` | `mneme-store/phase_iii_bind` → `mneme-account/phase_iii_bind_action` | `UnsupportedVersion` |
+| `mneme_account::bind_action` | `PHASE_III_BIND_ACTION_OPEN` | `false` |
+| Wire verify | `phase_iii_verify` / `PHASE_III_GATE_OPEN` | `false` |
+
+Tests: `crates/mneme-store/tests/phase_iii_bind.rs`, `crates/mneme-account/tests/bind_action.rs`,
+`crates/mneme-account/src/sign.rs` (`redteam_bind`).

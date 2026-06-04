@@ -191,6 +191,12 @@ impl Capability {
         self.verify_sig_chain()
     }
 
+    /// Offline signature-chain check (issuer + attenuation sigs). Phase III P3-1
+    /// `bind_action` uses this when the capability was not already verified by the store.
+    pub fn verify_signature_chain(&self) -> Result<(), MnemeError> {
+        self.verify_sig_chain()
+    }
+
     pub fn sig_chain(&self) -> Result<Vec<[u8; SIG_LEN]>, MnemeError> {
         parse_sig_chain(&self.inner.signature)
     }

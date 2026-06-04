@@ -18,6 +18,7 @@ mneme-verify.workspace = true
 mneme-index.workspace = true
 mneme-forget.workspace = true
 mneme-crdt.workspace = true
+mneme-account.workspace = true
 rand.workspace = true
 blake3.workspace = true
 ciborium.workspace = true
@@ -25,6 +26,10 @@ hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 libc = "0.2"
+
+[features]
+default = []
+phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -50,3 +55,7 @@ harness = true
 name = "chaos"
 path = "../../tests/chaos/mod.rs"
 harness = true
+
+[[test]]
+name = "phase_iii_bind"
+path = "tests/phase_iii_bind.rs"

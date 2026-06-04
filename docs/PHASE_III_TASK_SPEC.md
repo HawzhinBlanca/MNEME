@@ -38,8 +38,9 @@ the Phase III types reference it through an **optional** `cognition_cert_commit`
 ### P3-1 — Non-repudiation (P0)
 - [ ] Every external action binds to a capability **and** the sanctioning human
   identity; an action is refused without a valid certificate.
-- [ ] `bind_action` produces a signed `ActionReceipt` bound to the signed root
-  and (when present) the cert v2 commit; forged/altered receipts fail closed.
+- [x] `bind_action` produces a signed `ActionReceipt` bound to the signed root
+  and (when present) the cert v2 commit when `phase_iii_bind_action` is enabled;
+  forged/altered receipts fail closed (`phase_iii_verify`); default build rejects.
 - [x] Wire skeleton + canonical encode/decode gated by `ACTION_RECEIPT_VERSION`
   (gate closed; no store-path signer yet).
 - [x] Offline Ed25519 verify over `signable_preimage` behind `phase_iii_verify`
@@ -106,7 +107,7 @@ pilot sign-off; external audit passed.
 | 2026-06-03 | Fail-closed tests (core unit + `mneme-account` integration, incl. cert-supplied rejection) | **Landed** |
 | 2026-06-03 | Canonical dCBOR encode/decode for `ActionReceipt` / `ForgetProof`, version-gated; malformed-wire tests; wire verifiers remain gate-closed | **Landed (wire-only)** |
 | 2026-06-04 | `mneme-account`: `phase_iii_verify` feature — ActionReceipt Ed25519 verify + `mint_action_receipt`; ForgetProof witness/absence stubbed | **Landed (verify slice)** |
-| — | Real store-path `bind_action` signer (P3-1) | **Deferred** |
+| 2026-06-04 | Store-path `bind_action` / `Store::bind_external_action` with Ed25519 mint behind `phase_iii_bind_action` (default off) | **Landed (P3-1 slice)** |
 | — | Real crypto-shred witness + SMT non-membership prover for `ForgetProof` (P3-2) | **Deferred** |
 | — | Freeze `ActionReceipt` / `ForgetProof` into the §20.3 interface + pin domain tags | **Deferred** (post-review) |
 | — | Bind cert v2 commit once Phase II finalizes cert v2 layout | **Deferred** (depends on Phase II) |

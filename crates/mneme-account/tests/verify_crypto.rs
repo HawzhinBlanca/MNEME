@@ -1,6 +1,7 @@
 use mneme_account::{
-    PHASE_III_GATE_OPEN, mint_action_receipt, prove_forget, verify_action_receipt,
-    verify_action_receipt_bound, verify_action_receipt_wire, verify_forget_proof_wire,
+    PHASE_III_BIND_ACTION_OPEN, PHASE_III_GATE_OPEN, bind_action, mint_action_receipt,
+    prove_forget, verify_action_receipt, verify_action_receipt_bound, verify_action_receipt_wire,
+    verify_forget_proof_wire,
 };
 use mneme_cap::{Capability, Permissions};
 use mneme_core::{
@@ -47,6 +48,16 @@ fn sample_root() -> Root {
 #[test]
 fn gate_opens_with_phase_iii_verify_feature() {
     assert!(std::hint::black_box(PHASE_III_GATE_OPEN));
+    assert!(std::hint::black_box(PHASE_III_BIND_ACTION_OPEN));
+}
+
+#[test]
+fn bind_action_mints_and_bound_verify() {
+    let cap = sample_capability();
+    let root = sample_root();
+    let action = [0x55; 32];
+    let receipt = bind_action(action, cap.inner(), &sanctioner(), &root, None).unwrap();
+    verify_action_receipt_bound(&receipt, action, &cap, &root).unwrap();
 }
 
 #[test]

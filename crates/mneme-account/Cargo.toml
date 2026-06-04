@@ -7,11 +7,12 @@ description = "Phase III accountability: bind_action / prove_forget seams (gate 
 
 [features]
 default = []
-phase_iii_verify = ["mneme-crypto", "mneme-cap"]
+phase_iii_bind_action = ["mneme-cap"]
+phase_iii_verify = ["phase_iii_bind_action"]
 
 [dependencies]
 mneme-core.workspace = true
-mneme-crypto = { workspace = true, optional = true }
+mneme-crypto.workspace = true
 mneme-cap = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -21,3 +22,7 @@ mneme-cap.workspace = true
 [[test]]
 name = "verify_crypto"
 required-features = ["phase_iii_verify"]
+
+[[test]]
+name = "bind_action"
+required-features = ["phase_iii_bind_action"]

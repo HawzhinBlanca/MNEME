@@ -6,17 +6,22 @@
 
 #[cfg(not(feature = "phase_iii_verify"))]
 use mneme_account::PHASE_III_GATE_OPEN;
-use mneme_account::{
-    bind_action, prove_forget, verify_action_receipt_wire, verify_forget_proof_wire,
-};
+#[cfg(not(feature = "phase_iii_bind_action"))]
+use mneme_account::bind_action;
+use mneme_account::{prove_forget, verify_action_receipt_wire, verify_forget_proof_wire};
+#[cfg(not(feature = "phase_iii_bind_action"))]
+use mneme_core::Capability;
 #[cfg(not(feature = "phase_iii_verify"))]
 use mneme_core::decode_action_receipt;
 use mneme_core::{
-    ACTION_RECEIPT_VERSION, ActionReceipt, Capability, FORGET_PROOF_VERSION, ForgetMode,
-    ForgetProof, ForgetTarget, LogicalKey, MnemeError, ObjectId, Root, encode_action_receipt,
+    ACTION_RECEIPT_VERSION, ActionReceipt, FORGET_PROOF_VERSION, ForgetMode, ForgetProof,
+    ForgetTarget, LogicalKey, MnemeError, ObjectId, Root, encode_action_receipt,
     encode_forget_proof,
 };
+#[cfg(not(feature = "phase_iii_bind_action"))]
+use mneme_crypto::KeyPair;
 
+#[cfg(not(feature = "phase_iii_bind_action"))]
 fn sample_capability() -> Capability {
     Capability {
         issuer: [0x01; 32],
@@ -29,6 +34,11 @@ fn sample_capability() -> Capability {
         caveats: vec![],
         signature: vec![0x00; 64],
     }
+}
+
+#[cfg(not(feature = "phase_iii_bind_action"))]
+fn sanctioner_signer() -> KeyPair {
+    KeyPair::from_seed([0x02; 32])
 }
 
 fn sample_root() -> Root {
@@ -45,6 +55,16 @@ fn sample_root() -> Root {
     }
 }
 
+#[cfg(not(feature = "phase_iii_bind_action"))]
+#[test]
+fn bind_action_gate_is_closed() {
+    let gate = std::hint::black_box(mneme_account::PHASE_III_BIND_ACTION_OPEN);
+    assert!(
+        !gate,
+        "bind_action minting must stay closed until phase_iii_bind_action is enabled"
+    );
+}
+
 #[cfg(not(feature = "phase_iii_verify"))]
 #[test]
 fn gate_is_closed() {
@@ -56,11 +76,12 @@ fn gate_is_closed() {
     );
 }
 
+#[cfg(not(feature = "phase_iii_bind_action"))]
 #[test]
 fn bind_action_fails_closed_without_cert() {
     let cap = sample_capability();
     let root = sample_root();
-    let result = bind_action([0xAA; 32], &cap, [0xBB; 32], &root, None);
+    let result = bind_action([0xAA; 32], &cap, &sanctioner_signer(), &root, None);
     assert_eq!(
         result.unwrap_err(),
         MnemeError::UnsupportedVersion {
@@ -69,12 +90,19 @@ fn bind_action_fails_closed_without_cert() {
     );
 }
 
+#[cfg(not(feature = "phase_iii_bind_action"))]
 #[test]
 fn bind_action_fails_closed_even_with_cert_commit() {
     let cap = sample_capability();
     let root = sample_root();
     // Supplying a cert v2 commit must not unlock a fabricated receipt.
-    let result = bind_action([0xAA; 32], &cap, [0xBB; 32], &root, Some([0xCC; 32]));
+    let result = bind_action(
+        [0xAA; 32],
+        &cap,
+        &sanctioner_signer(),
+        &root,
+        Some([0xCC; 32]),
+    );
     assert!(matches!(
         result,
         Err(MnemeError::UnsupportedVersion {
@@ -172,14 +200,24 @@ fn gate_off_forged_receipt_with_signature_cannot_bypass() {
 }
 
 /// Gate-off bypass: minted-looking receipt bytes must not unlock bind_action.
-#[cfg(not(feature = "phase_iii_verify"))]
+#[cfg(all(
+    not(feature = "phase_iii_bind_action"),
+    not(feature = "phase_iii_verify")
+))]
 #[test]
 fn gate_off_bind_action_stays_closed_despite_forged_wire() {
     let cap = sample_capability();
     let root = sample_root();
     let _wire = sample_action_receipt_wire(Some([0xCC; 32]));
     assert_eq!(
-        bind_action([0xAA; 32], &cap, [0xBB; 32], &root, Some([0xCC; 32])).unwrap_err(),
+        bind_action(
+            [0xAA; 32],
+            &cap,
+            &sanctioner_signer(),
+            &root,
+            Some([0xCC; 32])
+        )
+        .unwrap_err(),
         MnemeError::UnsupportedVersion {
             got: ACTION_RECEIPT_VERSION
         }

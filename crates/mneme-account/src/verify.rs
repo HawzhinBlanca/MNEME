@@ -1,37 +1,9 @@
 use mneme_cap::Capability as CapToken;
 use mneme_core::{ActionReceipt, FORGET_PROOF_VERSION, ForgetProof, MnemeError, Root};
-use mneme_crypto::{KeyPair, verify_signature_bytes, verifying_key_from_bytes};
-
-pub fn mint_action_receipt(
-    sanctioner: &KeyPair,
-    action_commit: [u8; 32],
-    capability: &CapToken,
-    root: &Root,
-    cognition_cert_commit: Option<[u8; 32]>,
-) -> Result<ActionReceipt, MnemeError> {
-    let capability_commit = capability.cap_id()?;
-    let mut hlc = [0u8; 14];
-    hlc.copy_from_slice(&root.hlc_max);
-    let preimage = ActionReceipt {
-        version: mneme_core::ACTION_RECEIPT_VERSION,
-        action_commit,
-        capability_commit,
-        sanctioner: sanctioner.public_key_bytes(),
-        root_bound: root.preimage_hash,
-        hlc,
-        cognition_cert_commit,
-        signature: Vec::new(),
-    };
-    let sig = sanctioner.sign(&preimage.signable_preimage());
-    Ok(ActionReceipt {
-        signature: sig.to_vec(),
-        ..preimage
-    })
-}
 
 pub fn verify_action_receipt(receipt: &ActionReceipt) -> Result<(), MnemeError> {
-    let pk = verifying_key_from_bytes(&receipt.sanctioner)?;
-    verify_signature_bytes(&pk, &receipt.signable_preimage(), &receipt.signature)
+    let pk = mneme_crypto::verifying_key_from_bytes(&receipt.sanctioner)?;
+    mneme_crypto::verify_signature_bytes(&pk, &receipt.signable_preimage(), &receipt.signature)
 }
 
 pub fn verify_action_receipt_bound(
@@ -62,6 +34,7 @@ pub fn verify_forget_proof(_proof: &ForgetProof) -> Result<(), MnemeError> {
 #[cfg(test)]
 mod redteam {
     use super::*;
+    use crate::sign::mint_action_receipt;
     use mneme_cap::{Capability, Permissions};
     use mneme_core::TrustTier;
     use mneme_crypto::KeyPair;

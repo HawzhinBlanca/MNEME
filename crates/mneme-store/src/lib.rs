@@ -3,6 +3,7 @@
 //! **INV-5:** Agent-facing reads use [`Store::recall_verified`] / [`Store::recall_verified_default`]
 //! only. Untrusted recall assembly is `pub(crate)` inside this crate.
 
+mod action;
 mod atomic;
 mod certify;
 mod forget;
