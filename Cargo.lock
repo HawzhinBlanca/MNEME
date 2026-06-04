@@ -1363,6 +1363,7 @@ dependencies = [
 name = "mneme-gate"
 version = "0.1.0"
 dependencies = [
+ "mneme-context",
  "mneme-core",
 ]
 
