@@ -22,7 +22,7 @@ if ! rustup run "$FUZZ_TOOLCHAIN" rustc -V &>/dev/null; then
   exit 1
 fi
 
-FUZZ_TARGETS=(dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse)
+FUZZ_TARGETS=(dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse federation_cert_parse federation_cert_verify)
 for target in "${FUZZ_TARGETS[@]}"; do
   corpus="$ROOT/fuzz/corpus/$target"
   if [[ ! -d "$corpus" ]] || [[ -z "$(find "$corpus" -type f 2>/dev/null | head -n 1)" ]]; then
@@ -31,4 +31,4 @@ for target in "${FUZZ_TARGETS[@]}"; do
   fi
   cargo "+${FUZZ_TOOLCHAIN}" fuzz run "$target" -- -runs=16
 done
-echo "fuzz-smoke: OK (dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse)"
+echo "fuzz-smoke: OK (dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse federation_cert_parse federation_cert_verify)"

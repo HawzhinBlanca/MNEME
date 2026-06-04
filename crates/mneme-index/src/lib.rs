@@ -69,7 +69,7 @@ pub use cognition_cert::{
 pub use federation_cert::{
     FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
     PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
-    fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
+    fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
 };
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::verify_consumption_attestation;
@@ -113,7 +113,8 @@ pub const SEMANTIC_BACKEND_ENABLED: bool = false;
 mod tests {
     use super::*;
     use mneme_core::{
-        DistanceMetric, FixedPointEmbedding, LogicalKey, ObjectId, Procedure, ProcedureAlgo,
+        DistanceMetric, FixedPointEmbedding, LogicalKey, MnemeError, ObjectId, Procedure,
+        ProcedureAlgo,
     };
     use mneme_smt::SparseMerkleTree;
 
@@ -212,12 +213,19 @@ mod tests {
     #[cfg(feature = "piop_research")]
     #[test]
     fn piop_research_seam_is_honest() {
-        use super::piop_research::{PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS};
+        use super::piop_research::{
+            PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop,
+        };
         // Research seam must never claim to prove anything.
         assert!(PIOP_RESEARCH_HONESTY.contains("UNIMPLEMENTED"));
         assert!(PIOP_RESEARCH_HONESTY.contains("proves NOTHING"));
         assert!(PIOP_RESEARCH_HONESTY.contains("NOT a SNARK"));
         assert!(PIOP_RESEARCH_STATUS.contains("UNIMPLEMENTED"));
+        // Fail-closed Err — must not panic on the research entry point.
+        assert_eq!(
+            prove_exact_nn_piop(&[0u8; 32], &[0u8; 32], &[0u8; 32], 1),
+            Err(MnemeError::UnsupportedVersion { got: 0 })
+        );
     }
 
     #[test]

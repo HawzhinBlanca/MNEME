@@ -58,6 +58,12 @@ pub fn verify_federation_cognition_cert_wire(bytes: &[u8]) -> Result<(), MnemeEr
     if wire.cognition_cert_bytes.is_empty() {
         return Err(MnemeError::CertificateInvalid);
     }
+    if wire.issuer_org_id == [0u8; 32] {
+        return Err(MnemeError::CertificateInvalid);
+    }
+    if wire.merge_head_digest == [0u8; 32] {
+        return Err(MnemeError::CertificateInvalid);
+    }
     if !PHASE_IV_FEDERATION_GATE_OPEN {
         return Err(MnemeError::UnsupportedVersion { got: wire.version });
     }
@@ -67,6 +73,11 @@ pub fn verify_federation_cognition_cert_wire(bytes: &[u8]) -> Result<(), MnemeEr
 /// Fuzz entry: decode federated certificate wire only; must not panic.
 pub fn fuzz_federation_cert_wire(bytes: &[u8]) {
     let _ = decode_federation_cognition_cert_wire(bytes);
+}
+
+/// Fuzz entry: decode + offline verify sketch; must not panic (gate stays closed).
+pub fn fuzz_federation_cert_verify(bytes: &[u8]) {
+    let _ = verify_federation_cognition_cert_wire(bytes);
 }
 
 impl DcborEncode for FederationCognitionCertWire {
@@ -281,6 +292,61 @@ mod tests {
             bytes[pos] ^= 0x01;
         }
         assert!(verify_federation_cognition_cert_wire(&bytes).is_err());
+    }
+
+    #[test]
+    fn wrong_version_rejects_before_gate() {
+        let wire = FederationCognitionCertWire {
+            version: 99,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0x01; 32],
+            cognition_cert_bytes: vec![0x99],
+            merge_head_digest: [0x02; 32],
+        };
+        let bytes = to_bytes_canonical(&wire).expect("encode");
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::UnsupportedVersion { got: 99 })
+        );
+    }
+
+    #[test]
+    fn zero_issuer_org_rejects() {
+        let wire = FederationCognitionCertWire {
+            version: FEDERATION_COGNITION_CERT_VERSION,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0u8; 32],
+            cognition_cert_bytes: vec![0x99],
+            merge_head_digest: [0x02; 32],
+        };
+        let bytes = to_bytes_canonical(&wire).expect("encode");
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::CertificateInvalid)
+        );
+    }
+
+    #[test]
+    fn zero_merge_head_rejects() {
+        let wire = FederationCognitionCertWire {
+            version: FEDERATION_COGNITION_CERT_VERSION,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0x01; 32],
+            cognition_cert_bytes: vec![0x99],
+            merge_head_digest: [0u8; 32],
+        };
+        let bytes = to_bytes_canonical(&wire).expect("encode");
+        assert_eq!(
+            verify_federation_cognition_cert_wire(&bytes),
+            Err(MnemeError::CertificateInvalid)
+        );
+    }
+
+    #[test]
+    fn malformed_bytes_reject_without_panic() {
+        for garbage in [b"".as_slice(), b"\x00", b"\xff\xd9\x00", b"not-cbor"] {
+            assert!(verify_federation_cognition_cert_wire(garbage).is_err());
+        }
     }
 
     /// Wire tamper: empty cognition cert rejected before gate check.

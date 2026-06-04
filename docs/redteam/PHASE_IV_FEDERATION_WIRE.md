@@ -18,6 +18,9 @@ trust surface exists yet.
 | Wire tamper | Truncate CBOR, flip cognition cert payload | `CertificateInvalid` |
 | Elevated status | `status = "verified"` instead of draft label | `CertificateInvalid` |
 | Empty embed | `cognition_cert_bytes` empty | `CertificateInvalid` |
+| Zero issuer | `issuer_org_id` all-zero | `CertificateInvalid` |
+| Zero merge head | `merge_head_digest` all-zero | `CertificateInvalid` |
+| Wrong version | `version != 1` | `UnsupportedVersion` |
 | Unknown field | Extra map key | `UnknownField` / `CertificateInvalid` on decode |
 
 ## Why it matters
@@ -30,6 +33,7 @@ merge-head binding would let stale federated certs re-enter context.
 
 - `crates/mneme-index/src/federation_cert.rs` — `forgery_*` unit tests
 - `fuzz/fuzz_targets/federation_cert_parse.rs` — decode-only fuzz (no panic)
+- `fuzz/fuzz_targets/federation_cert_verify.rs` — decode + verify sketch fuzz (no panic)
 
 Run:
 
