@@ -60,6 +60,11 @@ bypass tests pin `UnsupportedVersion`. Store-path `bind_external_action` → `bi
 mints signed receipts only with `phase_iii_bind_action` / `phase_iii_verify` (or store
 `phase_iii_bind` feature); production default remains closed.
 
+**Store policy (2026-06-04):** `remember_with_action` / `forget_with_action` /
+`promote_with_action` verify optional/mandatory `ActionReceipt` against the **pre-mutation**
+root (`phase_iii_verify` / `phase_iii_require_action`, default **off**). MCP auto-binds via
+`mneme-mcp/phase_iii_bind` (default **off**).
+
 ## Store path
 
 | Surface | Gate | Default |

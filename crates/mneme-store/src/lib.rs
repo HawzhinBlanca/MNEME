@@ -4,6 +4,9 @@
 //! only. Untrusted recall assembly is `pub(crate)` inside this crate.
 
 mod action;
+pub use action::{
+    action_commit_forget, action_commit_promote, action_commit_remember, enforce_external_action,
+};
 mod atomic;
 mod certify;
 mod forget;
@@ -17,8 +20,9 @@ mod scoped_recall;
 use mneme_cap::Capability;
 use mneme_core::object::HlcWire;
 use mneme_core::{
-    Draft, Entry, FixedPointEmbedding, LogicalKey, MnemeError, NodeId, ObjectId, ObjectRecord,
-    PayloadEnc, Procedure, Query, Root, TrustTier, from_bytes_strict, hash_obj, to_bytes_canonical,
+    ActionReceipt, Draft, Entry, FixedPointEmbedding, LogicalKey, MnemeError, NodeId, ObjectId,
+    ObjectRecord, PayloadEnc, Procedure, Query, Root, TrustTier, from_bytes_strict, hash_obj,
+    to_bytes_canonical,
 };
 use mneme_crypto::{FileKeyVault, KeyVault};
 use mneme_crypto::{KeyPair, TrustConfig, open_payload, seal_payload};
@@ -69,6 +73,9 @@ impl RecallSessionCache {
         self.entries.insert(key, entries.to_vec());
     }
 }
+
+#[cfg(feature = "phase_iii_prove_forget")]
+pub use forget::ForgetProven;
 
 pub use layout::Tombstone;
 pub use merge::{SyncManifest, SyncSnapshot};
@@ -251,10 +258,26 @@ impl Store {
         draft: Draft,
         cap: &Capability,
     ) -> Result<(ObjectId, Root), MnemeError> {
+        self.remember_with_action(draft, cap, None)
+    }
+
+    pub fn remember_with_action(
+        &mut self,
+        draft: Draft,
+        cap: &Capability,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<(ObjectId, Root), MnemeError> {
         self.verify_cap(cap)?;
         if !cap.permits_write(&draft.namespace, draft.kind) {
             return Err(MnemeError::CapDenied);
         }
+        let pre_root = self.current_root()?;
+        action::enforce_external_action(
+            action_receipt,
+            action::action_commit_remember(&draft),
+            cap,
+            &pre_root,
+        )?;
         let tier = draft.trust_tier.unwrap_or_else(|| cap.default_tier());
         layout::begin_transaction(&self.path)?;
         pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
@@ -647,10 +670,27 @@ impl Store {
         to: TrustTier,
         cap: &Capability,
     ) -> Result<Root, MnemeError> {
+        self.promote_with_action(id, to, cap, None)
+    }
+
+    pub fn promote_with_action(
+        &mut self,
+        id: &ObjectId,
+        to: TrustTier,
+        cap: &Capability,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<Root, MnemeError> {
         self.verify_cap(cap)?;
         if !cap.permits_promote() {
             return Err(MnemeError::PromoteDenied);
         }
+        let pre_root = self.current_root()?;
+        action::enforce_external_action(
+            action_receipt,
+            action::action_commit_promote(id, to),
+            cap,
+            &pre_root,
+        )?;
         let id_bytes = *id.as_bytes();
         let bytes = self
             .objects

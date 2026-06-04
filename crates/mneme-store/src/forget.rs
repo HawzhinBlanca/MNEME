@@ -1,13 +1,22 @@
 //! Forget path with SMT tombstone + crypto-shred (§9.1, §13).
 
 use crate::Store;
+use crate::action::{action_commit_forget, enforce_external_action};
 use crate::layout;
 use crate::pause;
 use mneme_cap::Capability;
-use mneme_core::{ForgetMode, ForgetTarget, MnemeError};
+use mneme_core::{ActionReceipt, ForgetMode, ForgetTarget, MnemeError};
 use mneme_forget::{
-    RedactForgetInput, ShredForgetInput, forget_redact, forget_shred, object_id_for_key,
+    RedactForgetInput, ShredForgetInput, ShredOutcome, forget_redact, forget_shred,
+    object_id_for_key,
 };
+
+#[cfg(feature = "phase_iii_prove_forget")]
+pub struct ForgetProven {
+    pub tombstone: layout::Tombstone,
+    pub root: mneme_core::Root,
+    pub proof: mneme_core::ForgetProof,
+}
 
 impl Store {
     pub fn forget(
@@ -16,12 +25,49 @@ impl Store {
         cap: &Capability,
         mode: ForgetMode,
     ) -> Result<(layout::Tombstone, mneme_core::Root), MnemeError> {
+        self.forget_with_action(target, cap, mode, None)
+    }
+
+    pub fn forget_with_action(
+        &mut self,
+        target: ForgetTarget,
+        cap: &Capability,
+        mode: ForgetMode,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<(layout::Tombstone, mneme_core::Root), MnemeError> {
+        let outcome = self.forget_internal(target, cap, mode, action_receipt)?;
+        Ok((outcome.tombstone, outcome.root))
+    }
+
+    #[cfg(feature = "phase_iii_prove_forget")]
+    pub fn forget_with_proof(
+        &mut self,
+        target: ForgetTarget,
+        cap: &Capability,
+        mode: ForgetMode,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<ForgetProven, MnemeError> {
+        let outcome = self.forget_internal(target, cap, mode, action_receipt)?;
+        Ok(ForgetProven {
+            tombstone: outcome.tombstone,
+            root: outcome.root,
+            proof: outcome.proof.ok_or(MnemeError::ProvenanceBroken)?,
+        })
+    }
+
+    fn forget_internal(
+        &mut self,
+        target: ForgetTarget,
+        cap: &Capability,
+        mode: ForgetMode,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<ForgetInternalOutcome, MnemeError> {
         self.verify_cap(cap)?;
         if !cap.permits_forget() {
             return Err(MnemeError::CapDenied);
         }
-        let logical_key = match target {
-            ForgetTarget::LogicalKey(k) => k,
+        let logical_key = match &target {
+            ForgetTarget::LogicalKey(k) => k.clone(),
             ForgetTarget::ObjectId(_) => return Err(MnemeError::CapDenied),
         };
         let key_hash = logical_key.hash();
@@ -29,20 +75,30 @@ impl Store {
             return Err(MnemeError::Forgotten);
         }
 
+        let pre_root = self.current_root()?;
+        enforce_external_action(
+            action_receipt,
+            action_commit_forget(&target, mode),
+            cap,
+            &pre_root,
+        )?;
+
         let object_id = object_id_for_key(self.key_index.tree(), &key_hash)?;
         let object_bytes = self.objects.get(&object_id).cloned();
 
         layout::begin_transaction(&self.path)?;
         pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
+        let mut shred_outcome: Option<ShredOutcome> = None;
         let result = (|| -> Result<(layout::Tombstone, mneme_core::Root), MnemeError> {
             match mode {
                 ForgetMode::Shred => {
-                    forget_shred(ShredForgetInput {
+                    let shred = forget_shred(ShredForgetInput {
                         logical_key: &logical_key,
                         key_index: self.key_index.tree_mut(),
                         vault: &mut *self.vault,
                         object_bytes: object_bytes.as_deref(),
                     })?;
+                    shred_outcome = Some(shred);
                     self.key_to_object.remove(&key_hash);
                     self.embeddings.remove(&object_id);
                 }
@@ -66,9 +122,6 @@ impl Store {
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
             self.hlc.tick_local(self.hlc.wall_ms.saturating_add(1));
             layout::persist_key_index_tombstone(&self.path, &key_hash)?;
-            // Shred drops the per-object embedding; record it incrementally rather
-            // than rewriting the whole `embeddings.json` sidecar (§22 K5). Redact
-            // leaves embeddings unchanged.
             if let ForgetMode::Shred = mode {
                 layout::persist_embeddings_remove(&self.path, &object_id)?;
             }
@@ -86,9 +139,34 @@ impl Store {
         })();
 
         match result {
-            Ok(v) => {
+            Ok((tombstone, root)) => {
                 layout::commit_transaction(&self.path)?;
-                Ok(v)
+                #[cfg(feature = "phase_iii_prove_forget")]
+                let proof = if mode != ForgetMode::Shred {
+                    None
+                } else {
+                    let shred = shred_outcome.ok_or(MnemeError::ProvenanceBroken)?;
+                    let absence = self.prove_absent(&logical_key)?;
+                    let witness = mneme_account::ForgetProofWitness {
+                        shred: &shred,
+                        absence: &absence,
+                    };
+                    let proof = mneme_account::prove_forget(&target, mode, &root, None, &witness)?;
+                    mneme_account::verify_forget_proof_bound(&proof, &root, &target, &shred)?;
+                    if proof.root_bound != root.preimage_hash {
+                        return Err(MnemeError::ReceiptRootMismatch);
+                    }
+                    if root.sequence <= pre_root.sequence {
+                        return Err(MnemeError::RootReplayed);
+                    }
+                    Some(proof)
+                };
+                Ok(ForgetInternalOutcome {
+                    tombstone,
+                    root,
+                    #[cfg(feature = "phase_iii_prove_forget")]
+                    proof,
+                })
             }
             Err(MnemeError::IncompleteTransaction) => Err(MnemeError::IncompleteTransaction),
             Err(e) => {
@@ -97,4 +175,11 @@ impl Store {
             }
         }
     }
+}
+
+struct ForgetInternalOutcome {
+    tombstone: layout::Tombstone,
+    root: mneme_core::Root,
+    #[cfg(feature = "phase_iii_prove_forget")]
+    proof: Option<mneme_core::ForgetProof>,
 }

@@ -55,5 +55,8 @@ cargo test -p mneme-forget -- --nocapture
 ## Status
 
 **Mitigated (P3-2 software slice):** witness + absence forgeries fail closed when
-`phase_iii_verify` is enabled; default build remains `UnsupportedVersion`. Full
-store-path mandatory forget receipts are **out of scope** (separate task).
+`phase_iii_verify` is enabled; default build remains `UnsupportedVersion`.
+
+**Store path (2026-06-04):** shred `forget_with_proof` mints and verifies `ForgetProof` when
+`mneme-store/phase_iii_prove_forget` (+ `phase_iii_verify`) are enabled (default **off**).
+`root_bound` is the post-commit root; monotonic `sequence` rejects stale bindings (A-REPLAY).

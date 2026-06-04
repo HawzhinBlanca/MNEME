@@ -92,6 +92,12 @@ run_phase_two_three_four_redteam() {
     bash -c 'cargo test -p mneme-account --features phase_iii_verify redteam -- --nocapture && cargo test -p mneme-account --features phase_iii_verify redteam_forget -- --nocapture && cargo test -p mneme-account --features phase_iii_verify --test prove_forget -- --nocapture && cargo test -p mneme-account --features phase_iii_bind_action --test bind_action -- --nocapture && cargo test -p mneme-account --test fail_closed -- --nocapture'
   run_step "Store bind_external_action (gate-off + phase_iii_bind)" \
     bash -c 'cargo test -p mneme-store --test phase_iii_bind bind_external_action_fail_closed -- --nocapture && cargo test -p mneme-store --features phase_iii_bind --test phase_iii_bind -- --nocapture'
+  run_step "Store mandatory ActionReceipt policy (phase_iii_require_action)" \
+    cargo test -p mneme-store --features phase_iii_bind,phase_iii_require_action --test phase_iii_policy -- --nocapture
+  run_step "Store ForgetProof on forget (phase_iii_prove_forget)" \
+    cargo test -p mneme-store --features phase_iii_prove_forget --test phase_iii_forget -- --nocapture
+  run_step "MCP ActionReceipt bind (phase_iii_bind)" \
+    cargo test -p mneme-mcp --features phase_iii_bind --test phase_iii_mcp -- --nocapture
   run_step "Federation cert forgery (mneme-index)" \
     cargo test -p mneme-index forgery -- --nocapture
 }
