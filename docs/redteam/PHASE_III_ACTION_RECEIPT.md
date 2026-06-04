@@ -4,13 +4,13 @@
 
 ## What
 
-Phase III P3-1 adds Ed25519 signing over `ActionReceipt::signable_preimage` behind the
+Phase III P3-1 adds Ed25519 signing over the BLAKE3 digest from `ActionReceipt::signable_preimage` (`MNEME-action-rcpt-v3` domain tag over `encode_payload`) behind the
 `phase_iii_verify` Cargo feature (default **off**). When the feature is off,
 `mneme-account` rejects with `UnsupportedVersion` — no fabricated receipt enters the store path.
 
 When the feature is on (CI / opt-in builds), offline verify covers:
 
-- detached signature over the provisional preimage (no domain tag yet)
+- detached signature over the domain-tagged BLAKE3 digest (not raw `encode_payload` bytes)
 - optional `cognition_cert_commit` presence byte in the preimage
 - bound verify: action, capability, root must match after sig check
 
@@ -23,6 +23,7 @@ When the feature is on (CI / opt-in builds), offline verify covers:
 | Tampered preimage | Mutate `action_commit` / `root_bound` after mint | `RootSigInvalid` |
 | Spliced cert commit | Copy `cognition_cert_commit` from another receipt | `RootSigInvalid` |
 | Empty signature | Clear sig vector | `RootSigInvalid` |
+| Raw payload sig | Sign `encode_payload` without domain tag | `RootSigInvalid` |
 | Bound mismatch | Valid sig but wrong action/root/cap at bound gate | `ProvenanceBroken` / `ReceiptRootMismatch` / `CapMalformed` |
 | Gate-off bypass | Present forged wire when `phase_iii_verify` disabled | `UnsupportedVersion` (never Ok) |
 

@@ -243,7 +243,7 @@ fn crossref_appendix_b_mst_convergence_byte_exact() {
 }
 
 #[test]
-fn crossref_cognition_cert_v1_byte_exact() {
+fn crossref_cognition_cert_byte_exact() {
     use mneme_crossref::procedure::{DistanceMetric, Procedure, ProcedureAlgo};
     use mneme_crossref::wire_cert;
 
@@ -299,4 +299,9 @@ fn crossref_identity_digests_exclude_nondeterministic_inputs() {
             );
         }
     }
+}
+
+#[test]
+fn crossref_cognition_cert_v1_byte_exact() {
+    crossref_cognition_cert_byte_exact();
 }

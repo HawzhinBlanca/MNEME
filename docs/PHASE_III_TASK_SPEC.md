@@ -78,7 +78,7 @@ pilot sign-off; external audit passed.
 
 | Module | Phase III responsibility |
 |---|---|
-| `mneme-core` | `ActionReceipt`, `ForgetProof` wire skeletons (provisional, **not** §20.3-frozen yet); `ACTION_RECEIPT_VERSION` / `FORGET_PROOF_VERSION` |
+| `mneme-core` | `ActionReceipt` signable preimage **frozen** (`MNEME-action-rcpt-v3`); `ForgetProof` wire skeleton; `ACTION_RECEIPT_VERSION` / `FORGET_PROOF_VERSION` |
 | `mneme-account` | `bind_action` (P3-1) + `prove_forget` (P3-2) seams; `PHASE_III_GATE_OPEN` gate; fail-closed until implemented |
 | `mneme-verify` | Future `verify_action_receipt` / `verify_forget_proof` gates (budgeted) |
 | `mneme-store` | Wire `bind_action` into the action path; auditable forget events |
@@ -117,7 +117,8 @@ pilot sign-off; external audit passed.
 | 2026-06-04 | P3-2: `shred_witness_commit`, `prove_forget`/`mint_forget_proof` (`phase_iii_prove_forget`), `verify_forget_proof*` (`phase_iii_verify`); red-team doc | **Landed (P3-2 slice)** |
 | 2026-06-04 | Store-path mandatory `ActionReceipt` (`phase_iii_require_action`; default off); MCP optional bind (`mneme-mcp/phase_iii_bind`) | **Landed (P3-1 store slice)** |
 | 2026-06-04 | Store-path shred forget `ForgetProof` emit+verify (`phase_iii_prove_forget`; default off) | **Landed (P3-2 store slice)** |
-| — | Freeze `ActionReceipt` / `ForgetProof` into the §20.3 interface + pin domain tags | **Deferred** (post-review) |
+| 2026-06-04 | Freeze `ActionReceipt` domain tag `MNEME-action-rcpt-v3`; cert v2 draft wire frozen (`COGNITION_CERT_VERSION_V2_DRAFT`, proof vector) | **Done** |
+| — | Freeze `ForgetProof` domain tag | **Deferred** |
 | — | Bind cert v2 commit once Phase II finalizes cert v2 layout | **Deferred** (depends on Phase II) |
 | — | Lean/F* mechanized fail-closed proof (P3-3) | **Deferred** |
 | — | HSM/KMS custody, revocation, regulated pilot, 3rd-party audit (P3-4) | **Deferred** |
