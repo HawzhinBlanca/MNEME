@@ -198,6 +198,19 @@ mod redteam {
 
     /// Forgery: empty signature must not verify.
     #[test]
+    fn forgery_unsigned_domain_tag_preimage_rejects() {
+        let cap = sample_capability();
+        let root = sample_root();
+        let action = [0x0F; 32];
+        let mut receipt = mint_action_receipt(&sanctioner(), action, &cap, &root, None).unwrap();
+        receipt.signature = sanctioner().sign(&receipt.encode_payload()).to_vec();
+        assert_eq!(
+            verify_action_receipt(&receipt),
+            Err(MnemeError::RootSigInvalid)
+        );
+    }
+
+    #[test]
     fn forgery_empty_signature_rejects() {
         let cap = sample_capability();
         let root = sample_root();
