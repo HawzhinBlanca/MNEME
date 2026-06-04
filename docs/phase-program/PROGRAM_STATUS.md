@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator tip:** `master` @ `bf4d267` (2026-06-04) — merged `cursor/p4-federation-piop` (ec5b396 federation lab + merge-head); `cursor/redteam-ci-sweep`, `cursor/cert-v2-p3-freeze`, `cursor/strict-gates-production` already contained in `0633b17` integrator pass. Strict gates (`verify_*_strict`, `context_gate` off-by-default) on store/index/mnemed; TCB unchanged. `815e890` strict-gates branch superseded by integrator seam (not cherry-picked). `PHASE_GATE_LEVEL=full` — see gate table below.
+**Integrator tip:** `master` @ `a95121c` (2026-06-04) — merged `cursor/p4-federation-piop` (`ec5b396`), `cursor/redteam-ci-sweep` (`87b2a00`), `cursor/cert-v2-p3-freeze`, `cursor/strict-gates-production` (content also in `0633b17` integrator pass). Strict gates: `verify_*_strict` + cert v2 strict verify behind `context_gate` (off-by-default); mnemed `redteam_paths`. TCB unchanged. `815e890` superseded (not cherry-picked). **`PHASE_GATE_LEVEL=full` green** @ `a95121c`.
 
 **Prior:** Phase II no-injection @ `01abbbc`; P3 `PHASE_III_ENABLE_PATH.md`; federation 4 MiB embed cap.
 
@@ -41,9 +41,9 @@ Approx. program progress (software ceiling): **~62% done (13/21)**, **~19% parti
 | `cursor/phase-ii-max` | `14a87df` | Yes |
 | `cursor/phase-iii-max` | `bfda439` | Yes |
 | `cursor/phase-iv-max` | `c8368d8` | Yes |
-| `cursor/cert-v2-p3-freeze` | `fe2c3a1` | Yes (in `0633b17`) |
-| `cursor/strict-gates-production` | `fe2c3a1` | Yes (in `0633b17`) |
-| `cursor/p4-federation-piop` | `ec5b396` | Yes (`65148d1`) |
+| `cursor/cert-v2-p3-freeze` | `c89dc67` | Yes (`974cb09`) |
+| `cursor/strict-gates-production` | — | Yes (`4a2f25f`) |
+| `cursor/p4-federation-piop` | `ec5b396` | Yes (`0d9dcc8`) |
 | `cursor/redteam-ci-sweep` | `87b2a00` | Yes (`cdf149a`) |
 
 **Not merged:** `815e890` (strict-gates sibling; redundant with `0633b17`/`b447a4f`). SHAs `561a802`, `2fc500c`, `d3a9b886` not present locally.
