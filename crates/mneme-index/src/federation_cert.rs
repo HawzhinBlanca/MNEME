@@ -6,6 +6,7 @@
 //!
 //! See `docs/PHASE_IV_TASK_SPEC.md` P4-2 and `docs/phase-program/INTEROP_SDK_STUB.md`.
 
+use blake3::Hasher;
 use mneme_core::{
     CborValue, DcborDecode, DcborEncode, Decoder, Encoder, MnemeError, from_bytes_strict,
 };
@@ -28,6 +29,24 @@ const F_ISSUER_ORG: u64 = 3;
 const F_COGNITION_CERT: u64 = 4;
 const F_MERGE_HEAD: u64 = 5;
 
+const FED_MERGE_HEAD_DOMAIN: &[u8] = b"MNEME-FED-MERGE-HEAD-v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FederationMergeHeadSketch {
+    pub key_index_root: [u8; 32],
+    pub dag_root: [u8; 32],
+    pub sequence: u64,
+}
+
+pub fn digest_federation_merge_head_sketch(sketch: &FederationMergeHeadSketch) -> [u8; 32] {
+    let mut h = Hasher::new();
+    h.update(FED_MERGE_HEAD_DOMAIN);
+    h.update(&sketch.key_index_root);
+    h.update(&sketch.dag_root);
+    h.update(&sketch.sequence.to_le_bytes());
+    *h.finalize().as_bytes()
+}
+
 /// Federated cognition certificate wire (decode-only sketch).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FederationCognitionCertWire {
@@ -48,9 +67,29 @@ pub fn decode_federation_cognition_cert_wire(
     from_bytes_strict(bytes).map_err(|_| MnemeError::CertificateInvalid)
 }
 
-/// Offline verification hook — **gate closed**: parses then rejects with
-/// [`MnemeError::UnsupportedVersion`] so malformed wires still surface parse errors.
 pub fn verify_federation_cognition_cert_wire(bytes: &[u8]) -> Result<(), MnemeError> {
+    verify_federation_cognition_cert_wire_with_merge_head(bytes, None)
+}
+
+pub fn verify_federation_cognition_cert_wire_with_merge_head(
+    bytes: &[u8],
+    expected_merge_head: Option<&FederationMergeHeadSketch>,
+) -> Result<(), MnemeError> {
+    let wire = verify_federation_cognition_cert_structural(bytes)?;
+    if let Some(sketch) = expected_merge_head {
+        if wire.merge_head_digest != digest_federation_merge_head_sketch(sketch) {
+            return Err(MnemeError::CertificateInvalid);
+        }
+    }
+    if !PHASE_IV_FEDERATION_GATE_OPEN {
+        return Err(MnemeError::UnsupportedVersion { got: wire.version });
+    }
+    Ok(())
+}
+
+fn verify_federation_cognition_cert_structural(
+    bytes: &[u8],
+) -> Result<FederationCognitionCertWire, MnemeError> {
     let wire = decode_federation_cognition_cert_wire(bytes)?;
     if wire.version != FEDERATION_COGNITION_CERT_VERSION {
         return Err(MnemeError::UnsupportedVersion { got: wire.version });
@@ -69,10 +108,7 @@ pub fn verify_federation_cognition_cert_wire(bytes: &[u8]) -> Result<(), MnemeEr
     if wire.merge_head_digest == [0u8; 32] {
         return Err(MnemeError::CertificateInvalid);
     }
-    if !PHASE_IV_FEDERATION_GATE_OPEN {
-        return Err(MnemeError::UnsupportedVersion { got: wire.version });
-    }
-    Ok(())
+    Ok(wire)
 }
 
 /// Fuzz entry: decode federated certificate wire only; must not panic.
@@ -371,6 +407,47 @@ mod tests {
         }
     }
 
+    fn sample_merge_head() -> FederationMergeHeadSketch {
+        FederationMergeHeadSketch {
+            key_index_root: [0x11; 32],
+            dag_root: [0x22; 32],
+            sequence: 42,
+        }
+    }
+    fn sample_wire_with_merge_head(sketch: &FederationMergeHeadSketch) -> Vec<u8> {
+        let wire = FederationCognitionCertWire {
+            version: FEDERATION_COGNITION_CERT_VERSION,
+            status: FEDERATION_CERT_DRAFT_STATUS.to_string(),
+            issuer_org_id: [0x01; 32],
+            cognition_cert_bytes: vec![0x99, 0xAA, 0xBB],
+            merge_head_digest: digest_federation_merge_head_sketch(sketch),
+        };
+        to_bytes_canonical(&wire).expect("encode")
+    }
+    #[test]
+    fn forgery_merge_head_mismatch_rejects() {
+        let sketch = sample_merge_head();
+        let bytes = sample_wire_with_merge_head(&sketch);
+        let stale = FederationMergeHeadSketch {
+            sequence: sketch.sequence + 1,
+            ..sketch
+        };
+        assert_eq!(
+            verify_federation_cognition_cert_wire_with_merge_head(&bytes, Some(&stale)),
+            Err(MnemeError::CertificateInvalid)
+        );
+    }
+    #[test]
+    fn merge_head_binding_ok_still_gate_closed() {
+        let sketch = sample_merge_head();
+        let bytes = sample_wire_with_merge_head(&sketch);
+        assert_eq!(
+            verify_federation_cognition_cert_wire_with_merge_head(&bytes, Some(&sketch)),
+            Err(MnemeError::UnsupportedVersion {
+                got: FEDERATION_COGNITION_CERT_VERSION
+            })
+        );
+    }
     /// Wire tamper: empty cognition cert rejected before gate check.
     #[test]
     fn forgery_empty_cognition_cert_rejects() {

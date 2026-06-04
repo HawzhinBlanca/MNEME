@@ -22,7 +22,7 @@ members = [
     "crates/mneme-crossref",
 ]
 default-members = ["crates/mneme-store"]
-exclude = ["fuzz"]
+exclude = ["fuzz", "scripts/piop-flat-prototype"]
 
 [workspace.package]
 version = "0.1.0"

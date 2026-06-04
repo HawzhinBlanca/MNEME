@@ -14,7 +14,8 @@ trust surface exists yet.
 | Forgery | Vector | Expected rejection |
 |---|---|---|
 | Replay | Resubmit identical wire bytes | Still `UnsupportedVersion` (no accept on replay) |
-| Merge-head mismatch | Stale/wrong CRDT head | CertificateInvalid via verify_federation_cognition_cert_wire_with_merge_head |
+| Bad merge head | Tamper `merge_head_digest` on wire | `UnsupportedVersion` or `CertificateInvalid` |
+| Merge-head mismatch | Stale/wrong CRDT head vs caller sketch | `CertificateInvalid` via verify_federation_cognition_cert_wire_with_merge_head |
 | Wire tamper | Truncate CBOR, flip cognition cert payload | `CertificateInvalid` |
 | Elevated status | `status = "verified"` instead of draft label | `CertificateInvalid` |
 | Empty embed | `cognition_cert_bytes` empty | `CertificateInvalid` |
