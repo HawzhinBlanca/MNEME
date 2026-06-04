@@ -47,7 +47,7 @@ pedersen_schnorr_zk = ["dep:curve25519-dalek", "dep:rand"]
 # same honest Pedersen+Schnorr backend; it does not add or claim Plonky2/FRI.
 plonky2_prover = ["pedersen_schnorr_zk"]
 # Phase IV-A research seam (UNIMPLEMENTED). Off by default; wired into NO recall/receipt/
-# verify path. The entry point panics (unimplemented!) so it can never fabricate a proof.
+# verify path. The entry point returns UnsupportedVersion so it can never fabricate a proof.
 # Proves NOTHING — not exact-NN, not Plonky2/FRI, not a SNARK. Pure research placeholder for
 # the zkRAG-style global exact-NN direction. See docs/research/PHASE_IV_A_PIOP_SPIKE.md and
 # the `piop_research_seam_is_honest` regression test in lib.rs.

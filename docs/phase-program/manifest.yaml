@@ -49,11 +49,24 @@ phases:
           - path: docs/phase-program/AUTOMATION.md
 
   - phase: Phase II — Context Gate (software-only increment)
-    status: partial
-    note: "Software slice on master; gate closed, no enclave claims."
+    status: done
+    note: "Software slice complete; gate closed, no enclave claims. P2-1/P2-2 hardware deferred."
     items:
+      - id: P2-1
+        title: TEE / GPU confidential compute (enclave verify)
+        status: deferred
+        evidence:
+          - path: docs/PHASE_II_TASK_SPEC.md
+          - path: docs/redteam/PHASE_II_TEE_DEFERRED.md
+          - path: docs/ROADMAP.md
+      - id: P2-2
+        title: In-enclave recall + remote attestation verify
+        status: deferred
+        evidence:
+          - path: docs/PHASE_II_TASK_SPEC.md
+          - path: docs/redteam/PHASE_II_TEE_DEFERRED.md
       - id: P2-3
-        title: Deterministic assembly tests (enclave-bound)
+        title: Deterministic assembly tests
         status: done
         evidence:
           - path: docs/ROADMAP.md
@@ -83,6 +96,24 @@ phases:
           - path: docs/PHASE_II_TASK_SPEC.md
           - path: crates/mneme-index/Cargo.toml
           - path: crates/mneme-context/tests/deterministic_assembly.rs
+      - id: P2-7
+        title: Output binding types + verify hook
+        status: done
+        evidence:
+          - path: docs/PHASE_II_TASK_SPEC.md
+          - path: crates/mneme-core/src/output.rs
+          - path: crates/mneme-core/src/domain.rs
+          - path: crates/mneme-gate/src/lib.rs
+          - path: crates/mneme-context/tests/phase_ii_integration.rs
+      - id: P2-8
+        title: Certificate v2 draft + enclave-report placeholder (fail-closed)
+        status: done
+        evidence:
+          - path: docs/PHASE_II_TASK_SPEC.md
+          - path: crates/mneme-index/src/cognition_cert.rs
+          - path: crates/mneme-index/tests/cognition_cert_v1.rs
+          - path: crates/mneme-core/src/enclave.rs
+          - path: crates/mneme-gate/src/lib.rs
 
   - phase: Phase III — Accountability scaffolding
     status: partial
