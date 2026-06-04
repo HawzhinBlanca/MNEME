@@ -7,3 +7,4 @@ description = "Context gate attestation verifier (fail-closed digest guard)"
 
 [dependencies]
 mneme-core.workspace = true
+mneme-context.workspace = true

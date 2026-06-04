@@ -3,10 +3,11 @@
 
 //! Context gate attestation helpers (Phase II/IV scaffolding).
 
+use mneme_context::assemble_verified_context;
 use mneme_core::{
     AssemblyProfile, ContextConsumptionAttestation, ENCLAVE_REPORT_PLACEHOLDER_STATUS,
-    EnclaveReportPlaceholder, MnemeError, OutputBinding, hash_certified_memory_set,
-    hash_context_assembled, hash_model_output,
+    EnclaveReportPlaceholder, Entry, MnemeError, ObjectId, OutputBinding,
+    hash_certified_memory_set, hash_context_assembled, hash_model_output,
 };
 
 pub const PHASE_II_GATE_OPEN: bool = false;
@@ -14,6 +15,15 @@ pub const PHASE_II_GATE_OPEN: bool = false;
 pub const CONTEXT_GATE_STATUS: &str =
     "context gate attestation verifier stub - gate closed until remote attestation ships";
 
+/// Bind a CCA to caller-supplied `assembled_context` + `certified_memory_set_payload` bytes
+/// (digest consistency only).
+///
+/// SECURITY (see `docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md`): this DOES NOT prove the
+/// "nothing injected" invariant on its own — it never cross-binds the assembled prompt's plaintext
+/// to the certified set, so an injected `assembled_context` paired with a legit certified payload
+/// passes. It is sound only when the caller has *itself* produced `assembled_context` from
+/// authenticated entries. For the offline no-injection proof use
+/// [`verify_consumption_attestation_strict`], which re-derives from the verified entries.
 pub fn verify_consumption_attestation(
     attestation: &ContextConsumptionAttestation,
     assembled_context: &[u8],
@@ -30,6 +40,37 @@ pub fn verify_consumption_attestation(
     }
     let certified_hash = hash_certified_memory_set(certified_memory_set_payload);
     if attestation.certified_memory_set_hash != certified_hash {
+        return Err(MnemeError::ProvenanceBroken);
+    }
+    Ok(())
+}
+
+/// SOUND "nothing injected" check: re-derive the assembled prompt and certified-set digest from
+/// the AUTHENTICATED verified-recall entries and require the CCA digests to match.
+///
+/// `assemble_verified_context` re-hashes every entry (`record.compute_id() == id`) and rebuilds the
+/// prompt in `result_ids` order, so a prover cannot inject content, reorder, drop, or substitute an
+/// entry: any deviation changes the re-derived `context_hash` (or fails entry authentication) and
+/// this gate fails closed. Unlike [`verify_consumption_attestation`], the prompt bytes are NOT
+/// supplied by (and therefore not trusted from) the prover — they are reconstructed from the
+/// authenticated certified set. This is the offline proof that the model was fed *exactly* the
+/// certified context and nothing else.
+///
+/// Trust assumption: `entries` are the verified recall result (membership proven upstream by the
+/// receipt/zkANN gate); this function additionally re-checks each `record.compute_id() == id`.
+pub fn verify_consumption_attestation_strict(
+    attestation: &ContextConsumptionAttestation,
+    result_ids: &[ObjectId],
+    entries: &[Entry],
+    expected_profile: &AssemblyProfile,
+) -> Result<(), MnemeError> {
+    if &attestation.assembly_profile != expected_profile {
+        return Err(MnemeError::SchemaDrift);
+    }
+    let outcome = assemble_verified_context(result_ids, entries, *expected_profile)?;
+    if attestation.context_hash != outcome.context_hash
+        || attestation.certified_memory_set_hash != outcome.certified_memory_set_hash
+    {
         return Err(MnemeError::ProvenanceBroken);
     }
     Ok(())
