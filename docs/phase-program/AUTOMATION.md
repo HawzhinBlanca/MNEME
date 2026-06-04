@@ -9,8 +9,9 @@ This checklist hard-blocks merges on the Phase program gates. Follow it for ever
 ## Runbook (PR / push to master)
 1. `git checkout master && git pull --rebase`
 2. `PHASE_GATE_LEVEL=quick bash scripts/ci/phase-program-gate.sh`
-3. Update `docs/phase-program/manifest.yaml` with new evidence paths and statuses.
+3. Update `docs/phase-program/manifest.yaml` with new evidence paths and statuses; keep `docs/PHASE_*_TASK_SPEC.md` checkboxes in sync (Phase I is **done** in manifest — HNSW honest label, not global exact-NN).
 4. If any gate fails, stop and fix before merging (fail-closed, no TODO stubs).
+5. After Phase I exit: integrator tags `phase-i` and bumps the tip line in `PROGRAM_STATUS.md`.
 
 ## Full gate
 - Nightly or manual: `PHASE_GATE_LEVEL=full bash scripts/ci/phase-program-gate.sh`
