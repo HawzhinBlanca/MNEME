@@ -59,6 +59,10 @@ impl TestHarness {
     pub fn tool_auth_header(&self) -> String {
         format!("Bearer {}", cap_to_b64(&self.tool_cap).expect("cap b64"))
     }
+
+    pub fn store(&self) -> mnemed::state::SharedStore {
+        self.server.state.store.clone()
+    }
 }
 
 impl Drop for TestHarness {

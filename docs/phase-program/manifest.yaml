@@ -183,6 +183,7 @@ phases:
           - path: docs/research/PHASE_IV_A_PIOP_STATEMENT.md
           - path: docs/research/PHASE_IV_A_PIOP_TOOLCHAIN_MATRIX.md
           - path: crates/mneme-index/src/piop_research.rs
+          - path: scripts/piop-flat-prototype/
       - id: P4-2
         title: Federated cognition certificates
         status: partial
@@ -205,3 +206,4 @@ phases:
         evidence:
           - path: docs/PHASE_IV_TASK_SPEC.md
           - path: scripts/ci/phase-iv-cost-report.sh
+          - path: scripts/piop-flat-prototype/

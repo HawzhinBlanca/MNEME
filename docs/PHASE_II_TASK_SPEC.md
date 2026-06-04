@@ -2,7 +2,7 @@
 
 **Context Gate (software-only increment)** — deterministic prompt assembly and context
 consumption attestation scaffolding with the gate **closed** (no enclave, no remote
-attestation claims). Baseline: Phase I on `master`, red-team/tag pending (P1-5).
+attestation claims). Baseline: Phase I tagged (`phase-i`); software slice on `master` @ `01abbbc` (strict gates); **`phase-ii-software` tag not cut** — TEE/RA deferred (P2-1/P2-2).
 
 **Status:** Draft spec for Phase II software slice. **Language:** Rust 1.86.0.
 **Honesty:** *Authenticated ≠ true; no enclave present; the gate stays closed;*

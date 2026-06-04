@@ -46,7 +46,7 @@ no-injection on its own and pointing callers to the strict gate.
 
 **Output binding (P2-7):** `verify_output_binding_strict` re-derives `context_hash` from the same
 authenticated entry set; bytes-only `verify_output_binding` documents the same limitation as the
-CCA bytes-only gate. Tests: `phase_ii_strict_output_binding_rejects_injected_context_hash`.
+CCA bytes-only gate. Tests: `phase_ii_strict_output_binding_rejects_injected_context_hash`, `phase_ii_bytes_only_output_binding_misses_injection_strict_catches_it`.
 
 **Re-exports:** `mneme-index` with `--features context_gate` exposes
 `verify_consumption_attestation_strict` and `verify_output_binding_strict` for future cert v2 /

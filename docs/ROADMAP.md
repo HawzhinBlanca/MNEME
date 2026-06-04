@@ -15,8 +15,8 @@ fail closed.
 | Phase | Goal | Unlocks (the new proof) | Exit gate | ~Effort | Spec |
 |---|---|---|---|---|---|
 | **0 ✅** | Verifiable memory | integrity · provenance · authorization of stored memory | `master` green; cross-OS determinism proven | shipped | `READINESS.md`, `MNEME_2.0_TASK_SPEC.md` |
-| **I ✅** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team closed @ `d433999` (`9462a04`); offline `verify-cert`; **`phase-i` git tag pending** | shipped | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
-| **II** | The **Context Gate** (the kernel) | the model consumed *exactly* the certified context | end-to-end PCC on one model in a TEE, offline-verifiable — software slice on `master`; TEE/RA pending | ~3–5 mo | [`PHASE_II_TASK_SPEC.md`](PHASE_II_TASK_SPEC.md) |
+| **I ✅** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team closed @ `d433999` (`9462a04`); offline `verify-cert`; git tag **`phase-i`** @ `42079de` (software pin: **`phase-i-software`** @ `be2b536` — predates TCB fail-open @ `a494fe0`; do not move without release policy) | shipped | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
+| **II** | The **Context Gate** (the kernel) | the model consumed *exactly* the certified context | strict CCA/output binding on `master` @ `01abbbc`; cert v2 draft + `context_gate` tests; TEE/RA pending — **`phase-ii-software` tag not cut** (software slice only; gate closed) | ~3–5 mo | [`PHASE_II_TASK_SPEC.md`](PHASE_II_TASK_SPEC.md) |
 | **III** | **Accountability** complete | who sanctioned the action · what was forgotten · machine-checked TCB | NIST 4-dim met; Lean/F* proof; regulated pilot + 3rd-party audit — wire slice on `master`; gate closed | ~4 mo | [`PHASE_III_TASK_SPEC.md`](PHASE_III_TASK_SPEC.md) |
 | **IV** | **Scale & standard** | global exact-NN; federated certificates; open spec | certificate is an interop standard; cost ≈ "default tier" — PIOP research only | ongoing | [`PHASE_IV_TASK_SPEC.md`](PHASE_IV_TASK_SPEC.md) |
 
