@@ -8,20 +8,14 @@ use mneme_core::{
 use mneme_store::{ContextGateRecallOpts, Store};
 
 pub fn decode_cca_b64(b64: &str) -> Result<ContextConsumptionAttestation, MnemeError> {
-    let bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        b64.trim(),
-    )
-    .map_err(|_| MnemeError::SchemaDrift)?;
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
+        .map_err(|_| MnemeError::SchemaDrift)?;
     decode_context_consumption_attestation(&bytes)
 }
 
 pub fn decode_output_binding_b64(b64: &str) -> Result<OutputBinding, MnemeError> {
-    let bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        b64.trim(),
-    )
-    .map_err(|_| MnemeError::SchemaDrift)?;
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
+        .map_err(|_| MnemeError::SchemaDrift)?;
     decode_output_binding(&bytes)
 }
 
@@ -64,11 +58,9 @@ pub fn recall_verified_context_gated_from_b64(
     };
     let model_identity = match input.model_identity_b64 {
         Some(b64) => {
-            let bytes = base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD,
-                b64.trim(),
-            )
-            .map_err(|_| MnemeError::SchemaDrift)?;
+            let bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
+                    .map_err(|_| MnemeError::SchemaDrift)?;
             Some(<[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| MnemeError::SchemaDrift)?)
         }
         None => None,
