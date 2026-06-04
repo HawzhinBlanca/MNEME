@@ -1,8 +1,8 @@
 # MNEME Phase Program — Status (master)
 
-**Date:** 2026-06-04 • **Branch:** `master` @ `293a42d` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
+**Date:** 2026-06-04 • **Branch:** `master` @ `11379e8` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Phase II/III/IV slices on master (ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`); `origin/cursor/phase-ii-max` and `origin/cursor/phase-iii-max` pushed @ target SHAs. `PHASE_GATE_LEVEL=full` green; `mneme-account` `phase_iii_verify` 9/9; `mneme-verify` TCB ≤500 (494/500).
+**Integrator (2026-06-04):** Red-team adversarial coverage for Phase II/III/IV new surfaces landed @ `11379e8`. `PHASE_GATE_LEVEL=full` green on clean master. **Guardian review pending** before treating P3-1 / federation verify as closed. Prior phase slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
 
 ---
 
@@ -21,9 +21,9 @@
 ## On master (software slices)
 
 - **Phase I:** zkANN-1 + bi-temporal + provenance + Certificate v1 + proof obligations **done** (P1-1..P1-5). Red-team **#3** / **#5** at `d433999`; TCB fail-open (provenance skip) fixed at `a494fe0`.
-- **Phase II:** Context Gate **software slice done** (P2-3..P2-8 @ `14a87df`). Output binding, enclave-report placeholder (verify always fail-closed), Certificate v2 draft behind `context_gate` (off by default). Integration tests in `crates/mneme-context/tests/phase_ii_integration.rs`.
-- **Phase III:** Accountability scaffolding **partial** @ `bfda439` — ActionReceipt Ed25519 verify behind `phase_iii_verify` (default off); ForgetProof shred/absence stubbed. Formal verifier proof and trust-ops **deferred** (P3-3, P3-4).
-- **Phase IV:** **Research slice** @ `c8368d8` — federation cert wire sketch (decode-only, gate closed), `piop_research` off-by-default; `docs/phase-program/INTEROP_SDK_STUB.md`. No global exact-NN prover, no cross-org verifier, no shipped interop SDK.
+- **Phase II:** Context Gate **software slice done** (P2-3..P2-8 @ `14a87df`). Output binding forgery surface documented + tested (`docs/redteam/PHASE_II_OUTPUT_BINDING.md`). Enclave-report placeholder (verify always fail-closed), Certificate v2 draft behind `context_gate` (off by default).
+- **Phase III:** Accountability scaffolding **partial** @ `bfda439` — ActionReceipt forgery surface documented + tested (`docs/redteam/PHASE_III_ACTION_RECEIPT.md`); Ed25519 verify behind `phase_iii_verify` (default off). ForgetProof shred/absence stubbed. P3-1 production path / TEE **not started**; formal proof and trust-ops **deferred** (P3-3, P3-4).
+- **Phase IV:** **Research slice** @ `c8368d8` — federation cert wire forgery surface documented + tested (`docs/redteam/PHASE_IV_FEDERATION_WIRE.md`); decode-only, gate closed. `piop_research` off-by-default. No global exact-NN prover, no cross-org verifier, no shipped interop SDK.
 
 Approx. program progress by item count: **~52% done (11/21)**, **~24% partial (5/21)**, **~24% deferred (5/21)** — honest, excluding hardware/TEE/PIOP delivery.
 
@@ -59,6 +59,9 @@ Approx. program progress by item count: **~52% done (11/21)**, **~24% partial (5
 - `docs/research/PHASE_IV_A_PIOP_SPIKE.md`
 - `crates/mneme-index/src/federation_cert.rs`
 - `docs/redteam/PHASE_II_TEE_DEFERRED.md`
+- `docs/redteam/PHASE_II_OUTPUT_BINDING.md`
+- `docs/redteam/PHASE_III_ACTION_RECEIPT.md`
+- `docs/redteam/PHASE_IV_FEDERATION_WIRE.md`
 - `docs/redteam/PHASE_I_PROVENANCE_SCOPED.md`
 - `docs/redteam/PHASE_I_HNSW_AUDIT_OVERCLAIM.md`
 - `docs/redteam/PHASE_I_TCB_FAILOPEN_PROVENANCE.md`
