@@ -19,6 +19,8 @@ mneme-index.workspace = true
 mneme-forget.workspace = true
 mneme-crdt.workspace = true
 mneme-account.workspace = true
+mneme-context = { workspace = true, optional = true }
+mneme-gate = { workspace = true, optional = true }
 rand.workspace = true
 blake3.workspace = true
 ciborium.workspace = true
@@ -29,6 +31,7 @@ libc = "0.2"
 
 [features]
 default = []
+context_gate = ["mneme-index/context_gate", "dep:mneme-context", "dep:mneme-gate"]
 phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
 phase_iii_verify = ["mneme-account/phase_iii_verify"]
 phase_iii_prove_forget = ["mneme-account/phase_iii_prove_forget", "phase_iii_verify"]
@@ -58,6 +61,11 @@ harness = true
 name = "chaos"
 path = "../../tests/chaos/mod.rs"
 harness = true
+
+[[test]]
+name = "phase_ii_context_gate"
+path = "tests/phase_ii_context_gate.rs"
+required-features = ["context_gate"]
 
 [[test]]
 name = "phase_iii_bind"

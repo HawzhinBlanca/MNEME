@@ -3,12 +3,16 @@
 //! **INV-5:** Agent-facing reads use [`Store::recall_verified`] / [`Store::recall_verified_default`]
 //! only. Untrusted recall assembly is `pub(crate)` inside this crate.
 
+#[cfg(feature = "context_gate")]
+pub use context_gate::ContextGateRecallOpts;
 mod action;
 pub use action::{
     action_commit_forget, action_commit_promote, action_commit_remember, enforce_external_action,
 };
 mod atomic;
 mod certify;
+#[cfg(feature = "context_gate")]
+mod context_gate;
 mod forget;
 mod layout;
 mod merge;

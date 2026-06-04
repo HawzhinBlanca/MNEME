@@ -1,5 +1,7 @@
 //! Cognition Certificate v1 — offline-verifiable bundle (Phase I P1-4).
 
+#[cfg(feature = "context_gate")]
+use crate::context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
 use crate::receipt::SemanticRecallReceipt;
 use crate::verify::verify_semantic_receipt_vo_zkann;
 #[cfg(feature = "context_gate")]
@@ -7,6 +9,11 @@ use mneme_core::COGNITION_CERT_VERSION_V2_DRAFT;
 use mneme_core::{
     AsOf, COGNITION_CERT_VERSION, CborValue, DcborDecode, DcborEncode, Decoder, Encoder,
     MnemeError, RetrievalProofLevel, Root, from_bytes_strict, to_bytes_canonical,
+};
+#[cfg(feature = "context_gate")]
+use mneme_core::{
+    ContextConsumptionAttestation, Entry, OutputBinding, decode_context_consumption_attestation,
+    decode_output_binding,
 };
 use mneme_core::{ObjectId, Procedure, RootPreimage};
 use mneme_crypto::{TrustConfig, public_key_from_bytes, verify_signature_bytes};
@@ -35,6 +42,8 @@ pub struct ContextAttestationDraft {
     pub output_digest: Option<[u8; 32]>,
     /// Honest label carried on-wire so verifiers fail-closed if an attestor claims more.
     pub status: String,
+    pub consumption_attestation: Option<ContextConsumptionAttestation>,
+    pub output_binding: Option<OutputBinding>,
 }
 
 #[cfg(feature = "context_gate")]
@@ -44,6 +53,21 @@ impl ContextAttestationDraft {
             context_digest,
             output_digest: None,
             status: CONTEXT_GATE_DRAFT_STATUS.to_string(),
+            consumption_attestation: None,
+            output_binding: None,
+        }
+    }
+
+    pub fn strict(
+        attestation: ContextConsumptionAttestation,
+        output_binding: Option<OutputBinding>,
+    ) -> Self {
+        Self {
+            context_digest: attestation.context_hash,
+            output_digest: output_binding.as_ref().map(|b| b.output_hash),
+            status: CONTEXT_GATE_STRICT_STATUS.to_string(),
+            consumption_attestation: Some(attestation),
+            output_binding,
         }
     }
 }
@@ -173,8 +197,69 @@ pub fn verify_cognition_certificate_v2_draft(
     if wire.attestation.status != CONTEXT_GATE_DRAFT_STATUS {
         return Err(MnemeError::CertificateInvalid);
     }
+    if wire.attestation.consumption_attestation.is_some()
+        || wire.attestation.output_binding.is_some()
+    {
+        return Err(MnemeError::CertificateInvalid);
+    }
     let committed_leaf_count = wire.receipt.verification_object.candidates.len();
     verify_semantic_receipt_vo_zkann(&wire.receipt, proc, committed_leaf_count)?;
+    Ok(root)
+}
+
+/// Offline verification for Phase II strict context gate (gate open + `context_gate` feature).
+#[cfg(feature = "context_gate")]
+pub fn verify_cognition_certificate_v2_draft_strict(
+    bytes: &[u8],
+    trust: &TrustConfig,
+    proc: &Procedure,
+    entries: &[Entry],
+    model_output: Option<&[u8]>,
+    model_identity: Option<&[u8; 32]>,
+) -> Result<Root, MnemeError> {
+    let wire: CognitionCertWireV2Draft =
+        from_bytes_strict(bytes).map_err(|_| MnemeError::CertificateInvalid)?;
+    if wire.version != COGNITION_CERT_VERSION_V2_DRAFT {
+        return Err(MnemeError::UnsupportedVersion { got: wire.version });
+    }
+    let root = stored_root_to_root(&wire.stored_root)?;
+    verify_root_offline(&root, trust)?;
+    if wire.receipt.root_bound != root.preimage_hash
+        || !wire.receipt.binds_to_semantic_commit(&root.semantic_commit)
+    {
+        return Err(MnemeError::ReceiptRootMismatch);
+    }
+    if let Some(seq) = wire.as_of_seq {
+        if root.sequence != seq {
+            return Err(MnemeError::CertificateInvalid);
+        }
+    }
+    if let Some(z) = &wire.receipt.zkann {
+        if z.level != wire.level {
+            return Err(MnemeError::CertificateInvalid);
+        }
+    }
+    if wire.attestation.status != CONTEXT_GATE_STRICT_STATUS {
+        return Err(MnemeError::CertificateInvalid);
+    }
+    let att = wire
+        .attestation
+        .consumption_attestation
+        .as_ref()
+        .ok_or(MnemeError::CertificateInvalid)?;
+    if att.context_hash != wire.attestation.context_digest {
+        return Err(MnemeError::CertificateInvalid);
+    }
+    let committed_leaf_count = wire.receipt.verification_object.candidates.len();
+    verify_semantic_receipt_vo_zkann(&wire.receipt, proc, committed_leaf_count)?;
+    apply_context_gate_strict(
+        &wire.receipt.verification_object.result_ids,
+        entries,
+        att,
+        wire.attestation.output_binding.as_ref(),
+        model_output,
+        model_identity,
+    )?;
     Ok(root)
 }
 
@@ -382,6 +467,12 @@ impl DcborEncode for ContextAttestationDraft {
         if self.output_digest.is_some() {
             n += 1;
         }
+        if self.consumption_attestation.is_some() {
+            n += 1;
+        }
+        if self.output_binding.is_some() {
+            n += 1;
+        }
         enc.begin_map(n)?;
         enc.encode_unsigned(1)?;
         enc.encode_text(&self.status)?;
@@ -390,6 +481,14 @@ impl DcborEncode for ContextAttestationDraft {
         if let Some(digest) = self.output_digest {
             enc.encode_unsigned(3)?;
             enc.encode_bytes(&digest)?;
+        }
+        if let Some(att) = &self.consumption_attestation {
+            enc.encode_unsigned(F_CCA)?;
+            enc.encode_bytes(&mneme_core::encode_context_consumption_attestation(att)?)?;
+        }
+        if let Some(binding) = &self.output_binding {
+            enc.encode_unsigned(F_OUTPUT_BINDING)?;
+            enc.encode_bytes(&mneme_core::encode_output_binding(binding)?)?;
         }
         Ok(())
     }
@@ -402,12 +501,22 @@ impl DcborDecode for ContextAttestationDraft {
         let mut status = None;
         let mut context_digest = None;
         let mut output_digest = None;
+        let mut consumption_attestation = None;
+        let mut output_binding = None;
         for (key, value) in map {
             let field = parse_u64_field_key(&key)?;
             match field {
                 1 => status = Some(parse_text(&value)?),
                 2 => context_digest = Some(parse_fixed32(&value)?),
                 3 => output_digest = Some(parse_fixed32(&value)?),
+                f if f == F_CCA => {
+                    consumption_attestation = Some(decode_context_consumption_attestation(
+                        &parse_bytes(&value)?,
+                    )?);
+                }
+                f if f == F_OUTPUT_BINDING => {
+                    output_binding = Some(decode_output_binding(&parse_bytes(&value)?)?);
+                }
                 _ => return Err(MnemeError::UnknownField { field: 0 }),
             }
         }
@@ -415,6 +524,8 @@ impl DcborDecode for ContextAttestationDraft {
             status: status.ok_or(MnemeError::CertificateInvalid)?,
             context_digest: context_digest.ok_or(MnemeError::CertificateInvalid)?,
             output_digest,
+            consumption_attestation,
+            output_binding,
         })
     }
 }

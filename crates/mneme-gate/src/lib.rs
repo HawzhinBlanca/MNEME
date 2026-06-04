@@ -161,6 +161,11 @@ mod tests {
     }
 
     #[test]
+    fn gate_closed_by_default() {
+        assert!(!PHASE_II_GATE_OPEN);
+    }
+
+    #[test]
     fn consumption_attestation_accepts_matching_hashes() {
         let (a, c, p, att) = sample_attestation();
         verify_consumption_attestation(&att, &a, &c, &p).unwrap();
