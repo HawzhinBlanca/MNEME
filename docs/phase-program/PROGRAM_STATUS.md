@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Merged docs→p3→p4 on `master` @ `81e067b`; `PHASE_GATE_LEVEL=full` green. Phase I **closed in docs** (manifest-aligned). P3-1/P3-2 store paths feature-gated (default off). P4 research slice: PIOP docs, federation verify sketch, interop/crossref, cost harness — no prover/SDK. P3-3 Lean + P3-4 trust-ops deferred; P2-1/P2-2 TEE deferred.
+**Integrator (2026-06-04):** Merged docs→p3→p4 on `master` @ `8191d1c`; `PHASE_GATE_LEVEL=full` + `phase-program-gate` green. Phase I **closed in docs**; **`phase-i` tag** at this tip (`phase-i-software` @ `58b13fa` unchanged). P3-1/P3-2 store paths feature-gated (default off). P4 research slice: PIOP docs, federation verify sketch, interop/crossref, cost harness — no prover/SDK. P3-3 Lean + P3-4 trust-ops deferred; P2-1/P2-2 TEE deferred.
 
 ---
 
