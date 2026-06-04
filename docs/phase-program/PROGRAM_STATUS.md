@@ -1,8 +1,8 @@
 # MNEME Phase Program — Status (master)
 
-**Date:** 2026-06-04 • **Branch:** `master` @ `673b210` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
+**Date:** 2026-06-04 • **Branch:** `master` @ `293a42d` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Merged `origin/cursor/phase-ii-max` → `origin/cursor/phase-iii-max` → `origin/cursor/phase-iv-max` on master (ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`). `PHASE_GATE_LEVEL=full` green post-merge; `mneme-verify` TCB 494/500 lines.
+**Integrator (2026-06-04):** Phase II/III/IV slices on master (ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`); `origin/cursor/phase-ii-max` and `origin/cursor/phase-iii-max` pushed @ target SHAs. `PHASE_GATE_LEVEL=full` green; `mneme-account` `phase_iii_verify` 9/9; `mneme-verify` TCB ≤500 (494/500).
 
 ---
 
