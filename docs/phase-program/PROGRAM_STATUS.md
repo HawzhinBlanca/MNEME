@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Phase II no-injection binding: `verify_consumption_attestation_strict` + `verify_output_binding_strict` (re-derive context from verified recall entries); red-team `PHASE_II_CONTEXT_GATE_NO_INJECTION.md`. P3 enable-path doc `PHASE_III_ENABLE_PATH.md`. Federation sketch: 4 MiB embed cap. Prior tip `cd9f1b5`; see git log for merge SHA after this push.
+**Integrator (2026-06-04):** Phase II no-injection binding @ `01abbbc` on `origin/master`: `verify_consumption_attestation_strict` + `verify_output_binding_strict`; red-team `PHASE_II_CONTEXT_GATE_NO_INJECTION.md`. P3 enable-path `PHASE_III_ENABLE_PATH.md`. Federation sketch: 4 MiB embed cap. `PHASE_GATE_LEVEL=full` green post-merge.
 
 ---
 
