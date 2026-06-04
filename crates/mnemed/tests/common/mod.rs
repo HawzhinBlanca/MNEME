@@ -56,10 +56,12 @@ impl TestHarness {
         format!("Bearer {}", cap_to_b64(&self.agent_cap).expect("cap b64"))
     }
 
+    #[allow(dead_code)]
     pub fn tool_auth_header(&self) -> String {
         format!("Bearer {}", cap_to_b64(&self.tool_cap).expect("cap b64"))
     }
 
+    #[allow(dead_code)]
     pub fn store(&self) -> mnemed::state::SharedStore {
         self.server.state.store.clone()
     }

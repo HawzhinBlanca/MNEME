@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator tip:** `master` @ `2908994` (2026-06-04) — merged `cursor/p4-federation-piop` (ec5b396 federation lab + merge-head); `cursor/redteam-ci-sweep`, `cursor/cert-v2-p3-freeze`, `cursor/strict-gates-production` already contained in `0633b17` integrator pass. Strict gates (`verify_*_strict`, `context_gate` off-by-default) on store/index/mnemed; TCB unchanged. `815e890` strict-gates branch superseded by integrator seam (not cherry-picked). `PHASE_GATE_LEVEL=full` — see gate table below.
+**Integrator tip:** `master` @ `da64cbc` (2026-06-04) — merged `cursor/p4-federation-piop` (ec5b396 federation lab + merge-head); `cursor/redteam-ci-sweep`, `cursor/cert-v2-p3-freeze`, `cursor/strict-gates-production` already contained in `0633b17` integrator pass. Strict gates (`verify_*_strict`, `context_gate` off-by-default) on store/index/mnemed; TCB unchanged. `815e890` strict-gates branch superseded by integrator seam (not cherry-picked). `PHASE_GATE_LEVEL=full` — see gate table below.
 
 **Prior:** Phase II no-injection @ `01abbbc`; P3 `PHASE_III_ENABLE_PATH.md`; federation 4 MiB embed cap.
 
