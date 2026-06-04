@@ -8,8 +8,6 @@
 #![deny(warnings)]
 
 mod cognition_cert;
-#[cfg(feature = "context_gate")]
-mod context_gate;
 mod commit;
 mod distance;
 mod error;
@@ -61,8 +59,6 @@ pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
 pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkann_attachment};
 
 #[cfg(feature = "context_gate")]
-pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
-#[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
     verify_cognition_certificate_v2_draft,
@@ -72,10 +68,8 @@ pub use cognition_cert::{
 };
 pub use federation_cert::{
     FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
-    FederationMergeHeadSketch, PHASE_IV_FEDERATION_GATE_OPEN,
-    decode_federation_cognition_cert_wire, digest_federation_merge_head_sketch,
+    PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
     fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
-    verify_federation_cognition_cert_wire_with_merge_head,
 };
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::{

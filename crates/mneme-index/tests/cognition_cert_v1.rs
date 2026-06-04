@@ -181,14 +181,26 @@ fn cognition_cert_v2_status_mismatch_rejects() {
 fn cognition_cert_v2_byte_tamper_rejects() {
     let mut index = SemanticIndex::new();
     let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
-    index.insert(oid(4), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap()).unwrap();
-    let receipt = index.recall_receipt_zkann(&proc(), &q, [0xbb; 32], RetrievalProofLevel::ExactDominance).unwrap();
+    index
+        .insert(oid(4), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
+        .unwrap();
+    let receipt = index
+        .recall_receipt_zkann(&proc(), &q, [0xbb; 32], RetrievalProofLevel::ExactDominance)
+        .unwrap();
     let stored = fixture_root(index.semantic_commit());
     let attestation = ContextAttestationDraft::placeholder([0x33; 32]);
-    let mut bytes = assemble_cognition_certificate_v2_draft(&stored, &receipt, None, attestation).unwrap();
-    if let Some(b) = bytes.last_mut() { *b ^= 0xff; }
+    let mut bytes =
+        assemble_cognition_certificate_v2_draft(&stored, &receipt, None, attestation).unwrap();
+    if let Some(b) = bytes.last_mut() {
+        *b ^= 0xff;
+    }
     let trust = TrustConfig::new([0u8; 32]);
     let err = verify_cognition_certificate_v2_draft(&bytes, &trust, &proc()).unwrap_err();
-    assert!(matches!(err, MnemeError::RootSigInvalid | MnemeError::CertificateInvalid | MnemeError::SerializationNonCanonical | MnemeError::SchemaDrift));
+    assert!(matches!(
+        err,
+        MnemeError::RootSigInvalid
+            | MnemeError::CertificateInvalid
+            | MnemeError::SerializationNonCanonical
+            | MnemeError::SchemaDrift
+    ));
 }
-
