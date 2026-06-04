@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** Worker merge docs→p3→p4 on `master`. Phase I **closed in docs** (manifest-aligned); **`git tag phase-i` pending** full lane green. P3-1/P3-2 store paths feature-gated (default off). P4 research slice: PIOP docs, federation verify sketch, interop/crossref, cost harness — no prover/SDK. P3-3 Lean + P3-4 trust-ops deferred; P2-1/P2-2 TEE deferred.
+**Integrator (2026-06-04):** Merged docs→p3→p4 on `master` @ `81e067b`; `PHASE_GATE_LEVEL=full` green. Phase I **closed in docs** (manifest-aligned). P3-1/P3-2 store paths feature-gated (default off). P4 research slice: PIOP docs, federation verify sketch, interop/crossref, cost harness — no prover/SDK. P3-3 Lean + P3-4 trust-ops deferred; P2-1/P2-2 TEE deferred.
 
 ---
 
