@@ -97,7 +97,7 @@ case "$LANE" in
     # check. It is explicitly NOT the §17.7 cross-host milestone, which stays
     # UNPROVEN until run with MNEME_SECOND_HOST=<distinct host> (and, for a strict
     # release gate, MNEME_STRICT_CROSS_HOST=1 to force fail-closed without a peer).
-    echo "validation-lane (full): §17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
+    echo "validation-lane (full): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
     echo "validation-lane (full): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."
     bash scripts/ci/determinism-two-machine.sh
     bash scripts/ci/cross-implementation-vectors.sh
@@ -111,7 +111,7 @@ case "$LANE" in
       --out "$ROOT/out/ci-foundation-gate" \
       --timestamp "1970-01-01T00:00:00Z"
     bash scripts/ci/check-foundation-digests.sh
-    # B5: agent-session sim over live MCP stdio (not live Claude API — see mcp-agent-sim.sh).
+    # B5: agent-session sim over live MCP stdio; see mcp-agent-sim.sh.
     bash scripts/ci/mcp-agent-sim.sh
     ;;
 
