@@ -106,6 +106,10 @@ case "$LANE" in
     # §17.4 sustained fuzz (≥30s/target, seeded corpus); 16-run smoke is quick-only.
     bash scripts/ci/fuzz-meaningful.sh
     bash scripts/ci/check-test-vectors.sh
+    # Re-materialize report after workspace/fuzz (prior ci-foundation-gate tree may be gone).
+    cargo run -p mneme-cli -- determinism foundation-gate \
+      --out "$ROOT/out/ci-foundation-gate" \
+      --timestamp "1970-01-01T00:00:00Z"
     bash scripts/ci/check-foundation-digests.sh
     # B5: agent-session sim over live MCP stdio (not live Claude API — see mcp-agent-sim.sh).
     bash scripts/ci/mcp-agent-sim.sh
