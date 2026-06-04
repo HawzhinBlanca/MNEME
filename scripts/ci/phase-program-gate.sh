@@ -84,8 +84,19 @@ run_phase_one_targets() {
     bash scripts/ci/cross-implementation-vectors.sh
 }
 
+run_phase_two_redteam_quick() {
+  section "Phase II red-team (quick)"
+  run_step "Context gate strict vs bytes-only (mneme-context)" \
+    cargo test -p mneme-context phase_ii_bytes_only -- --nocapture
+  run_step "Cognition cert v2 tamper (mneme-index, context_gate)" \
+    cargo test -p mneme-index --features context_gate cognition_cert_v2 -- --nocapture
+  run_step "mnemed A-DB recall paths (http/grpc/unix)" \
+    cargo test -p mnemed --test redteam_paths -- --nocapture
+}
+
 run_phase_two_three_four_redteam() {
   section "Phase II/III/IV red-team (new surfaces)"
+  run_phase_two_redteam_quick
   run_step "Output binding forgery (mneme-core + mneme-gate)" \
     bash -c 'cargo test -p mneme-core output:: -- --nocapture && cargo test -p mneme-gate forgery -- --nocapture'
   run_step "ActionReceipt + ForgetProof (mneme-account, phase_iii_verify + gate-off)" \

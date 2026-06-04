@@ -140,7 +140,7 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 | 2026-06-03 | Phase I spec authored (from `VISION_PROOF_CARRYING_COGNITION.md`) | Done |
 | 2026-06-03 | Phase I public seams scaffolded: `AsOf`, `Store::recall_verified_at`, `Store::provenance_scoped_recall`, `mneme certify`, and `mneme verify-cert`; all fail closed with tests. | **Landed (initial gated scaffold; superseded by full integration on `master`)** |
 | 2026-06-03 | Phase I full integration (`7b19c13`): zkANN-1 dominance + HNSW prover-asserted-set path; bi-temporal `recall_verified_at`; provenance-scoped recall; Cognition Certificate v1 (`mneme certify` / `verify-cert`); `mneme-crossref` vectors exercised; CLI certify path wired. | **Landed** |
-| 2026-06-04 | Red-team #3 (provenance-scoped) + #5 (HNSW honesty) closed @ `d433999`; TCB fail-open (provenance skip) @ `a494fe0`; `validation-lane full` + `cognition_cert_parse` fuzz green @ `9462a04`. | **Done (software-complete; `phase-i` release tag pending)** |
+| 2026-06-04 | Red-team #3 (provenance-scoped) + #5 (HNSW honesty) closed @ `d433999`; TCB fail-open (provenance skip) @ `a494fe0`; `validation-lane full` + `cognition_cert_parse` fuzz green @ `9462a04`. | **Done (software-complete; `phase-i` @ `42079de`; `phase-i-software` @ `be2b536` predates `a494fe0`)** |
 
 ---
 

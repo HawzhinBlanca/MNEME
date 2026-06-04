@@ -2,6 +2,8 @@
 
 **Date:** 2026-06-04 • **Branch:** `master` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
+**Integrator prep (`cursor/redteam-ci-sweep`):** quick gate — mnemed `redteam_paths`, cert v2 byte-tamper, Phase II bytes-only/strict regressions; ROADMAP tag notes. Re-pin tip after merge.
+
 **Integrator (2026-06-04):** Phase II no-injection binding @ `01abbbc` on `origin/master`: `verify_consumption_attestation_strict` + `verify_output_binding_strict`; red-team `PHASE_II_CONTEXT_GATE_NO_INJECTION.md`. P3 enable-path `PHASE_III_ENABLE_PATH.md`. Federation sketch: 4 MiB embed cap. `PHASE_GATE_LEVEL=full` green post-merge.
 
 ---
@@ -20,7 +22,7 @@
 
 ## On master (software slices)
 
-- **Phase I:** zkANN-1 + bi-temporal + provenance + Certificate v1 + proof obligations **done** (P1-1..P1-5). Red-team **#3** / **#5** at `d433999`; TCB fail-open (provenance skip) fixed at `a494fe0`.
+- **Phase I:** zkANN-1 + bi-temporal + provenance + Certificate v1 + proof obligations **done** (P1-1..P1-5). Red-team **#3** / **#5** at `d433999`; TCB fail-open (provenance skip) fixed at `a494fe0`. Tag **`phase-i`** @ `42079de`; **`phase-i-software`** @ `be2b536` predates `a494fe0`.
 - **Phase II:** Context Gate **software slice done** (P2-3..P2-8). **No-injection / strict binding:** CCA and output binding re-derive `context_hash` from authenticated entries (`verify_*_strict` in `mneme-gate`); bytes-only gates documented as unsound alone (`docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md`, `PHASE_II_OUTPUT_BINDING.md`). Enclave-report placeholder fail-closed; cert v2 draft behind `context_gate` (off by default).
 - **Phase III:** Accountability scaffolding **partial** — P3-1 store/MCP `ActionReceipt` policy (`phase_iii_require_action` / `phase_iii_bind`; default off; enable path `docs/phase-program/PHASE_III_ENABLE_PATH.md`). P3-2 store shred `forget_with_proof` (`phase_iii_prove_forget`; default off). P3-3 Lean + P3-4 trust-ops **deferred**.
 - **Phase IV:** **Research slice** @ `1bedd6e` — PIOP statement + toolchain matrix (`docs/research/PHASE_IV_A_PIOP_*`); federation cert verify sketch + `federation_cert_verify` fuzz; interop stub + crossref notes; P4-4 cost-report harness (no production numbers). `piop_research` off-by-default. No global exact-NN prover, no cross-org verifier, no shipped interop SDK.

@@ -33,6 +33,10 @@ path = "tests/v11_object_sync.rs"
 name = "unix_api"
 path = "tests/unix_api.rs"
 
+[[test]]
+name = "redteam_paths"
+path = "tests/redteam_paths.rs"
+
 [dependencies]
 mneme-core.workspace = true
 mneme-crypto.workspace = true

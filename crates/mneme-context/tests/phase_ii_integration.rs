@@ -218,3 +218,28 @@ fn phase_ii_bytes_only_gate_misses_injection_strict_catches_it() {
         Err(MnemeError::ProvenanceBroken)
     );
 }
+
+#[test]
+fn phase_ii_bytes_only_output_binding_misses_injection_strict_catches_it() {
+    let entry = sample_entry(b"context-body");
+    let id = entry.id;
+    let outcome = assemble_verified_context(&[id], &[entry], ASSEMBLY_PROFILE_V1).unwrap();
+    let model_out = b"generated tokens";
+    let model_id = [0x77; 32];
+    let injected_ctx = b"MNEME-CTX-ASM-v1\nINJECTED-PROMPT".to_vec();
+    let mut binding = output_binding_from_assembly(&outcome, model_out, model_id);
+    binding.context_hash = hash_context_assembled(&injected_ctx);
+    verify_output_binding(&binding, &injected_ctx, model_out, &model_id).unwrap();
+    let entry2 = sample_entry(b"context-body");
+    assert_eq!(
+        verify_output_binding_strict(
+            &binding,
+            &[id],
+            &[entry2],
+            model_out,
+            &model_id,
+            &ASSEMBLY_PROFILE_V1
+        ),
+        Err(MnemeError::ProvenanceBroken),
+    );
+}
