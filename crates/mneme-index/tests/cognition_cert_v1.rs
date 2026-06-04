@@ -11,16 +11,11 @@ use mneme_index::{
 use mneme_root::StoredRoot;
 
 #[cfg(feature = "context_gate")]
-use mneme_context::{
-    ASSEMBLY_PROFILE_V1, assemble_verified_context, consumption_attestation_from_assembly,
-};
-#[cfg(feature = "context_gate")]
 use mneme_core::{Decoder, Encoder};
 #[cfg(feature = "context_gate")]
 use mneme_index::{
-    CONTEXT_GATE_STRICT_STATUS, ContextAttestationDraft, apply_context_gate_strict,
-    assemble_cognition_certificate_v2_draft, verify_cognition_certificate_v2_draft,
-    verify_cognition_certificate_v2_draft_strict,
+    ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
+    verify_cognition_certificate_v2_draft,
 };
 
 fn oid(b: u8) -> ObjectId {
