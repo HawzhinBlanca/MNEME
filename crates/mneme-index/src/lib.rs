@@ -113,8 +113,7 @@ pub const SEMANTIC_BACKEND_ENABLED: bool = false;
 mod tests {
     use super::*;
     use mneme_core::{
-        DistanceMetric, FixedPointEmbedding, LogicalKey, MnemeError, ObjectId, Procedure,
-        ProcedureAlgo,
+        DistanceMetric, FixedPointEmbedding, LogicalKey, ObjectId, Procedure, ProcedureAlgo,
     };
     use mneme_smt::SparseMerkleTree;
 
