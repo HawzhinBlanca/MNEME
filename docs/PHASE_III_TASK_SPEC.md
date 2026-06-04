@@ -47,12 +47,14 @@ the Phase III types reference it through an **optional** `cognition_cert_commit`
   feature (default off); tamper tests with test keys.
 
 ### P3-2 — Verifiable forgetting (P0)
-- [ ] `prove_forget` folds crypto-shred + proof-of-absence into the certificate
-  (prove deleted **and** not-served-after), A-REPLAY safe.
-- [ ] Tamper tests: resurrected/over-retained target → typed rejection.
-- [x] Wire skeleton + canonical encode/decode gated by `FORGET_PROOF_VERSION`
-  (gate closed; shred witness / non-membership verify stub returns `UnsupportedVersion`).
-- [x] Optional cert v2 commit wire + preimage tests; witness/absence verify stubbed.
+- [x] `prove_forget` / `mint_forget_proof` fold shred witness + SMT absence behind
+  `phase_iii_prove_forget` (default `UnsupportedVersion`; requires `ForgetProofWitness`).
+- [x] Offline verify: `verify_forget_proof` + bound shred check behind `phase_iii_verify`
+  (`mneme_forget::verify_absence`, `shred_witness_commit`; default closed).
+- [x] Tamper tests: resurrected key, tampered path/shred commit, wrong root → typed rejection.
+- [x] Wire skeleton + canonical encode/decode gated by `FORGET_PROOF_VERSION`.
+- [x] Optional cert v2 commit on wire; red-team `docs/redteam/PHASE_III_FORGET_PROOF.md`.
+- [ ] Store-path mandatory forget receipts + A-REPLAY binding on every forget (separate task).
 
 ### P3-3 — Formal proof (P0)
 - [ ] Mechanize the verifier's fail-closed property in Lean/F* (seL4-style); TCB
@@ -108,7 +110,8 @@ pilot sign-off; external audit passed.
 | 2026-06-03 | Canonical dCBOR encode/decode for `ActionReceipt` / `ForgetProof`, version-gated; malformed-wire tests; wire verifiers remain gate-closed | **Landed (wire-only)** |
 | 2026-06-04 | `mneme-account`: `phase_iii_verify` feature — ActionReceipt Ed25519 verify + `mint_action_receipt`; ForgetProof witness/absence stubbed | **Landed (verify slice)** |
 | 2026-06-04 | Store-path `bind_action` / `Store::bind_external_action` with Ed25519 mint behind `phase_iii_bind_action` (default off) | **Landed (P3-1 slice)** |
-| — | Real crypto-shred witness + SMT non-membership prover for `ForgetProof` (P3-2) | **Deferred** |
+| 2026-06-04 | P3-2: `shred_witness_commit`, `prove_forget`/`mint_forget_proof` (`phase_iii_prove_forget`), `verify_forget_proof*` (`phase_iii_verify`); red-team doc | **Landed (P3-2 slice)** |
+| — | Store-path mandatory forget proof on every `Store::forget` | **Deferred** (separate task) |
 | — | Freeze `ActionReceipt` / `ForgetProof` into the §20.3 interface + pin domain tags | **Deferred** (post-review) |
 | — | Bind cert v2 commit once Phase II finalizes cert v2 layout | **Deferred** (depends on Phase II) |
 | — | Lean/F* mechanized fail-closed proof (P3-3) | **Deferred** |

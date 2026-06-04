@@ -8,16 +8,19 @@
 use mneme_account::PHASE_III_GATE_OPEN;
 #[cfg(not(feature = "phase_iii_bind_action"))]
 use mneme_account::bind_action;
-use mneme_account::{prove_forget, verify_action_receipt_wire, verify_forget_proof_wire};
+#[cfg(not(feature = "phase_iii_prove_forget"))]
+use mneme_account::prove_forget;
+use mneme_account::{verify_action_receipt_wire, verify_forget_proof_wire};
 #[cfg(not(feature = "phase_iii_bind_action"))]
 use mneme_core::Capability;
 #[cfg(not(feature = "phase_iii_verify"))]
 use mneme_core::decode_action_receipt;
 use mneme_core::{
     ACTION_RECEIPT_VERSION, ActionReceipt, FORGET_PROOF_VERSION, ForgetMode, ForgetProof,
-    ForgetTarget, LogicalKey, MnemeError, ObjectId, Root, encode_action_receipt,
-    encode_forget_proof,
+    MnemeError, Root, encode_action_receipt, encode_forget_proof,
 };
+#[cfg(not(feature = "phase_iii_prove_forget"))]
+use mneme_core::{ForgetTarget, LogicalKey, ObjectId};
 #[cfg(not(feature = "phase_iii_bind_action"))]
 use mneme_crypto::KeyPair;
 
@@ -111,6 +114,7 @@ fn bind_action_fails_closed_even_with_cert_commit() {
     ));
 }
 
+#[cfg(not(feature = "phase_iii_prove_forget"))]
 #[test]
 fn prove_forget_fails_closed_for_key_and_object_targets() {
     let root = sample_root();
@@ -131,6 +135,7 @@ fn prove_forget_fails_closed_for_key_and_object_targets() {
     }
 }
 
+#[cfg(not(feature = "phase_iii_prove_forget"))]
 #[test]
 fn prove_forget_fails_closed_for_redact_and_with_cert() {
     let root = sample_root();
@@ -236,7 +241,8 @@ fn verify_action_receipt_wire_rejects_malformed_wire() {
 #[test]
 fn verify_forget_proof_wire_fails_closed_but_parses() {
     let wire = sample_forget_proof_wire(None);
-    let err = verify_forget_proof_wire(&wire).unwrap_err();
+    let root = sample_root();
+    let err = verify_forget_proof_wire(&wire, &root).unwrap_err();
     assert_eq!(
         err,
         MnemeError::UnsupportedVersion {
@@ -249,6 +255,7 @@ fn verify_forget_proof_wire_fails_closed_but_parses() {
 fn verify_forget_proof_wire_rejects_malformed_wire() {
     let mut wire = sample_forget_proof_wire(Some([0xDD; 32]));
     wire.truncate(wire.len().saturating_sub(17));
-    let err = verify_forget_proof_wire(&wire).unwrap_err();
+    let root = sample_root();
+    let err = verify_forget_proof_wire(&wire, &root).unwrap_err();
     assert_eq!(err, MnemeError::SchemaDrift);
 }

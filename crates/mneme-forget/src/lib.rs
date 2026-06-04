@@ -14,5 +14,5 @@ pub use redact::{
 };
 pub use shred::{
     ShredForgetInput, ShredOutcome, apply_shred_forget, forget_shred, object_id_for_key,
-    payload_aad, payload_unreadable, structure_intact,
+    payload_aad, payload_unreadable, shred_witness_commit, structure_intact,
 };

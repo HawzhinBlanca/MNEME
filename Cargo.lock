@@ -1223,6 +1223,8 @@ dependencies = [
  "mneme-cap",
  "mneme-core",
  "mneme-crypto",
+ "mneme-forget",
+ "mneme-smt",
 ]
 
 [[package]]

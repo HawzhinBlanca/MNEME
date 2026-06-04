@@ -15,6 +15,25 @@ pub struct ShredForgetInput<'a> {
     pub object_bytes: Option<&'a [u8]>,
 }
 
+/// BLAKE3 commit over a completed shred forget (Phase III P3-2 witness).
+///
+/// Binds `key_hash`, `object_id`, and optional destroyed payload `KeyId`.
+/// Provisional domain tag until the Phase III seam is frozen.
+pub fn shred_witness_commit(outcome: &ShredOutcome) -> [u8; 32] {
+    use blake3::Hasher;
+    let mut h = Hasher::new();
+    h.update(b"MNEME-shred-witness-v1\x00");
+    h.update(&outcome.key_hash);
+    h.update(&outcome.object_id);
+    if let Some(id) = outcome.shredded_key_id {
+        h.update(&[1u8]);
+        h.update(&id);
+    } else {
+        h.update(&[0u8]);
+    }
+    *h.finalize().as_bytes()
+}
+
 /// Result of `apply_shred_forget`: tombstone recorded, optional vault key destroyed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShredOutcome {
