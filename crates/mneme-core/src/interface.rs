@@ -173,6 +173,7 @@ pub struct CandidateProvenance {
 
 /// Cognition Certificate schema version (Phase I v1 wire).
 pub const COGNITION_CERT_VERSION: u16 = 1;
+pub const COGNITION_CERT_VERSION_V2_DRAFT: u16 = 2;
 
 /// Authenticated verification object (§9.2, ADS backend).
 #[derive(Clone, Debug, PartialEq, Eq)]

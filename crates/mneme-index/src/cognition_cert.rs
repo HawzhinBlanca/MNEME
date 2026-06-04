@@ -2,6 +2,8 @@
 
 use crate::receipt::SemanticRecallReceipt;
 use crate::verify::verify_semantic_receipt_vo_zkann;
+#[cfg(feature = "context_gate")]
+use mneme_core::COGNITION_CERT_VERSION_V2_DRAFT;
 use mneme_core::{
     AsOf, COGNITION_CERT_VERSION, CborValue, DcborDecode, DcborEncode, Decoder, Encoder,
     MnemeError, RetrievalProofLevel, Root, from_bytes_strict, to_bytes_canonical,
@@ -20,9 +22,6 @@ const F_STORED_ROOT: u64 = 4;
 const F_SEMANTIC_RECEIPT: u64 = 5;
 #[cfg(feature = "context_gate")]
 const F_CONTEXT_ATTESTATION: u64 = 6;
-
-#[cfg(feature = "context_gate")]
-const COGNITION_CERT_VERSION_V2_DRAFT: u16 = 2;
 
 #[cfg(feature = "context_gate")]
 pub const CONTEXT_GATE_DRAFT_STATUS: &str = "unverified_until_phase_ii_gate";

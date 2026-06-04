@@ -15,6 +15,7 @@ pub enum DomainTag {
     ContextAssembled,
     CertifiedMemorySet,
     ModelOutput,
+    ActionReceipt,
 }
 
 impl DomainTag {
@@ -32,6 +33,7 @@ impl DomainTag {
             Self::ContextAssembled => b"MNEME-ctx-assembled-v1\x00",
             Self::CertifiedMemorySet => b"MNEME-cms-v1\x00",
             Self::ModelOutput => b"MNEME-model-output-v1\x00",
+            Self::ActionReceipt => b"MNEME-action-rcpt-v3\x00",
         }
     }
 }
@@ -105,6 +107,10 @@ pub fn hash_context_assembled(bytes: &[u8]) -> [u8; 32] {
 /// Certified memory-set digest (order-only on object ids).
 pub fn hash_certified_memory_set(bytes: &[u8]) -> [u8; 32] {
     hash_domain(DomainTag::CertifiedMemorySet, bytes)
+}
+
+pub fn hash_action_receipt_preimage(payload: &[u8]) -> [u8; 32] {
+    hash_domain(DomainTag::ActionReceipt, payload)
 }
 
 pub fn hash_model_output(bytes: &[u8]) -> [u8; 32] {

@@ -1,13 +1,9 @@
 //! Phase III accountability wire skeletons (ROADMAP Phase III, P3-1 / P3-2).
 //!
-//! **STATUS: wire skeleton only — not a frozen interface seam, not implemented.**
-//! These types declare the *shape* of the Phase III certificate extensions
-//! (authorized action + honored forgetting). No proving, signing, hashing-to-a
-//! -domain-tag, or verification logic exists yet: the Phase III gate is closed
-//! and the `mneme-account` crate fails closed (`MnemeError::UnsupportedVersion`).
-//! Unlike [`crate::interface`], this module is **not** under the §20.3 interface
-//! freeze; layouts here are provisional until the Phase III seam is reviewed and
-//! frozen (at which point `*_VERSION` and any domain tags are pinned).
+//! **STATUS:** [`ActionReceipt`] wire + domain-separated signable preimage are
+//! **frozen at v3** (`DomainTag::ActionReceipt`, `MNEME-action-rcpt-v3`). Ed25519
+//! covers the BLAKE3 digest from [`crate::domain::hash_action_receipt_preimage`],
+//! not the raw payload bytes. [`ForgetProof`] remains a provisional wire skeleton.
 //!
 //! **Honesty boundary (CLAUDE.md §honesty, carried into Phase III):**
 //! - An [`ActionReceipt`] binds an external action to the capability that
@@ -38,9 +34,7 @@ pub const FORGET_PROOF_VERSION: u16 = 3;
 /// Non-repudiation receipt binding an external action to its authorizing
 /// capability and sanctioning human identity (Phase III P3-1).
 ///
-/// **Skeleton:** the `signature` is empty and no field is hash-bound yet;
-/// [`ActionReceipt::signable_preimage`] returns the provisional byte layout that
-/// a future signer will cover, but nothing signs it today.
+/// Detached Ed25519 signature covers [`ActionReceipt::signable_preimage`] (32-byte digest).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionReceipt {
     /// Wire version; equals [`ACTION_RECEIPT_VERSION`] for receipts minted by
@@ -61,18 +55,12 @@ pub struct ActionReceipt {
     /// OPTIONAL commit to the Phase II cognition certificate ("cert v2") the
     /// action consumed. `None` until cert v2 is finalized — never fabricated.
     pub cognition_cert_commit: Option<[u8; 32]>,
-    /// Detached signature over [`ActionReceipt::signable_preimage`]. Empty in
-    /// the skeleton (no signer wired yet).
+    /// Detached Ed25519 signature over [`ActionReceipt::signable_preimage`].
     pub signature: Vec<u8>,
 }
 
 impl ActionReceipt {
-    /// Provisional signable preimage: `version ‖ action_commit ‖
-    /// capability_commit ‖ sanctioner ‖ root_bound ‖ hlc ‖ cert_present(1) ‖
-    /// [cert_commit]`. Excludes `signature` (signed-over content), mirroring
-    /// [`crate::interface::RootPreimage`]. **No domain tag is applied yet** —
-    /// that is pinned when the Phase III seam is frozen.
-    pub fn signable_preimage(&self) -> Vec<u8> {
+    pub fn encode_payload(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(2 + 32 * 4 + 14 + 1 + 32);
         buf.extend_from_slice(&self.version.to_le_bytes());
         buf.extend_from_slice(&self.action_commit);
@@ -81,13 +69,16 @@ impl ActionReceipt {
         buf.extend_from_slice(&self.root_bound);
         buf.extend_from_slice(&self.hlc);
         match self.cognition_cert_commit {
-            Some(commit) => {
+            Some(c) => {
                 buf.push(1);
-                buf.extend_from_slice(&commit);
+                buf.extend_from_slice(&c);
             }
             None => buf.push(0),
         }
         buf
+    }
+    pub fn signable_preimage(&self) -> [u8; 32] {
+        crate::domain::hash_action_receipt_preimage(&self.encode_payload())
     }
 }
 
@@ -508,23 +499,32 @@ mod tests {
     }
 
     #[test]
-    fn action_preimage_excludes_signature_and_is_deterministic() {
+    fn action_signable_preimage_excludes_signature_and_is_deterministic() {
         let mut a = sample_action(None);
         let p1 = a.signable_preimage();
-        // Signature is signed-over content, never part of its own preimage.
         a.signature = vec![0xAB; 64];
-        let p2 = a.signable_preimage();
-        assert_eq!(p1, p2);
+        assert_eq!(p1, a.signable_preimage());
     }
-
     #[test]
-    fn action_optional_cert_changes_preimage_without_fabrication() {
-        let without = sample_action(None).signable_preimage();
-        let with = sample_action(Some([0x99; 32])).signable_preimage();
-        // Presence flag + commit must be observable; absence is one byte `0`.
-        assert_eq!(*without.last().unwrap(), 0u8);
-        assert_eq!(with.len(), without.len() + 32);
-        assert_ne!(without, with);
+    fn action_optional_cert_changes_signable_digest() {
+        assert_ne!(
+            sample_action(None).signable_preimage(),
+            sample_action(Some([0x99; 32])).signable_preimage()
+        );
+    }
+    #[test]
+    fn action_encode_payload_hex_is_frozen() {
+        assert_eq!(
+            hex::encode(sample_action(None).encode_payload()),
+            "03001111111111111111111111111111111111111111111111111111111111111111222222222222222222222222222222222222222222222222222222222222222233333333333333333333333333333333333333333333333333333333333333334444444444444444444444444444444444444444444444444444444444444444555555555555555555555555555500"
+        );
+    }
+    #[test]
+    fn action_signable_preimage_hex_is_frozen() {
+        assert_eq!(
+            hex::encode(sample_action(None).signable_preimage()),
+            "568df55727a6b84c311baf90349f0a3ab3e98902e4a08dfb717e5d14a8002c2b"
+        );
     }
 
     #[test]
