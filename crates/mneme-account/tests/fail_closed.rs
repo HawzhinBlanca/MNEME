@@ -4,9 +4,10 @@
 //! with `UnsupportedVersion`, never returning a fabricated receipt or proof —
 //! and they reject *even when* a cert v2 commit is supplied.
 
+#[cfg(not(feature = "phase_iii_verify"))]
+use mneme_account::PHASE_III_GATE_OPEN;
 use mneme_account::{
-    PHASE_III_GATE_OPEN, bind_action, prove_forget, verify_action_receipt_wire,
-    verify_forget_proof_wire,
+    bind_action, prove_forget, verify_action_receipt_wire, verify_forget_proof_wire,
 };
 use mneme_core::{
     ACTION_RECEIPT_VERSION, ActionReceipt, Capability, FORGET_PROOF_VERSION, ForgetMode,
@@ -42,6 +43,7 @@ fn sample_root() -> Root {
     }
 }
 
+#[cfg(not(feature = "phase_iii_verify"))]
 #[test]
 fn gate_is_closed() {
     // `black_box` prevents const-folding so the assertion is a real runtime check.
@@ -139,6 +141,7 @@ fn sample_forget_proof_wire(cert: Option<[u8; 32]>) -> Vec<u8> {
     encode_forget_proof(&proof).expect("forget proof wire")
 }
 
+#[cfg(not(feature = "phase_iii_verify"))]
 #[test]
 fn verify_action_receipt_wire_fails_closed_but_parses() {
     let wire = sample_action_receipt_wire(Some([0xCC; 32]));
@@ -159,6 +162,7 @@ fn verify_action_receipt_wire_rejects_malformed_wire() {
     assert_eq!(err, MnemeError::SchemaDrift);
 }
 
+#[cfg(not(feature = "phase_iii_verify"))]
 #[test]
 fn verify_forget_proof_wire_fails_closed_but_parses() {
     let wire = sample_forget_proof_wire(None);

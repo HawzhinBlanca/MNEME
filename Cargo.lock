@@ -1220,7 +1220,9 @@ dependencies = [
 name = "mneme-account"
 version = "0.1.0"
 dependencies = [
+ "mneme-cap",
  "mneme-core",
+ "mneme-crypto",
 ]
 
 [[package]]
@@ -1277,6 +1279,7 @@ dependencies = [
  "blake3",
  "hex",
  "mneme-core",
+ "mneme-gate",
 ]
 
 [[package]]
