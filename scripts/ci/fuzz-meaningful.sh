@@ -13,7 +13,7 @@ mkdir -p "$CARGO_TARGET_DIR"
 mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-fuzz-meaningful}"
 
 FUZZ_SECS="${MNEME_FUZZ_MAX_TOTAL_TIME:-30}"
-FUZZ_TARGETS=(dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse)
+FUZZ_TARGETS=(dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse federation_cert_parse federation_cert_verify)
 EVIDENCE_DIR="${MNEME_FUZZ_EVIDENCE_DIR:-}"
 TOTAL_EXECS=0
 CRASHES=0

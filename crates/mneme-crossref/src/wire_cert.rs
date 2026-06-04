@@ -4,6 +4,9 @@
 //! the outer cert map (fields 1-5) and inner semantic receipt (fields 1-7), then
 //! runs fail-closed verification: Ed25519 root signature, receipt↔root binding, and
 //! ADS replay + zkANN dominance. No `mneme-*` deps.
+//!
+//! Phase IV federation wire is **not** mirrored here yet; see
+//! `docs/phase-program/PHASE_IV_CROSSREF_NOTES.md`.
 
 use crate::dcbor::{CborValue, Decoder};
 use crate::error::CrossrefError;

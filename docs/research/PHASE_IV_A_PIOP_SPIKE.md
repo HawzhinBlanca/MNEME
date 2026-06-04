@@ -208,18 +208,12 @@ blockers above are cleared.
 
 Ordered, each independently abandonable. None of these is started by this memo.
 
-1. **Formalize the statement (paper artifact, no code).** Write the exact-NN
-   PIOP statement over `(semantic_commit, P, D, q, k, R)` precisely, including
-   the integer-distance encoding (we already use `i64` distances — a real
-   advantage) and the dominance predicate of §2. Output: a 2–3 page statement
-   doc + a soundness red-team sketch (what a malicious prover would try). Gate:
-   does the statement actually retire caveat #2 without smuggling in trust?
-2. **Toolchain buildability matrix (spike, no proofs).** Evaluate which succinct
-   argument stacks build on **stable 1.86.0** (candidates to assess, not endorse:
-   arkworks-family, halo2/halo2-axiom, Spartan/Nova-family, plonky3) and their
-   transparency / trusted-setup / recursion properties and dependency weight.
-   Output: a table of *what compiles on our pin* + trust assumptions. This is the
-   single biggest go/no-go input. Do **not** adopt nightly to widen it.
+1. **Formalize the statement (paper artifact, no code).** — **Done (research slice):**
+   `docs/research/PHASE_IV_A_PIOP_STATEMENT.md` (exact-NN statement, integer-distance
+   encoding, threat model §4, fail-closed degradation §4.4).
+2. **Toolchain buildability matrix (spike, no proofs).** — **Done (research slice):**
+   `docs/research/PHASE_IV_A_PIOP_TOOLCHAIN_MATRIX.md` (stable 1.86.0 survey; no nightly
+   for Plonky2; out-of-TCB verifier architecture unchanged).
 3. **Commitment-bridge spike (§3.1).** Prototype Option (b): a field-friendly
    sidecar commitment over the same `(ObjectId, embedding_commit)` multiset,
    computed deterministically alongside the BLAKE3 tree, plus a microbenchmark of
