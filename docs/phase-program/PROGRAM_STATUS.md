@@ -1,8 +1,8 @@
 # MNEME Phase Program — Status (master)
 
-**Date:** 2026-06-04 • **Branch:** `master` @ `11379e8` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
+**Date:** 2026-06-04 • **Branch:** `master` @ `946021e` • **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged.
 
-**Integrator (2026-06-04):** P3-1 store-path `bind_action` + `bind_external_action` landed (feature-gated signing; default fail-closed). Red-team @ `11379e8` extended for bind path. **Guardian review pending** for P3-1 exit. Prior slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
+**Integrator (2026-06-04):** P3-1 store-path `bind_action` + `bind_external_action` @ `946021e` (feature-gated signing; default fail-closed). `PHASE_GATE_LEVEL=quick|full` green. **Guardian review pending** for P3-1 exit. Prior slices: ii @ `14a87df`, iii @ `bfda439`, iv @ `c8368d8`.
 
 ---
 
