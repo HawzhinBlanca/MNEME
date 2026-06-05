@@ -161,10 +161,13 @@ Verified implementation scope (turnkey for next increment):
 - Tests to gate with the feature: `tests/e2e/phase_i_gates.rs` (2 tests),
   `tests/e2e/mod.rs` (`e2e_bypass_adb_recall_verified_at_trusted`,
   `e2e_bypass_ainj_poison_recall_verified_at_trusted`).
-- Determinism risk to verify first: confirm the foundation-gate digest does not
-  hash `meta/snapshots/`. If it diffs the whole store dir, the pinned
-  `root_preimage`/`receipt`/`absent_proof` digests must be re-pinned and the
-  change explained as a layout (not semantic) difference.
+- Determinism risk: VERIFIED LOW. `crates/mneme-cli/src/determinism.rs`
+  computes the foundation digests from `root.preimage_hash`,
+  `digest_receipt(receipt)`, and the absence-proof digest — all in-memory
+  structures; none hash `meta/snapshots/` or the store directory. Gating the
+  per-commit snapshot therefore must not move the pinned
+  `root_preimage`/`receipt`/`absent_proof` digests. Still re-run determinism +
+  tamper + full after the change to confirm empirically.
 
 ## Performance — committed-state 1M run (`c2251db`, fsync-on, watchdog-guarded)
 
