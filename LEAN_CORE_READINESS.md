@@ -1,17 +1,45 @@
 # MNEME Lean Core Readiness
 
-Top-line status: NOT LEAN.
+Top-line status: NOT LEAN — but the clean-checkout gap is now closed.
 
 The local code boundary is much closer to the lean product, and the trusted
-verifier surface shrank. It is still not honest to write `LEAN` because:
+verifier surface shrank. Two honesty blockers remain; one prior blocker is
+resolved:
 
-- No real second physical host was available. Strict mode failed closed when
-  `MNEME_SECOND_HOST` was unset.
-- The full validation lane passed in this dirty worktree, not from a committed
-  clean checkout.
-- The full 1M fsync-on benchmark with 200 write/forget/erasure samples was
-  stopped at 99% disk usage. A bounded 1M run with 10 erasure samples completed
-  and is recorded separately.
+- RESOLVED: The full validation lane now passes from a committed, cold,
+  separate clean checkout (`git worktree` detached at `c2251db`), not just a
+  dirty worktree. See "Clean-Checkout Proof" below.
+- OPEN (needs infra): No real second physical host was available. Strict mode
+  failed closed when `MNEME_SECOND_HOST` was unset. Closing this needs a real
+  `MNEME_SECOND_HOST=user@host`.
+- OPEN (needs disk): The full 1M fsync-on benchmark with 200
+  write/forget/erasure samples was stopped at 99% disk usage. A bounded 1M run
+  with 10 erasure samples completed and is recorded separately. Closing this
+  needs ~50 GiB free, or a reduced sample count in the gate spec.
+
+## Clean-Checkout Proof
+
+The lean-core separation was committed as `c2251db` (62 git-verified renames,
+0 orphan deletes). A fresh detached `git worktree` of that commit was created
+at `/tmp/mneme-clean-checkout` and confirmed self-contained: the full
+`experimental/` tree is present and `git status` is clean. From that cold
+checkout:
+
+| Lane | Result | Evidence |
+|---|---:|---|
+| Clean-checkout quick | PASS (exit 0) | `out/lean-core-readiness/clean-checkout-quick.log` |
+| Clean-checkout full | PASS (exit 0) | `out/lean-core-readiness/clean-checkout-full.log` |
+
+The full lane ended `validation-lane (full): OK` and included chaos
+(disk-full mid-txn fail-closed, every iter `unsafe_state:false` with the
+`.incomplete` guard held), storage-tamper rejection, A-injection quarantine
+block, Appendix B cross-impl vectors, release recall bench, and ≥30s/target
+fuzz. This proves the committed commit builds and passes every gate in
+isolation — the renames carried the entire tree.
+
+Also green on the committed state (same worktree, clean tree): `quick`,
+`tamper`, and `determinism` lanes (see
+`validation-{quick,tamper,determinism}-after-commit.log`).
 
 ## Boundary Decisions Made
 
@@ -187,13 +215,14 @@ scripts invoke it explicitly with `--ignored`.
 
 ## What Is Left Exactly
 
-1. Produce a true clean-checkout proof. This needs a committed branch or a
-   separate clean checkout of the exact patch.
+1. DONE. True clean-checkout proof produced: committed `c2251db`, fresh
+   detached worktree, `validation-lane full` PASS. See "Clean-Checkout Proof".
 2. Run real second physical host determinism with
-   `MNEME_SECOND_HOST=user@host`.
+   `MNEME_SECOND_HOST=user@host`. (Blocked: no second host available here.)
 3. Re-run the full 1M fsync-on benchmark with enough free disk for the requested
    200 write/forget/erasure samples, or reduce the accepted sample count in the
-   gate spec.
+   gate spec. (Blocked: ~59 GiB free; run needs ~46+ GiB store and previously
+   hit 99%.)
 4. Review `CLASSIFICATION.md` before any CUT deletion.
 5. Decide whether `mneme-crossref` is core assurance or deferred
    standardization.
