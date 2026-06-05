@@ -35,6 +35,7 @@ CLI `audit`, `init`, and `determinism` are operator-only behind
 | Federation/A2A | `experimental/federation/mneme-index-federation-cert.rs`; federation fuzz targets | off | Federation is not required for single-store compliance-of-record. |
 | ZK/privacy retrieval | `experimental/zk-privacy/mneme-index-{commitment-binding,pedersen-schnorr-zk,semantic-zk}.rs`; ZK tests/vectors | off | 12-month proof path, not v1 exact record lookup. |
 | PIOP research | `experimental/research/mneme-index-piop-research.rs`; `scripts/piop-flat-prototype` | off | Research-only; no production prover/verifier claim. |
+| Bi-temporal / point-in-time recall | `crates/mneme-store/src/recall_at.rs`; `recall_verified_at`; per-commit snapshot in `commit_root_inner`; `layout::{snapshot,load}_key_index_at_seq`; `tests/e2e/phase_i_gates.rs` bi-temporal tests | off | Sole consumer of per-commit full key-index snapshots (O(N) write, O(N×writes) disk). Not in the MCP four-call surface, so deferred behind `bitemporal_recall`. `AsOf` stays in frozen `mneme-core`. |
 | Crossref reference implementation | `crates/mneme-crossref` | off runtime | Assurance/standardization infrastructure, not runtime TCB. |
 
 ## Feature Map
@@ -54,6 +55,7 @@ Experimental features:
 - `commitment_binding`
 - `pedersen_schnorr_zk`
 - `piop_research`
+- `bitemporal_recall`
 - `bench_support`
 - `internal_test_support`
 - `operator_tools`

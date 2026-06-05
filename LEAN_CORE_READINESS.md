@@ -1,23 +1,27 @@
 # MNEME Lean Core Readiness
 
-Top-line status: NOT LEAN — clean-checkout gap closed; a real O(N)
-write-amplification blocker found at 1M scale.
+Top-line status: NOT LEAN — but the clean-checkout gap and the O(N)
+write-amplification blocker are both now FIXED and proven; only physical
+second-host determinism remains.
 
 The local code boundary is much closer to the lean product, and the trusted
-verifier surface shrank. The headline new finding is a genuine scalability
-blocker (see "Perf Finding (TOP BLOCKER)"): every `remember`/`forget` writes a
-full, unpruned key-index snapshot, making writes O(N) in time and O(N × writes)
-in disk at scale. One prior blocker is resolved; the rest remain:
+verifier surface shrank. The headline scalability blocker (per-commit full
+key-index snapshot, O(N) time / O(N × writes) disk) has been **fixed**: the
+snapshot is now gated behind an off-by-default `bitemporal_recall` feature
+(commit `8ba87fc`). Lean `remember` dropped from p50 4.476 s to 46.3 ms (~97×)
+at 1M; the full 200-sample fsync run now completes (forget/erasure included);
+pinned determinism digests are unchanged; tamper + e2e green. See "Perf Finding
+(RESOLVED)". Remaining blockers:
 
 - RESOLVED: The full validation lane now passes from a committed, cold,
   separate clean checkout (`git worktree` detached at `c2251db`), not just a
   dirty worktree. See "Clean-Checkout Proof" below.
+- RESOLVED: The O(N) per-commit key-index snapshot is gated behind
+  `bitemporal_recall` (commit `8ba87fc`). Lean `remember` is ~97× faster at 1M
+  and the full 200-sample fsync run completes; digests unchanged.
 - OPEN (needs infra): No real second physical host was available. Strict mode
   failed closed when `MNEME_SECOND_HOST` was unset. Closing this needs a real
-  `MNEME_SECOND_HOST=user@host`.
-- OPEN (needs disk): The full 1M fsync-on benchmark with 200
-  write/forget/erasure samples was stopped at 99% disk usage. A bounded 1M run
-  with 10 erasure samples completed and is recorded separately. Closing this
+  `MNEME_SECOND_HOST=user@host`. This is now the sole hard blocker to LEAN. Closing this
   needs ~50 GiB free, or a reduced sample count in the gate spec.
 
 ## Clean-Checkout Proof
@@ -108,7 +112,25 @@ Real second physical host: NOT PROVEN. With
 closed instead of pretending dual-workspace determinism is a physical-host
 proof.
 
-## Perf Finding (TOP BLOCKER): O(N) write amplification on every commit
+## Perf Finding (RESOLVED): O(N) write amplification on every commit
+
+FIXED in commit `8ba87fc` by gating the per-commit snapshot behind
+`bitemporal_recall` (off by default). Measured effect at 1M, fsync-on, 200
+samples (`out/lean-core-readiness/bench-1m-fsync-after-snapshot-gate.log`):
+
+| Op | Before (snapshot on) | After (gated off) |
+|---|---:|---:|
+| `remember` p50 / p99 | 4.476 s / 4.667 s | 46.3 ms / 58.6 ms |
+| `forget` p50 / p99 | BLOCKED (disk) | 32.8 ms / 39.1 ms |
+| `erasure_receipt` p50 / p99 | BLOCKED (disk) | 37.3 ms / 47.2 ms |
+| `recall_verified` p50 | 164.9 us | 162.6 us (unchanged) |
+| disk during run | 7 → 52 GiB (aborted) | flat; 58 GiB free held |
+
+The full 200-sample run completed (`BENCH_EXIT=0`); the watchdog never tripped.
+Pinned `root_preimage`/`receipt`/`absent_proof` digests are unchanged (verified
+against `out/ci-foundation-gate/foundation.report.json`), confirming the
+snapshot is a sidecar, not part of the signed root. Original analysis follows
+for the record.
 
 Investigating the 1M write run on the committed state (`c2251db`) surfaced a
 real scalability blocker, more significant than the perf sample count or the
@@ -303,15 +325,14 @@ scripts invoke it explicitly with `--ignored`.
 
 1. DONE. True clean-checkout proof produced: committed `c2251db`, fresh
    detached worktree, `validation-lane full` PASS. See "Clean-Checkout Proof".
-2. TOP PRIORITY. Fix the O(N) write-amplification: gate per-commit
-   `snapshot_key_index_at_seq` behind a historical-recall feature (off in lean
-   default), then re-run determinism + tamper + full and prove the foundation
-   digests are unchanged. See "Perf Finding (TOP BLOCKER)". This both fixes
-   write scalability and unblocks the 200-sample forget/erasure perf at 1M.
-3. Run real second physical host determinism with
-   `MNEME_SECOND_HOST=user@host`. (Blocked: no second host available here.)
-4. After the write-amp fix, re-run the full 1M fsync benchmark to completion
-   (forget/erasure @ 200) — it should now fit disk easily.
+2. DONE. O(N) write-amplification fixed (commit `8ba87fc`): per-commit snapshot
+   gated behind `bitemporal_recall`. Determinism digests unchanged, tamper +
+   e2e green, remember ~97× faster. See "Perf Finding (RESOLVED)".
+3. DONE. Full 1M fsync benchmark now completes all 200 forget/erasure samples
+   without disk pressure (`BENCH_EXIT=0`).
+4. REMAINING (needs infra). Run real second physical host determinism with
+   `MNEME_SECOND_HOST=user@host`. This is now the sole hard blocker to LEAN per
+   the README acceptance checklist.
 4. Review `CLASSIFICATION.md` before any CUT deletion.
 5. Decide whether `mneme-crossref` is core assurance or deferred
    standardization.

@@ -166,7 +166,7 @@ Source anchors:
 | `layout.rs` | CORE | Tombstone layout exported at `crates/mneme-store/src/lib.rs:98`. |
 | `pause.rs` | CORE test support | Pause hooks exported only with `internal_test_support` at `crates/mneme-store/src/lib.rs:102-107`. |
 | `recall.rs` | CORE default / DEFER semantic | Key recall default at `crates/mneme-store/src/recall.rs:1-56`; semantic branch cfg-gated at `crates/mneme-store/src/recall.rs:105`. |
-| `recall_at.rs` | CORE default / DEFER semantic | Semantic imports cfg-gated at `crates/mneme-store/src/recall_at.rs:6-17`. |
+| `recall_at.rs` | DEFER | Bi-temporal `recall_verified_at`; whole module gated by `bitemporal_recall` at `crates/mneme-store/src/lib.rs:31-32`. Sole consumer of per-commit key-index snapshots (O(N) write-amplification); off in lean default. |
 | `scoped_recall.rs` | CORE default / DEFER semantic | Semantic imports cfg-gated at `crates/mneme-store/src/scoped_recall.rs:6-16`. |
 | `certify.rs` | DEFER | Module compiled only by `experimental_cognition_cert` at `crates/mneme-store/src/lib.rs:21-22`. |
 | `context_gate.rs` | DEFER | Module compiled only by `context_gate` at `crates/mneme-store/src/lib.rs:6-7` and `crates/mneme-store/src/lib.rs:23-24`. |
