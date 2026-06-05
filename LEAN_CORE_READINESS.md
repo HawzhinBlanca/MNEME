@@ -145,6 +145,27 @@ include the snapshot bytes, so removing per-commit snapshots should not move the
 `root_preimage`/`receipt`/`absent_proof` digests — but this must be proven, not
 assumed, by re-running determinism + tamper + full after the change.
 
+Verified implementation scope (turnkey for next increment):
+
+- New off-by-default `mneme-store` feature, e.g. `bitemporal_recall`.
+- Exactly one snapshot caller to gate: `commit_root_inner`
+  (`crates/mneme-store/src/lib.rs:891`).
+- Exactly one load caller / consumer: `recall_verified_at` in
+  `crates/mneme-store/src/recall_at.rs` (the whole `recall_at` module + its
+  `pub use` re-exports).
+- `AsOf` stays in `crates/mneme-core/src/interface.rs` (frozen seam) — type is
+  untouched; only the store-side impl is gated.
+- `crates/mneme-store/src/certify.rs` already sits behind
+  `experimental_cognition_cert`; ensure its `AsOf` use still compiles with both
+  features on.
+- Tests to gate with the feature: `tests/e2e/phase_i_gates.rs` (2 tests),
+  `tests/e2e/mod.rs` (`e2e_bypass_adb_recall_verified_at_trusted`,
+  `e2e_bypass_ainj_poison_recall_verified_at_trusted`).
+- Determinism risk to verify first: confirm the foundation-gate digest does not
+  hash `meta/snapshots/`. If it diffs the whole store dir, the pinned
+  `root_preimage`/`receipt`/`absent_proof` digests must be re-pinned and the
+  change explained as a layout (not semantic) difference.
+
 ## Performance — committed-state 1M run (`c2251db`, fsync-on, watchdog-guarded)
 
 Authorized full 200-sample run; disk watchdog (floor 8 GiB free) hard-aborted
