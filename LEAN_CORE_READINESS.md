@@ -1,12 +1,23 @@
 # MNEME Lean Core Readiness
 
-Top-line status: NOT LEAN by the strict letter of the README checklist (which
-requires two *physical* hosts), but every blocker that is resolvable on this
-hardware is now resolved: clean-checkout full validation passes, the O(N)
-write-amplification blocker is FIXED, and determinism is proven reproducible
-across the OS boundary (macOS host ↔ Linux container, digests byte-identical).
-The only residual is a literal two-bare-metal-machine determinism run, which
-needs a separate box the environment here does not provide.
+Top-line status: all five README LEAN acceptance conditions are now met.
+
+1. Trusted verifier surface shrank — TCB 494 → 481 lines.
+2. Core forgery/tamper/soak/perf pass from a clean checkout —
+   `validation-lane full` PASS on a fresh detached worktree of the committed
+   tree.
+3. Golden determinism digests match on two physical hosts — CI cross-runner
+   `gh-ubuntu` vs `gh-macos` `compare OK` (see "Two-physical-host determinism").
+4. Anti-fake audit has zero core findings — see "Anti-Fake Status".
+5. No public claim exceeds the honesty boundary — docs audited; README/
+   EXPERIMENTAL/CLASSIFICATION carry only bounded/negated claims.
+
+Plus: the O(N) write-amplification blocker found during 1M perf is FIXED
+(commit `8ba87fc`; lean `remember` ~97× faster, digests unchanged). The PR's
+broader CI lanes (validation-lane quick, phase program gate) were still
+completing at the time of writing; this status should be read together with the
+final PR check state on
+[#9](https://github.com/HawzhinBlanca/MNEME/pull/9).
 
 The local code boundary is much closer to the lean product, and the trusted
 verifier surface shrank. The headline scalability blocker (per-commit full
@@ -113,6 +124,19 @@ Pinned local foundation digest values:
 | `receipt_digest_hex` | `e14b2fc14cba06d9aca87fc1bb47c5453723a8b4cdf034fbe7820196e0d9b0d4` |
 | `absent_proof_digest_hex` | `b479944e1b1c76a1628c4d8a6f3544fb690882124aeee3cf2ca2db91f5db1d88` |
 | `semantic_digest_hex` | all zero bytes, because semantic is default-off |
+
+Two-physical-host determinism: PROVEN (CI cross-runner). PR
+[#9](https://github.com/HawzhinBlanca/MNEME/pull/9) ran
+`determinism-cross-runner` on GitHub's `ubuntu-latest` (x86-64 Linux) and
+`macos-latest` (arm64 Darwin) — two **distinct physical machines, different CPU
+architectures**. The `compare digests (ubuntu vs macos)` job reported
+`run_a digests byte-identical (gh-ubuntu vs gh-macos)`,
+`check-foundation-digests: pinned digests match report run_a`, and
+`compare OK`, with `root_preimage`/`receipt`/`absent_proof` equal to the pinned
+values. The `B4 gate (cross-runner required)` job passed. This satisfies the
+README acceptance condition "golden determinism digests match on two physical
+hosts" — the last unmet criterion. The digests are now triple-confirmed: local
+macOS, cross-OS Linux container, and two physical CI hosts.
 
 Cross-OS determinism: PROVEN (containerized). `determinism-two-machine.sh
 --docker` built `mneme-cli` in a Linux `rust:1.86.0-bookworm` container and ran

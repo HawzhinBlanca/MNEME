@@ -144,7 +144,10 @@ jobs:
           shared-key: mneme-e2e-store
 
       - name: Store integration (tests/e2e/mod.rs)
-        run: cargo test -p mneme-store --test e2e -- --nocapture
+        # e2e target requires internal_test_support (lean refactor gated test
+        # helpers); semantic + bitemporal_recall enable the Phase I provenance
+        # and bi-temporal recall tests so coverage matches the pre-lean suite.
+        run: cargo test -p mneme-store --test e2e --features internal_test_support,experimental_semantic,bitemporal_recall -- --nocapture
 
   e2e-daemon:
     name: mnemed API e2e (${{ matrix.shard }})

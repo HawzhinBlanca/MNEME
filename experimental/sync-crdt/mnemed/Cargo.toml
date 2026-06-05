@@ -65,6 +65,12 @@ tokio-tungstenite = "0.26"
 futures-util = "0.3"
 
 [dev-dependencies]
+# Re-declare mneme-store with internal_test_support so integration tests
+# (redteam_paths) can reach the gated `tamper_object_bytes` helper. After the
+# lean refactor moved test helpers behind `internal_test_support`, tests that
+# tamper with store bytes must opt in here; Cargo unifies this with the
+# `[dependencies]` entry for test builds.
+mneme-store = { workspace = true, features = ["experimental_sync_crdt", "internal_test_support"] }
 tempfile.workspace = true
 reqwest = { version = "0.12", features = ["json"] }
 tonic = { workspace = true, features = ["transport"] }

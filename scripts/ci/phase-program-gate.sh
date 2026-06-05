@@ -72,10 +72,19 @@ run_phase_one_targets() {
     cargo test -p mneme-index --features pedersen_schnorr_zk -- zkann --nocapture
   run_step "Cognition certificate (mneme-index)" \
     cargo test -p mneme-index --features pedersen_schnorr_zk -- cognition_cert --nocapture
+  # Phase I bi-temporal + provenance tests live in the e2e target and, post lean
+  # refactor, are gated: e2e needs internal_test_support, the bi-temporal tests
+  # need bitemporal_recall, the semantic/provenance tests need
+  # experimental_semantic. Without these the filter matches 0 tests and silently
+  # passes — so pass the features and the explicit --test target.
   run_step "Bi-temporal recall (mneme-store recall_verified_at)" \
-    cargo test -p mneme-store recall_verified_at -- --nocapture
+    cargo test -p mneme-store \
+      --features internal_test_support,experimental_semantic,bitemporal_recall \
+      --test e2e recall_verified_at -- --nocapture
   run_step "Provenance-scoped recall (mneme-store provenance_scoped)" \
-    cargo test -p mneme-store provenance_scoped -- --nocapture
+    cargo test -p mneme-store \
+      --features internal_test_support,experimental_semantic,bitemporal_recall \
+      --test e2e provenance_scoped -- --nocapture
   run_step "CLI certify (mneme-cli)" \
     cargo test -p mneme-cli certify -- --nocapture
   run_step "CLI verify-cert (mneme-cli)" \
