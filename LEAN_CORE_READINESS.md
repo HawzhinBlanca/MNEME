@@ -1,10 +1,13 @@
 # MNEME Lean Core Readiness
 
-Top-line status: NOT LEAN — but the clean-checkout gap is now closed.
+Top-line status: NOT LEAN — clean-checkout gap closed; a real O(N)
+write-amplification blocker found at 1M scale.
 
 The local code boundary is much closer to the lean product, and the trusted
-verifier surface shrank. Two honesty blockers remain; one prior blocker is
-resolved:
+verifier surface shrank. The headline new finding is a genuine scalability
+blocker (see "Perf Finding (TOP BLOCKER)"): every `remember`/`forget` writes a
+full, unpruned key-index snapshot, making writes O(N) in time and O(N × writes)
+in disk at scale. One prior blocker is resolved; the rest remain:
 
 - RESOLVED: The full validation lane now passes from a committed, cold,
   separate clean checkout (`git worktree` detached at `c2251db`), not just a
@@ -105,7 +108,66 @@ Real second physical host: NOT PROVEN. With
 closed instead of pretending dual-workspace determinism is a physical-host
 proof.
 
-## Performance
+## Perf Finding (TOP BLOCKER): O(N) write amplification on every commit
+
+Investigating the 1M write run on the committed state (`c2251db`) surfaced a
+real scalability blocker, more significant than the perf sample count or the
+second-host gap:
+
+- `Store::commit_root_inner` runs on **every** `remember`/`forget` and
+  unconditionally calls `layout::snapshot_key_index_at_seq(path, seq, self)`
+  (`crates/mneme-store/src/lib.rs:891`).
+- `snapshot_key_index_at_seq` (`crates/mneme-store/src/layout.rs:236`) writes
+  `meta/snapshots/<seq>/key_index.json` containing the **entire** key index
+  plus tombstones, hex-encoded, as **pretty-printed JSON**, fsync'd.
+- There is **no pruning/retention** of `meta/snapshots/<seq>/`.
+
+Consequences at 1M entries:
+
+- Write latency is O(N): each `remember` serializes + fsyncs the full index,
+  ≈4.5 s/op (the snapshot dominates, not the entry write itself).
+- Disk is O(N × writes): each commit keeps a full ≈225 MiB index copy. 200
+  writes grew the store from ≈7 GiB (post-populate) to ≈52 GiB used, which is
+  what stopped the prior run at 99% and tripped this run's 8 GiB watchdog floor.
+
+Root insight: the **only** consumer of these per-sequence snapshots is
+historical/point-in-time recall (`layout::load_key_index_at_seq`), and the lean
+public MCP `recall-with-signed-chain` exposes **no time/sequence parameter** —
+point-in-time recall is not in the lean product surface. So the lean core is
+paying an O(N) write+disk tax for a deferred feature.
+
+Proposed fix (next, must go through the full determinism/tamper/validation
+ladder before acceptance): gate `snapshot_key_index_at_seq` behind a
+historical-recall feature (off in lean default), making lean `remember`/`forget`
+O(1) on the write path and bounding disk. The signed root is assembled from
+`dag.root + key_index.root + semantic_commit + hlc + prev + seq` and does **not**
+include the snapshot bytes, so removing per-commit snapshots should not move the
+`root_preimage`/`receipt`/`absent_proof` digests — but this must be proven, not
+assumed, by re-running determinism + tamper + full after the change.
+
+## Performance — committed-state 1M run (`c2251db`, fsync-on, watchdog-guarded)
+
+Authorized full 200-sample run; disk watchdog (floor 8 GiB free) hard-aborted
+during the forget/erasure phase and cleaned up the store. Completed, honest
+metrics:
+
+| Operation | Samples | p50 | p99 | Status |
+|---|---:|---:|---:|---|
+| populate 1M | — | 117.093 s wall | — | complete |
+| `recall_verified` | 2000 | 164.916 us | 205.292 us | complete |
+| `recall_verified_cached` | 2000 | 37.500 us | 47.583 us | complete |
+| `recall_raw` | 2000 | 64.042 us | 76.959 us | complete |
+| `remember` | 200 | 4.476 s | 4.667 s | complete |
+| `forget` | 200 | — | — | BLOCKED (watchdog abort; see write-amplification finding) |
+| `erasure_receipt` | 200 | — | — | BLOCKED (watchdog abort) |
+
+Read-path SLAs hold at 1M (`recall_verified` p99 ≈205 us, well under the §19
+<1 ms budget). The write-path numbers are dominated by the O(N) snapshot, not
+intrinsic write cost. Evidence:
+`out/lean-core-readiness/bench-1m-fsync-200samples-authorized.log`. The store
+was removed after the run; final free disk 7 GiB.
+
+## Performance (prior, pre-commit runs)
 
 The full 200-write-sample 1M run was stopped to protect the machine:
 
@@ -217,12 +279,15 @@ scripts invoke it explicitly with `--ignored`.
 
 1. DONE. True clean-checkout proof produced: committed `c2251db`, fresh
    detached worktree, `validation-lane full` PASS. See "Clean-Checkout Proof".
-2. Run real second physical host determinism with
+2. TOP PRIORITY. Fix the O(N) write-amplification: gate per-commit
+   `snapshot_key_index_at_seq` behind a historical-recall feature (off in lean
+   default), then re-run determinism + tamper + full and prove the foundation
+   digests are unchanged. See "Perf Finding (TOP BLOCKER)". This both fixes
+   write scalability and unblocks the 200-sample forget/erasure perf at 1M.
+3. Run real second physical host determinism with
    `MNEME_SECOND_HOST=user@host`. (Blocked: no second host available here.)
-3. Re-run the full 1M fsync-on benchmark with enough free disk for the requested
-   200 write/forget/erasure samples, or reduce the accepted sample count in the
-   gate spec. (Blocked: ~59 GiB free; run needs ~46+ GiB store and previously
-   hit 99%.)
+4. After the write-amp fix, re-run the full 1M fsync benchmark to completion
+   (forget/erasure @ 200) — it should now fit disk easily.
 4. Review `CLASSIFICATION.md` before any CUT deletion.
 5. Decide whether `mneme-crossref` is core assurance or deferred
    standardization.

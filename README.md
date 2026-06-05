@@ -67,14 +67,24 @@ real second physical host unless `MNEME_SECOND_HOST=user@host` is supplied to
 the two-machine determinism script. Strict cross-host mode fails closed without
 that peer.
 
-Run the 1M fsync-on performance lane explicitly:
+`scripts/ci/bench-recall-optional.sh` is the §19 verify-<1ms-@-10k SLA gate; it
+runs `bench_verify_recall_10k_entries` only and does not honor
+`MNEME_BENCH_SCALE`. To run the 1M fsync-on scale lane
+(`bench_scale_ops`: populate + recall + remember/forget/erasure percentiles)
+invoke its target directly:
 
 ```bash
 MNEME_BENCH_SCALE=1000000 \
 MNEME_BENCH_SAMPLES=2000 \
 MNEME_BENCH_WRITE_SAMPLES=200 \
-scripts/ci/bench-recall-optional.sh
+MNEME_BENCH_STORE_DIR=/path/with/headroom \
+cargo test -p mneme-store --release \
+  --features bench_support,internal_test_support,erasure_receipt \
+  --test bench_recall -- bench_scale_ops --ignored --nocapture
 ```
+
+This run writes a multi-GiB persistent store; point `MNEME_BENCH_STORE_DIR` at a
+volume with headroom and guard free space.
 
 ## Current Lean Status
 
