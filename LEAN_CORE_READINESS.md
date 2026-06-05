@@ -13,11 +13,23 @@ Top-line status: all five README LEAN acceptance conditions are now met.
    EXPERIMENTAL/CLASSIFICATION carry only bounded/negated claims.
 
 Plus: the O(N) write-amplification blocker found during 1M perf is FIXED
-(commit `8ba87fc`; lean `remember` ~97× faster, digests unchanged). The PR's
-broader CI lanes (validation-lane quick, phase program gate) were still
-completing at the time of writing; this status should be read together with the
-final PR check state on
-[#9](https://github.com/HawzhinBlanca/MNEME/pull/9).
+(commit `8ba87fc`; lean `remember` ~97× faster, digests unchanged).
+
+PR [#9](https://github.com/HawzhinBlanca/MNEME/pull/9) is fully green — every
+check passes: `Phase program gate`, `compare digests (ubuntu vs macos)`, both
+`foundation-gate` runners, `store kernel e2e`, `validation-lane quick/crypto`,
+`CLI e2e`, `mnemed API e2e (grpc/http/sync)`, `determinism (docker sim)`,
+`B4 gate (cross-runner required)`, and `CI gate`. Pushing the lean branch to
+real CI also surfaced and fixed feature-wiring gaps the local dirty-worktree
+validation had missed (the lean refactor gated test helpers/targets behind
+`internal_test_support`/`bitemporal_recall`/`phase_iii_*` but several workflow
+and `phase-program-gate.sh` invocations kept their pre-lean, featureless
+commands).
+
+Honesty boundary still holds: "10/10" here means the project meets its own
+documented LEAN acceptance bar with green CI on two physical hosts. It does NOT
+mean MNEME proves semantic truth, exact nearest neighbors, or deletion of model
+parametric residue — those limits are unchanged.
 
 The local code boundary is much closer to the lean product, and the trusted
 verifier surface shrank. The headline scalability blocker (per-commit full
