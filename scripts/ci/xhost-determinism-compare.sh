@@ -10,7 +10,7 @@
 #   then eyeball / diff the two outputs (or pass --expect <sha> to assert).
 #
 # Windows peers: run the equivalent one-liner from an "x64 Native Tools" prompt:
-#   cargo run -q -p mneme-cli -- determinism foundation-gate --out out\xhost --timestamp 1970-01-01T00:00:00Z
+#   cargo run -q -p mneme-cli --features operator_tools -- determinism foundation-gate --out out\xhost --timestamp 1970-01-01T00:00:00Z
 #   powershell -NoProfile -Command "(Get-Content out\xhost\foundation.report.json|ConvertFrom-Json).run_a"
 # No MNEME_NO_FSYNC needed: directory fsync is correctly a no-op on Windows (see atomic.rs).
 set -euo pipefail
@@ -23,7 +23,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 OUT="${1:-out/xhost-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)}"
 rm -rf "$OUT"
-cargo run -q -p mneme-cli -- determinism foundation-gate \
+cargo run -q -p mneme-cli --features operator_tools -- determinism foundation-gate \
   --out "$OUT" --timestamp '1970-01-01T00:00:00Z' >/dev/null
 
 REPORT="$OUT/foundation.report.json"

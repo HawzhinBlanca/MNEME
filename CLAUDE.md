@@ -58,20 +58,20 @@ Toolchain: Rust **1.86.0** (see `rust-toolchain.toml`; `rustfmt` and `clippy` co
 
 | Crate | Role |
 |---|---|
-| `mneme-core` | Frozen interface contracts (§20.3), `ObjectId`, `LogicalKey`, `Root`, `Receipt`, `TrustTier`, HLC, dCBOR codec |
-| `mneme-crypto` | Ed25519 signing, ChaCha20-Poly1305 AEAD, key vault, chameleon redaction |
+| `mneme-core` | Frozen interface contracts (§20.3), `ObjectId`, `LogicalKey`, `Root`, `Receipt`, `ForgetProof`, `TrustTier`, HLC, dCBOR codec; broader `ActionReceipt` accountability remains roadmap |
+| `mneme-crypto` | Ed25519 signing, ChaCha20-Poly1305 AEAD, key vault; chameleon redaction requires `experimental_redaction` |
 | `mneme-smt` | Sparse Merkle Tree: membership and non-membership proofs |
 | `mneme-dag` | DAG index tracking parent/head pointers across objects |
-| `mneme-index` | Key-index (SMT-backed) and semantic index (HNSW) with recall receipts |
+| `mneme-index` | Default key-index (SMT-backed) exact record lookup; semantic/HNSW/cert/federation exports require explicit experimental features |
 | `mneme-root` | Signed root assembly, checkpoint log, A-REPLAY detection |
 | `mneme-cap` | Offline-verifiable capability tokens (scoped write/promote/forget) |
-| `mneme-forget` | GDPR shred, tombstone, prove-absent, chameleon redaction |
-| `mneme-crdt` | CRDT merge / anti-entropy wire format (MST-style) |
-| `mneme-verify` | **Fail-closed verifier TCB** — `verify_recall`, `verify_semantic_recall`, `verify_store`; `TCB_LINE_BUDGET = 500` |
-| `mneme-store` | Store kernel: `remember` / `recall_verified` / `forget` / `promote`; atomic transactions with crash-safe `.incomplete` guard |
-| `mneme-mcp` | MCP stdio server exposing store ops to AI agents |
-| `mneme-cli` | `mneme` binary: `verify`, `recall`, `remember`, `forget`, `merge`, `attest`, `determinism` |
-| `mnemed` | Local daemon with HTTP (`:7845`) + optional gRPC + Unix socket APIs, sync over WebSocket |
+| `mneme-forget` | GDPR shred, tombstone, prove-absent; chameleon redaction requires `experimental_redaction` |
+| `mneme-crdt` | Experimental CRDT merge / anti-entropy wire format (MST-style), stored under `experimental/sync-crdt/` |
+| `mneme-verify` | **Fail-closed verifier TCB** — default `verify_recall`, `verify_store`; `verify_semantic_recall` is `experimental_semantic`; `TCB_LINE_BUDGET = 481` |
+| `mneme-store` | Store kernel: `remember` / `recall_verified` / `forget` / `promote`; `erasure_receipt` returns verified `ForgetProof`; helper/test surfaces require `internal_test_support` or `bench_support` |
+| `mneme-mcp` | MCP stdio server exposing exactly `record-with-provenance`, `recall-with-signed-chain`, `erase-with-receipt-and-proof-of-absence`, and `verify` |
+| `mneme-cli` | Operator/adoption binary: default product calls are `verify`, `recall`, `remember`, `forget`; `audit`, `init`, and `determinism` require `operator_tools`; `merge`/`sync`, `attest`, and cognition cert commands require explicit experimental features |
+| `mnemed` | Experimental daemon under `experimental/sync-crdt/` with HTTP (`:7845`) + optional gRPC + Unix socket APIs, sync over WebSocket |
 | `mneme-crossref` | Independent reference implementation of Appendix B vectors (zero `mneme-*` deps) |
 | `fuzz/` | `cargo-fuzz` targets; excluded from workspace build |
 
@@ -80,7 +80,7 @@ Toolchain: Rust **1.86.0** (see `rust-toolchain.toml`; `rustfmt` and `clippy` co
 - **INV-5**: Agent-facing reads use only `Store::recall_verified` / `recall_verified_default`. The untrusted index path (`Store::recall`) is `pub(crate)`.
 - **INV-6**: Cold open rejects if any on-disk signed checkpoint has a higher sequence than `HEAD` (`RootReplayed` error). This closes the A-REPLAY rollback vector.
 - **Fail-closed default**: every error path rejects rather than guesses. `MnemeError` variants are the typed rejection surface.
-- **TCB budget**: `mneme-verify` must stay under 500 lines. Adding logic there requires explicit invariant justification.
+- **TCB budget**: `mneme-verify` must stay at or under its pinned `TCB_LINE_BUDGET` (currently 481 lines). Adding logic there requires explicit invariant justification.
 - **Interface freeze**: types in `mneme-core/src/interface.rs` are normative seams. Field layout, enum variants, and hashing rules must not change without a formal interface-change request.
 
 ## Key data flow
@@ -103,7 +103,10 @@ The `mneme-crossref` crate is an independent reimplementation of the Appendix B 
 2. **Verifiable retrieval proves procedure-faithfulness, not exact nearest neighbors.**
 3. The `commitment_binding` feature is a **tagged BLAKE3 envelope only** — not zero-knowledge, not a SNARK. (A legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it implied zero-knowledge, which the BLAKE3 envelope is not.) The `pedersen_schnorr_zk` feature (12-month milestone B3, off by default; previously mis-named `plonky2_prover` and renamed for honesty) is a **real transparent zero-knowledge proof**: Pedersen commitments + a Schnorr equality-of-openings NIZK over Ristretto (Fiat–Shamir, no trusted setup). It proves *faithful execution of a committed retrieval-match with witness privacy* — it is **not** Plonky2 and **not** a FRI/PLONK SNARK (Plonky2 1.x is nightly-only; the repo pins stable 1.86.0), and it still does **not** prove semantic truth or exact nearest neighbors. The `B3_DEFERRAL_STATUS` string in `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
 
-These limits appear in `MnemeError` messages, MCP tool descriptions, and verifier exports. Never weaken or remove them.
+The memory-and-record layer is cryptographically airtight; model-side parametric
+residue is STATISTICAL attestation only, never claimed as cryptographic
+deletion. These limits appear in `MnemeError` messages, MCP tool descriptions,
+and verifier exports. Never weaken or remove them.
 
 ## Scope notes
 

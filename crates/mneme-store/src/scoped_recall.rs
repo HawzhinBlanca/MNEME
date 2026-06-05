@@ -3,14 +3,29 @@
 use crate::Store;
 use mneme_cap::Capability;
 use mneme_core::{Entry, MnemeError, Procedure, ProvenanceFilter, Query};
+#[cfg(feature = "experimental_semantic")]
 use mneme_index::{
     align_scoped_receipt_results, build_provenance_attestation, verify_provenance_attestation,
     verify_semantic_receipt_vo_zkann,
 };
+#[cfg(feature = "experimental_semantic")]
 use mneme_verify::{RecallContext, SemanticRecallInput, verify_semantic_recall};
 
 impl Store {
     /// Semantic recall whose receipt proves a provenance filter was honored (exact path).
+    #[cfg(not(feature = "experimental_semantic"))]
+    pub fn recall_verified_scoped(
+        &self,
+        _query: &Query,
+        _proc: &Procedure,
+        _cap: &Capability,
+        _filter: &ProvenanceFilter,
+    ) -> Result<Vec<Entry>, MnemeError> {
+        Err(MnemeError::ProcedureMismatch)
+    }
+
+    /// Semantic recall whose receipt proves a provenance filter was honored (exact path).
+    #[cfg(feature = "experimental_semantic")]
     pub fn recall_verified_scoped(
         &self,
         query: &Query,

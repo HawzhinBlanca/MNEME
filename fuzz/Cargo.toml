@@ -11,10 +11,10 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 mneme-cap = { path = "../crates/mneme-cap" }
 mneme-core = { path = "../crates/mneme-core" }
-mneme-index = { path = "../crates/mneme-index" }
+mneme-index = { path = "../crates/mneme-index", features = ["experimental_semantic", "cognition_cert", "federation"] }
 mneme-smt = { path = "../crates/mneme-smt" }
-mneme-crdt = { path = "../crates/mneme-crdt" }
-mneme-attest = { path = "../crates/mneme-attest" }
+mneme-crdt = { path = "../experimental/sync-crdt/mneme-crdt" }
+mneme-attest = { path = "../experimental/attestation/mneme-attest" }
 
 [[bin]]
 name = "dcbor_parse"

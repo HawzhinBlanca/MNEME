@@ -18,8 +18,8 @@ Until then, Playwright specs are skipped with an explicit reason (not fantasy gr
 | Journey | Blueprint ref |
 |--------|----------------|
 | Onboarding / store open | §7 `Store::open`, fail-closed |
-| Search / recall with min tier | §14.1 `memory.recall`, §13.4 tiers |
-| Remember + quarantine tier | §14.1 `memory.remember` |
+| Search / recall with min tier | §14.1 `recall-with-signed-chain`, §13.4 tiers |
+| Record + quarantine tier | §14.1 `record-with-provenance` |
 | Forget + prove absent | §9.5, §13.2 |
 | Settings / trust & capabilities | §12 capabilities |
 
@@ -39,7 +39,7 @@ Critical CLI journeys are covered in:
 
 ```bash
 # Store kernel e2e (blueprint §19 v0 + §21)
-cargo test -p mneme-store --test e2e
+cargo test -p mneme-store --features internal_test_support --test e2e
 
 # Rust CLI e2e
 cargo test -p mneme-cli --test cli_e2e
@@ -52,6 +52,22 @@ npm run test:e2e
 ```
 
 Default `MNEME_BIN` in Node tests: `target/debug/mneme` after `cargo build -p mneme-cli`.
+
+## MCP integration (active)
+
+The MCP public surface is exactly:
+
+- `record-with-provenance`
+- `recall-with-signed-chain`
+- `erase-with-receipt-and-proof-of-absence`
+- `verify`
+
+Run with:
+
+```bash
+cargo build -p mneme-mcp
+npm run test:e2e:mcp
+```
 
 ### Exit codes (CLI contract)
 

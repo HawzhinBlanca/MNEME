@@ -1,63 +1,100 @@
-//! Authenticated indexes: key-index recall (v0) + committed semantic ANN (90-day).
+//! Authenticated indexes: key-index recall (v0) plus experimental semantic ANN.
 //!
-//! Semantic retrieval uses wrapped `hnsw_rs` with Merkle-committed nodes and
-//! deterministic procedure P (integer distance, ObjectId tie-break). Receipts
+//! The default lean build exports only exact key-index lookup and sidecar replay.
+//! Semantic retrieval is compiled only with `experimental_semantic`; receipts
 //! prove procedure-faithfulness, **not** exact nearest neighbors (blueprint §3).
 
 #![forbid(unsafe_code)]
 #![deny(warnings)]
 
+#[cfg(feature = "cognition_cert")]
+#[path = "../../../experimental/cognition-cert/mneme-index-cognition-cert.rs"]
 mod cognition_cert;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-commit.rs"]
 mod commit;
 #[cfg(feature = "context_gate")]
+#[path = "../../../experimental/context-gate/mneme-index-context-gate.rs"]
 mod context_gate;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-distance.rs"]
 mod distance;
 mod error;
+#[cfg(feature = "federation")]
+#[path = "../../../experimental/federation/mneme-index-federation-cert.rs"]
 mod federation_cert;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-hnsw-backend.rs"]
 mod hnsw_backend;
 mod key_index;
 mod key_index_load;
 mod procedure;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-provenance.rs"]
 mod provenance;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-receipt.rs"]
 mod receipt;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-semantic.rs"]
 mod semantic;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-verify.rs"]
 mod verify;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-wire.rs"]
 mod wire;
+#[cfg(feature = "experimental_semantic")]
+#[path = "../../../experimental/semantic-retrieval/mneme-index-zkann.rs"]
 mod zkann;
 
 #[cfg(feature = "commitment_binding")]
+#[path = "../../../experimental/zk-privacy/mneme-index-commitment-binding.rs"]
 mod commitment_binding;
 
 #[cfg(feature = "pedersen_schnorr_zk")]
+#[path = "../../../experimental/zk-privacy/mneme-index-pedersen-schnorr-zk.rs"]
 mod pedersen_schnorr_zk;
 
 #[cfg(feature = "pedersen_schnorr_zk")]
+#[path = "../../../experimental/zk-privacy/mneme-index-semantic-zk.rs"]
 mod semantic_zk;
 
-// Phase IV-A research seam — UNIMPLEMENTED, off by default, wired into no recall path.
 #[cfg(feature = "piop_research")]
+#[path = "../../../experimental/research/mneme-index-piop-research.rs"]
 mod piop_research;
 
+#[cfg(feature = "experimental_semantic")]
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
 pub use key_index_load::{load_key_index_tree, load_object_keys};
+#[cfg(feature = "experimental_semantic")]
 pub use procedure::{
-    IndexedEntry, PROC_DOMAIN, default_key_procedure, default_semantic_procedure,
-    execute_procedure_p, is_key_index_procedure, procedure_id, replay_from_candidates,
+    CandidateRow, IndexedEntry, default_semantic_procedure, execute_procedure_p,
+    replay_from_candidates,
 };
+pub use procedure::{PROC_DOMAIN, default_key_procedure, is_key_index_procedure, procedure_id};
+#[cfg(feature = "experimental_semantic")]
 pub use provenance::{
     align_scoped_receipt_results, build_provenance_attestation, verify_provenance_attestation,
 };
+#[cfg(feature = "experimental_semantic")]
 pub use receipt::SemanticRecallReceipt;
+#[cfg(feature = "experimental_semantic")]
 pub use receipt::ZkRetrievalAttachment;
+#[cfg(feature = "experimental_semantic")]
 pub use receipt::{ProvenanceAttestation, ZkannAttachment};
+#[cfg(feature = "experimental_semantic")]
 pub use semantic::SemanticIndex;
+#[cfg(feature = "experimental_semantic")]
 pub use verify::{
     HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_ads_vo_membership, verify_semantic_receipt_full,
     verify_semantic_receipt_tcb_gate, verify_semantic_receipt_vo, verify_semantic_receipt_vo_zkann,
 };
+#[cfg(feature = "experimental_semantic")]
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
+#[cfg(feature = "experimental_semantic")]
 pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkann_attachment};
 
 #[cfg(feature = "context_gate")]
@@ -65,11 +102,13 @@ pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
     verify_cognition_certificate_v2_draft, verify_cognition_certificate_v2_draft_strict,
 };
+#[cfg(feature = "cognition_cert")]
 pub use cognition_cert::{
     assemble_cognition_certificate_v1, fuzz_cognition_cert_wire, verify_cognition_certificate_v1,
 };
 #[cfg(feature = "context_gate")]
 pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
+#[cfg(feature = "federation")]
 pub use federation_cert::{
     FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
     PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
@@ -98,30 +137,28 @@ pub use pedersen_schnorr_zk::{
 #[cfg(feature = "pedersen_schnorr_zk")]
 pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
 
-// Phase IV-A research seam (UNIMPLEMENTED). Exported only so the honesty
-// constants are inspectable; `prove_exact_nn_piop` fails closed and proves nothing.
 #[cfg(feature = "piop_research")]
 pub use piop_research::{
     PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, PIOP_RESEARCH_VERSION, prove_exact_nn_piop,
 };
 
-/// ADS backend enabled when the `ads` feature is on.
+/// Semantic backend enabled when the `experimental_semantic` feature is on.
 /// Privacy path is `commitment_binding` only — a tagged BLAKE3 binding envelope,
 /// not SNARK, not Plonky2. (The legacy `zk` Cargo feature alias was dropped
 /// because it implied zero-knowledge, which the BLAKE3 envelope is not. The
 /// deprecated `plonky2_prover` alias maps to `pedersen_schnorr_zk`, not this path.)
-#[cfg(feature = "ads")]
+#[cfg(feature = "experimental_semantic")]
 pub const SEMANTIC_BACKEND_ENABLED: bool = true;
 
-#[cfg(not(feature = "ads"))]
+#[cfg(not(feature = "experimental_semantic"))]
 pub const SEMANTIC_BACKEND_ENABLED: bool = false;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mneme_core::{
-        DistanceMetric, FixedPointEmbedding, LogicalKey, ObjectId, Procedure, ProcedureAlgo,
-    };
+    #[cfg(feature = "experimental_semantic")]
+    use mneme_core::{DistanceMetric, FixedPointEmbedding, Procedure, ProcedureAlgo};
+    use mneme_core::{LogicalKey, ObjectId};
     use mneme_smt::SparseMerkleTree;
 
     fn sample_id(byte: u8) -> ObjectId {
@@ -174,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "experimental_semantic")]
     fn semantic_backend_enabled_with_ads_feature() {
         if !SEMANTIC_BACKEND_ENABLED {
             panic!("SEMANTIC_BACKEND_ENABLED must be true");
@@ -223,10 +261,10 @@ mod tests {
             PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop,
         };
         // Research seam must never claim to prove anything.
-        assert!(PIOP_RESEARCH_HONESTY.contains("UNIMPLEMENTED"));
-        assert!(PIOP_RESEARCH_HONESTY.contains("proves NOTHING"));
+        assert!(PIOP_RESEARCH_HONESTY.contains("not implemented"));
+        assert!(PIOP_RESEARCH_HONESTY.contains("does not prove"));
         assert!(PIOP_RESEARCH_HONESTY.contains("NOT a SNARK"));
-        assert!(PIOP_RESEARCH_STATUS.contains("UNIMPLEMENTED"));
+        assert!(PIOP_RESEARCH_STATUS.contains("not implemented"));
         // Fail-closed Err — must not panic on the research entry point.
         assert_eq!(
             prove_exact_nn_piop(&[0u8; 32], &[0u8; 32], &[0u8; 32], 1),
@@ -262,6 +300,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "experimental_semantic")]
     fn semantic_recall_returns_receipt_bound_results() {
         let mut index = SemanticIndex::new();
         let emb = FixedPointEmbedding::new(2, 0, vec![5, 0]).unwrap();

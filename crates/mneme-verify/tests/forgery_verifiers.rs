@@ -4,17 +4,18 @@ mod helpers;
 
 use std::path::Path;
 
-use helpers::{
-    build_root_chain_fixture, build_valid_recall, build_valid_semantic_recall, sample_procedure,
-    sample_query_embedding, theme_key,
-};
+use helpers::{build_root_chain_fixture, build_valid_recall, theme_key};
+#[cfg(feature = "experimental_semantic")]
+use helpers::{build_valid_semantic_recall, sample_procedure, sample_query_embedding};
 use mneme_core::{MnemeError, Query, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_smt::{MembershipProof, TREE_DEPTH};
 use mneme_verify::{
-    RecallContext, verify_membership_proof, verify_recall, verify_root, verify_semantic_recall,
-    verify_semantic_receipt, verify_signed_head_only, verify_store,
+    RecallContext, verify_membership_proof, verify_recall, verify_root, verify_signed_head_only,
+    verify_store,
 };
+#[cfg(feature = "experimental_semantic")]
+use mneme_verify::{verify_semantic_recall, verify_semantic_receipt};
 
 #[test]
 fn forgery_membership_proof_replays_valid_path_under_wrong_root() {
@@ -131,6 +132,7 @@ fn forgery_store_head_skips_object_integrity_verify_store_fails_closed() {
 }
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn forgery_semantic_receipt_binds_to_alien_semantic_commit() {
     let mut f = build_valid_semantic_recall();
     f.receipt.semantic_commit[0] ^= 0x01;
@@ -220,6 +222,7 @@ fn persist_forgery_store(path: &Path, fixture: &helpers::RecallFixture) {
 }
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn forgery_semantic_recall_swaps_object_bytes_under_valid_receipt() {
     let mut f = build_valid_semantic_recall();
     let id = f.receipt.verification_object.result_ids[0];

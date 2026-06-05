@@ -6,20 +6,20 @@ members = [
     "crates/mneme-smt",
     "crates/mneme-dag",
     "crates/mneme-index",
-    "crates/mneme-context",
     "crates/mneme-root",
     "crates/mneme-cap",
-    "crates/mneme-attest",
     "crates/mneme-forget",
-    "crates/mneme-crdt",
     "crates/mneme-verify",
     "crates/mneme-store",
     "crates/mneme-account",
-    "crates/mneme-gate",
     "crates/mneme-mcp",
     "crates/mneme-cli",
-    "crates/mnemed",
     "crates/mneme-crossref",
+    "experimental/attestation/mneme-attest",
+    "experimental/context-gate/mneme-context",
+    "experimental/context-gate/mneme-gate",
+    "experimental/sync-crdt/mneme-crdt",
+    "experimental/sync-crdt/mnemed",
 ]
 default-members = ["crates/mneme-store"]
 exclude = ["fuzz", "scripts/piop-flat-prototype"]
@@ -38,17 +38,17 @@ mneme-smt = { path = "crates/mneme-smt" }
 mneme-dag = { path = "crates/mneme-dag" }
 mneme-index = { path = "crates/mneme-index" }
 mneme-forget = { path = "crates/mneme-forget" }
-mneme-crdt = { path = "crates/mneme-crdt" }
+mneme-crdt = { path = "experimental/sync-crdt/mneme-crdt" }
 mneme-mcp = { path = "crates/mneme-mcp" }
 mneme-root = { path = "crates/mneme-root" }
 mneme-cap = { path = "crates/mneme-cap" }
-mneme-attest = { path = "crates/mneme-attest" }
+mneme-attest = { path = "experimental/attestation/mneme-attest" }
 mneme-verify = { path = "crates/mneme-verify" }
 mneme-store = { path = "crates/mneme-store" }
 mneme-account = { path = "crates/mneme-account" }
-mneme-gate = { path = "crates/mneme-gate" }
-mnemed = { path = "crates/mnemed" }
-mneme-context = { path = "crates/mneme-context" }
+mneme-gate = { path = "experimental/context-gate/mneme-gate" }
+mnemed = { path = "experimental/sync-crdt/mnemed" }
+mneme-context = { path = "experimental/context-gate/mneme-context" }
 
 blake3 = "1.8"
 ciborium = "0.2"

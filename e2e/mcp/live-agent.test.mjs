@@ -2,12 +2,12 @@
  * A2 — LIVE LLM agent loop over `mneme-mcp` (credential-gated, turn-key).
  *
  * Drives a REAL Anthropic model through the MCP tool-use loop against a live
- * `mneme-mcp` stdio server: the model is given the three memory tools and asked to
- * remember a fact and then recall it. We assert the model actually invoked
- * `memory.remember` and `memory.recall`, and that the recalled content (which came
- * back through `recall_verified`, INV-5) round-trips. This is the live counterpart to
- * the deterministic 9-turn simulation (`scripts/ci/mcp-agent-sim.sh`) and the official
- * SDK-client interop test (`sdk-client.test.mjs`).
+ * `mneme-mcp` stdio server: the model is given the four lean record tools and
+ * asked to record a fact and then recall it. We assert the model actually
+ * invoked `record-with-provenance` and `recall-with-signed-chain`, and that the
+ * recalled content (which came back through `recall_verified`, INV-5)
+ * round-trips. This is the live counterpart to the deterministic session
+ * simulation and the official SDK-client interop test (`sdk-client.test.mjs`).
  *
  * TURN-KEY / FAIL-CLOSED GATING (so the standard `node --test e2e/mcp/*.test.mjs` CI
  * lane stays green without credentials):
@@ -48,13 +48,13 @@ function toolText(result) {
 // Convert an MCP tool definition into the Anthropic tool-use schema.
 function toAnthropicTool(t) {
   return {
-    name: t.name.replace(/\./g, "_"), // Anthropic tool names disallow "."
+    name: t.name.replace(/[^A-Za-z0-9_-]/g, "_"),
     description: t.description ?? "",
     input_schema: t.inputSchema ?? { type: "object", properties: {} },
   };
 }
 
-test("A2: a live LLM drives memory.remember + memory.recall over MCP", async (t) => {
+test("A2: a live LLM drives record + recall over MCP", async (t) => {
   if (!process.env.ANTHROPIC_API_KEY) {
     t.skip("ANTHROPIC_API_KEY unset — live-LLM agent loop is credential-gated (set the key to run)");
     return;
@@ -96,9 +96,10 @@ test("A2: a live LLM drives memory.remember + memory.recall over MCP", async (t)
       {
         role: "user",
         content:
-          "Use the memory tools. First remember this fact under namespace 'user', name " +
+          "Use the memory tools. First record this fact under namespace 'user', name " +
           "'theme': the content is exactly \"dark mode preferred\", kind 'semantic'. " +
-          "Then recall it with query 'theme' (min_tier 'quarantine', namespace 'user') and " +
+          "Use record-with-provenance for the write. Then recall it with query 'theme' " +
+          "(min_tier 'quarantine', namespace 'user') using recall-with-signed-chain and " +
           "tell me what you stored.",
       },
     ];
@@ -122,7 +123,7 @@ test("A2: a live LLM drives memory.remember + memory.recall over MCP", async (t)
         invoked.add(mcpName);
         const result = await mcp.callTool({ name: mcpName, arguments: use.input ?? {} });
         const text = toolText(result);
-        if (mcpName === "memory.recall") lastRecallText = text;
+        if (mcpName === "recall-with-signed-chain") lastRecallText = text;
         toolResults.push({
           type: "tool_result",
           tool_use_id: use.id,
@@ -133,8 +134,14 @@ test("A2: a live LLM drives memory.remember + memory.recall over MCP", async (t)
       messages.push({ role: "user", content: toolResults });
     }
 
-    assert.ok(invoked.has("memory.remember"), "the live model must invoke memory.remember");
-    assert.ok(invoked.has("memory.recall"), "the live model must invoke memory.recall");
+    assert.ok(
+      invoked.has("record-with-provenance"),
+      "the live model must invoke record-with-provenance",
+    );
+    assert.ok(
+      invoked.has("recall-with-signed-chain"),
+      "the live model must invoke recall-with-signed-chain",
+    );
     assert.ok(
       lastRecallText.includes("dark mode preferred"),
       `recall_verified must return the remembered content (got: ${lastRecallText})`,

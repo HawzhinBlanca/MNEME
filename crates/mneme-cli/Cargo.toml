@@ -5,6 +5,17 @@ edition.workspace = true
 license.workspace = true
 description = "MNEME fail-closed memory gate (CLI adoption layer)"
 
+[features]
+default = []
+operator_tools = []
+experimental_attest = ["dep:sha2"]
+experimental_cognition_cert = [
+  "dep:mneme-index",
+  "mneme-index/cognition_cert",
+  "mneme-store/experimental_cognition_cert",
+]
+experimental_sync_crdt = ["dep:mnemed", "dep:tokio", "mneme-store/experimental_sync_crdt"]
+
 [[bin]]
 name = "mneme"
 path = "src/main.rs"
@@ -16,16 +27,16 @@ mneme-crypto.workspace = true
 mneme-cap.workspace = true
 mneme-store.workspace = true
 mneme-verify.workspace = true
-mneme-index.workspace = true
+mneme-index = { workspace = true, optional = true }
 mneme-smt.workspace = true
-mnemed = { path = "../mnemed" }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+mnemed = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"], optional = true }
 hex.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 blake3.workspace = true
-sha2 = "0.10"
+sha2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -34,7 +45,7 @@ tempfile = "3.14"
 mneme-cap.workspace = true
 mneme-core.workspace = true
 mneme-crypto.workspace = true
-mneme-store.workspace = true
+mneme-store = { workspace = true, features = ["internal_test_support"] }
 mneme-verify.workspace = true
 mneme-index.workspace = true
 hex.workspace = true

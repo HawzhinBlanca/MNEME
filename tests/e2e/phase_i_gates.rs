@@ -1,10 +1,15 @@
 use super::helpers::{agent_store, semantic_draft_with_embedding, theme_key};
+#[cfg(feature = "experimental_semantic")]
 use mneme_cap::agent_cap;
-use mneme_core::{
-    AsOf, Draft, FixedPointEmbedding, MemoryKind, ProvenanceFilter, Query, TrustTier,
-};
+use mneme_core::{AsOf, Query, TrustTier};
+#[cfg(feature = "experimental_semantic")]
+use mneme_core::{Draft, FixedPointEmbedding, MemoryKind, ProvenanceFilter};
+#[cfg(feature = "experimental_semantic")]
 use mneme_crypto::KeyPair;
-use mneme_index::{default_key_procedure, default_semantic_procedure};
+use mneme_index::default_key_procedure;
+#[cfg(feature = "experimental_semantic")]
+use mneme_index::default_semantic_procedure;
+#[cfg(feature = "experimental_semantic")]
 use mneme_store::Store;
 
 #[test]
@@ -28,6 +33,7 @@ fn e2e_recall_verified_at_matches_current_root() {
 }
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn e2e_provenance_scoped_recall_honors_filter() {
     let (mut store, cap, _dir) = agent_store();
     let embedding = mneme_core::FixedPointEmbedding::new(2, 0, vec![3, 4]).unwrap();
@@ -57,6 +63,7 @@ fn e2e_provenance_scoped_recall_honors_filter() {
 /// failed closed (`.unwrap()` would panic) — non-functional. Guards both functionality and
 /// the post-filter.
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn e2e_recall_verified_at_valid_time_semantic_excludes_and_is_functional() {
     let (mut store, cap, _dir) = agent_store();
     let emb = FixedPointEmbedding::new(2, 0, vec![1, 2]).unwrap();
@@ -101,6 +108,7 @@ fn e2e_recall_verified_at_valid_time_semantic_excludes_and_is_functional() {
 /// provenance-scoped recall filtering on the trusted writer. Proves the receipt enforces
 /// exclusion, not just inclusion (the case the existing suite omitted).
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn e2e_provenance_scoped_recall_excludes_foreign_writer_poison() {
     let dir = tempfile::tempdir().expect("tempdir");
     let operator = KeyPair::generate();
@@ -171,6 +179,7 @@ fn e2e_provenance_scoped_recall_excludes_foreign_writer_poison() {
 /// `verify_semantic_recall` re-replays the UNFILTERED candidates against the post-filter
 /// `result_ids`. Un-ignore when the scoped path stops re-checking the unfiltered VO.
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn e2e_provenance_scoped_returns_trusted_when_poison_outranks() {
     let dir = tempfile::tempdir().expect("tempdir");
     let operator = KeyPair::generate();

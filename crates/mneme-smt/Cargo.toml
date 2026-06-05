@@ -9,6 +9,10 @@ mneme-core.workspace = true
 mneme-crypto.workspace = true
 blake3.workspace = true
 
+[features]
+default = []
+experimental_redaction = ["mneme-crypto/experimental_redaction"]
+
 [dev-dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -17,7 +17,7 @@ fail_closed() {
 }
 
 require_store() {
-  if ! cargo check -p mneme-store --quiet 2>/dev/null; then
+  if ! cargo check -p mneme-store --features internal_test_support --quiet 2>/dev/null; then
     fail_closed "mneme-store does not build"
   fi
 }
@@ -26,15 +26,19 @@ case "$LANE" in
   tamper)
     require_store
     echo "==> store generative tamper (≥120 executed cases)"
-    cargo test -p mneme-store --test tamper_suite tamper_suite_generative -- --nocapture
-    echo "==> verify tamper suites (key + semantic + cap)"
+    cargo test -p mneme-store --features internal_test_support --test tamper_suite tamper_suite_generative -- --nocapture
+    echo "==> verify tamper suites (key + cap; semantic is experimental)"
     cargo test -p mneme-verify --test tamper_suite -- --nocapture
-    cargo test -p mneme-verify --test tamper_semantic -- --nocapture
+    if [[ "${MNEME_EXPERIMENTAL_SEMANTIC:-0}" == "1" ]]; then
+      cargo test -p mneme-verify --features experimental_semantic --test tamper_semantic -- --nocapture
+    else
+      echo "==> skipping semantic tamper suite (set MNEME_EXPERIMENTAL_SEMANTIC=1)"
+    fi
     cargo test -p mneme-verify --test tamper_cap -- --nocapture
     ;;
 
   determinism)
-    if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+    if ! cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate --help &>/dev/null; then
       fail_closed "mneme-cli determinism foundation-gate not available"
     fi
     out="$ROOT/out/ci-foundation-gate"
@@ -43,10 +47,10 @@ case "$LANE" in
       echo "==> determinism foundation-gate run ${run}/2"
       dest="$out"
       [[ "$run" -eq 2 ]] && dest="${out}-2"
-      cargo run -p mneme-cli -- determinism foundation-gate \
+      cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
         --out "$dest" \
         --timestamp "1970-01-01T00:00:00Z"
-      cargo run -p mneme-cli -- determinism foundation-verify \
+      cargo run -p mneme-cli --features operator_tools -- determinism foundation-verify \
         "$dest/foundation.report.json" \
         --output "$dest/foundation.verify.json"
     done

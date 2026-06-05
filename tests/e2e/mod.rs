@@ -3,16 +3,21 @@
 pub mod helpers;
 mod phase_i_gates;
 
+#[cfg(feature = "experimental_semantic")]
+use helpers::semantic_draft_with_embedding;
 use helpers::{
     ConventionalVectorDb, KILLER_POISON, agent_store, bypass_attempt, demo_audit, semantic_draft,
-    semantic_draft_with_embedding, theme_key, tool_store,
+    theme_key, tool_store,
 };
 use mneme_cap::{agent_cap, tool_channel_cap};
+#[cfg(feature = "experimental_semantic")]
 use mneme_core::FixedPointEmbedding;
 use mneme_core::{ForgetMode, ForgetTarget, LogicalKey, MnemeError, Query, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_dag::DagIndex;
-use mneme_index::{default_key_procedure, default_semantic_procedure};
+use mneme_index::default_key_procedure;
+#[cfg(feature = "experimental_semantic")]
+use mneme_index::default_semantic_procedure;
 use mneme_smt::SparseMerkleTree;
 use mneme_store::Store;
 use mneme_verify::{RecallContext, RecallInput, verify_recall};
@@ -609,6 +614,7 @@ fn e2e_bypass_verify_store_head_with_tampered_object() {
 // --- §19 v0: bench populate / recall path (in-process smoke) ---
 
 #[test]
+#[cfg(feature = "bench_support")]
 fn e2e_bench_populate_recall_smoke() {
     test_clear_pause();
     let (mut store, cap, _dir) = agent_store();
@@ -752,6 +758,7 @@ fn e2e_kill_resume_forget_at_write_boundaries() {
     }
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_kill_resume_merge_at_write_boundaries() {
     let boundaries = [
@@ -854,6 +861,7 @@ fn e2e_kill_resume_recovery_after_marker_removal() {
     assert_eq!(entries[0].plaintext, b"kept");
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_kill_resume_merge_recovery_after_marker_removal() {
     test_clear_pause();
@@ -1067,6 +1075,7 @@ fn e2e_90day_forget_shred_proves_absent_and_fails_recall() {
 }
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn e2e_90day_semantic_recall_verified_with_receipt() {
     let (mut store, cap, _store_dir) = agent_store();
     let near = FixedPointEmbedding::new(2, 0, vec![10, 0]).unwrap();
@@ -1334,6 +1343,7 @@ fn e2e_open_pinned_rejects_full_snapshot_rollback() {
 
 // --- Phase 2a: §11 INCREMENTAL anti-entropy (manifest + delta) convergence ---
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn inc_peer(
     seed: u8,
     cap: &mneme_cap::Capability,
@@ -1348,6 +1358,7 @@ fn inc_peer(
 
 /// Disjoint keys converge via the manifest+delta path, and each peer fetches ONLY
 /// the object bytes it lacks (not the full snapshot).
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_incremental_sync_disjoint_converges_delta_only() {
     let operator = KeyPair::from_seed([0x6a; 32]);
@@ -1390,6 +1401,7 @@ fn e2e_incremental_sync_disjoint_converges_delta_only() {
 
 /// Re-pulling an already-converged peer fetches nothing and leaves the authenticated
 /// content root unchanged (idempotent).
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_incremental_sync_is_idempotent() {
     let operator = KeyPair::from_seed([0x6b; 32]);
@@ -1419,6 +1431,7 @@ fn e2e_incremental_sync_is_idempotent() {
 
 /// A conflicting write to the SAME logical key on both peers converges to ONE
 /// deterministic winner regardless of merge direction (CRDT semantics over the wire).
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_incremental_sync_conflicting_key_converges() {
     let operator = KeyPair::from_seed([0x6c; 32]);
@@ -1449,6 +1462,7 @@ fn e2e_incremental_sync_conflicting_key_converges() {
 /// A-NET: a fetched delta object mutated in transit must NOT be ingested — the
 /// recomputed content hash no longer matches the manifest leaf, so the forged key
 /// never appears (merge does not error; it drops the forged object).
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_incremental_sync_rejects_in_transit_tamper() {
     let operator = KeyPair::from_seed([0x6d; 32]);
@@ -1481,6 +1495,7 @@ fn e2e_incremental_sync_rejects_in_transit_tamper() {
 /// Phase 2a fail-closed: an INCOMPLETE delta (peer manifest references an object it
 /// does not serve — truncated/malicious HaveObjects) must be REJECTED, never merged
 /// with a silent divergence. Regression for the adversarial-review convergence blocker.
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_incremental_sync_incomplete_delta_fails_closed() {
     let operator = KeyPair::from_seed([0x6e; 32]);
@@ -1622,6 +1637,7 @@ fn e2e_kill_resume_remember_batch() {
 
 /// Build two stores sharing the SAME operator key (one trust domain, e.g. a user's
 /// two devices) plus a writer cap valid under that operator.
+#[cfg(feature = "experimental_sync_crdt")]
 fn b4_peer_pair(
     operator: &KeyPair,
 ) -> (
@@ -1643,6 +1659,7 @@ fn b4_peer_pair(
 /// B4: a same-operator peer that merges a SEALED snapshot decrypts the transferred
 /// vault keys and recalls the sender's entry as PLAINTEXT — the functional gap the
 /// keyless ciphertext-only snapshot left open.
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_b4_sealed_snapshot_enables_same_operator_plaintext_recall() {
     let operator = KeyPair::from_seed([0x42; 32]);
@@ -1671,6 +1688,7 @@ fn e2e_b4_sealed_snapshot_enables_same_operator_plaintext_recall() {
 /// B4 A-NET: a sealed bundle whose bytes were mutated in transit fails AEAD — the
 /// keys are NOT imported, so the entry converges over ciphertext (membership holds)
 /// but recall fails closed with NO plaintext leak.
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_b4_tampered_sealed_keys_fail_closed_but_still_converge() {
     let operator = KeyPair::from_seed([0x42; 32]);
@@ -1704,6 +1722,7 @@ fn e2e_b4_tampered_sealed_keys_fail_closed_but_still_converge() {
 /// B4 confidentiality boundary: a DIFFERENT operator (foreign trust domain) derives a
 /// different channel key and cannot open the sealed bundle, so it never recovers the
 /// peer's plaintext even though it received the sealed snapshot.
+#[cfg(feature = "experimental_sync_crdt")]
 #[test]
 fn e2e_b4_foreign_operator_cannot_open_sealed_keys() {
     let operator_x = KeyPair::from_seed([0x42; 32]);

@@ -7,7 +7,7 @@ const FORBIDDEN_HEAD_VERIFY: &[&str] = &["verify_store_head", "verify_signed_hea
 
 const PRODUCTION_SRC_ROOTS: &[&str] = &[
     "crates/mneme-cli/src",
-    "crates/mnemed/src",
+    "experimental/sync-crdt/mnemed/src",
     "crates/mneme-mcp/src",
     "crates/mneme-store/src",
 ];

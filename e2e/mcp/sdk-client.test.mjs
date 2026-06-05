@@ -2,10 +2,11 @@
  * Real MCP client interop — drives `mneme-mcp` with the OFFICIAL
  * `@modelcontextprotocol/sdk` client (the same library real agents/Claude Desktop
  * use), not a hand-rolled framing. Proves: a standard MCP client can complete the
- * `initialize` handshake, discover the memory tools, write via `memory.remember`,
- * and get a RECEIPT-VERIFIED `memory.recall` (the handler is `recall_verified` only,
- * INV-5) with the content round-tripping. Closes blueprint §19 "MCP agent recall"
- * for the real-client path (a live-LLM loop is the optional credential-gated extra).
+ * `initialize` handshake, discover the four lean record tools, write via
+ * `record-with-provenance`, and get a RECEIPT-VERIFIED
+ * `recall-with-signed-chain` (the handler is `recall_verified` only, INV-5)
+ * with the content round-tripping. Closes blueprint §19 "MCP agent recall" for
+ * the real-client path (a live-LLM loop is the optional credential-gated extra).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -59,26 +60,46 @@ test("official MCP SDK client gets receipt-verified recall from mneme-mcp", asyn
   try {
     const { tools } = await client.listTools();
     const names = tools.map((tdef) => tdef.name).sort();
-    assert.deepEqual(names, ["memory.forget", "memory.recall", "memory.remember"]);
+    assert.deepEqual(names, [
+      "erase-with-receipt-and-proof-of-absence",
+      "recall-with-signed-chain",
+      "record-with-provenance",
+      "verify",
+    ]);
 
-    const remembered = toolJson(
+    const recorded = toolJson(
       await client.callTool({
-        name: "memory.remember",
+        name: "record-with-provenance",
         arguments: { content: "dark mode preferred", kind: "semantic", namespace: "user", name: "theme" },
       }),
     );
-    assert.ok(remembered.object_id_hex?.length >= 64, "remember returns 32-byte object id");
-    assert.ok(remembered.root_hash_hex?.length >= 64, "remember returns signed root hash");
+    assert.ok(recorded.object_id_hex?.length >= 64, "record returns 32-byte object id");
+    assert.ok(recorded.root_hash_hex?.length >= 64, "record returns signed root hash");
+    assert.ok(recorded.root?.root_signature_hex?.length >= 64, "record returns signed root evidence");
 
     const recalled = toolJson(
       await client.callTool({
-        name: "memory.recall",
+        name: "recall-with-signed-chain",
         arguments: { query: "theme", min_tier: "quarantine", namespace: "user" },
       }),
     );
     // Recall went through recall_verified (INV-5). The content must round-trip.
     const blob = JSON.stringify(recalled);
     assert.ok(blob.includes("dark mode preferred"), `recall_verified must return the remembered content: ${blob}`);
+
+    const erased = toolJson(
+      await client.callTool({
+        name: "erase-with-receipt-and-proof-of-absence",
+        arguments: { namespace: "user", target: "theme" },
+      }),
+    );
+    assert.equal(erased.forget_proof?.mode, "shred");
+    assert.equal(erased.forget_proof?.absence_path_len, 256);
+    assert.ok(erased.forget_proof?.wire_hex?.length > 64, "erase returns canonical ForgetProof wire");
+    assert.equal(erased.absence_proof?.path_len, 256);
+
+    const verified = toolJson(await client.callTool({ name: "verify", arguments: {} }));
+    assert.ok(verified.root?.root_signature_hex?.length >= 64, "verify returns signed root evidence");
   } finally {
     await client.close();
   }

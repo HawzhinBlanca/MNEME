@@ -10,5 +10,5 @@ default = []
 phase_ii_gate_open = []
 
 [dependencies]
-mneme-core.workspace = true
+mneme-core = { workspace = true, features = ["experimental_context_gate"] }
 mneme-context.workspace = true

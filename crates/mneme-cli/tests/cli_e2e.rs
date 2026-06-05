@@ -2,20 +2,27 @@
 
 use assert_cmd::Command;
 use mneme_cap::agent_cap;
-use mneme_core::{Draft, FixedPointEmbedding, MemoryKind, MnemeError, TrustTier};
+#[cfg(feature = "operator_tools")]
+use mneme_core::MnemeError;
+use mneme_core::{Draft, MemoryKind};
+#[cfg(feature = "experimental_cognition_cert")]
+use mneme_core::{FixedPointEmbedding, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_store::{Store, test_clear_pause};
 use mneme_verify::{verify_signed_head_only, verify_store};
 use predicates::prelude::*;
 use std::fs;
+#[cfg(feature = "operator_tools")]
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
+#[cfg(feature = "operator_tools")]
 use walkdir::WalkDir;
 
 fn mneme() -> Command {
     Command::cargo_bin("mneme").unwrap()
 }
 
+#[cfg(not(feature = "operator_tools"))]
 #[test]
 fn help_lists_critical_subcommands() {
     mneme()
@@ -26,17 +33,76 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("recall"))
         .stdout(predicate::str::contains("forget"))
         .stdout(predicate::str::contains("remember"))
-        .stdout(predicate::str::contains("merge"))
-        .stdout(predicate::str::contains("audit"))
-        .stdout(predicate::str::contains("attest"))
-        .stdout(predicate::str::contains("certify"))
-        .stdout(predicate::str::contains("verify-cert"))
-        .stdout(predicate::str::contains("init"))
-        .stdout(predicate::str::contains("sync"))
+        .stdout(predicate::str::contains("audit").not())
+        .stdout(predicate::str::contains("init").not())
+        .stdout(predicate::str::contains("determinism").not())
         .stdout(predicate::str::contains("--vault"));
 }
 
+#[cfg(feature = "operator_tools")]
 #[test]
+fn operator_help_lists_operator_subcommands() {
+    mneme()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("audit"))
+        .stdout(predicate::str::contains("init"))
+        .stdout(predicate::str::contains("determinism"));
+}
+
+#[cfg(not(any(
+    feature = "experimental_attest",
+    feature = "experimental_cognition_cert",
+    feature = "experimental_sync_crdt"
+)))]
+#[test]
+fn default_help_hides_experimental_subcommands() {
+    mneme()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("merge").not())
+        .stdout(predicate::str::contains("sync").not())
+        .stdout(predicate::str::contains("attest").not())
+        .stdout(predicate::str::contains("certify").not())
+        .stdout(predicate::str::contains("verify-cert").not());
+}
+
+#[cfg(feature = "experimental_sync_crdt")]
+#[test]
+fn experimental_help_lists_sync_crdt_subcommands() {
+    mneme()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("merge"))
+        .stdout(predicate::str::contains("sync"));
+}
+
+#[cfg(feature = "experimental_attest")]
+#[test]
+fn experimental_help_lists_attest_subcommand() {
+    mneme()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("attest"));
+}
+
+#[cfg(feature = "experimental_cognition_cert")]
+#[test]
+fn experimental_help_lists_cert_subcommands() {
+    mneme()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("certify"))
+        .stdout(predicate::str::contains("verify-cert"));
+}
+
+#[test]
+#[cfg(feature = "experimental_sync_crdt")]
 fn sync_pull_help_documents_peer_url() {
     mneme()
         .args(["sync", "pull", "--help"])
@@ -82,6 +148,7 @@ fn verify_missing_store_path_exits_usage() {
 }
 
 #[test]
+#[cfg(feature = "experimental_cognition_cert")]
 fn certify_and_verify_cert_succeeds() {
     let dir = tempdir().unwrap();
     let store = dir.path().join("store");
@@ -135,6 +202,7 @@ fn certify_and_verify_cert_succeeds() {
 }
 
 #[test]
+#[cfg(feature = "experimental_cognition_cert")]
 fn verify_cert_is_fail_closed() {
     let dir = tempdir().unwrap();
     let cert = dir.path().join("cert.json");
@@ -157,6 +225,7 @@ fn verify_cert_is_fail_closed() {
         .stderr(predicate::str::contains("certificate invalid"));
 }
 
+#[cfg(feature = "operator_tools")]
 #[test]
 fn init_verify_recall_forget_journey() {
     let dir = tempdir().unwrap();
@@ -218,6 +287,7 @@ fn init_verify_recall_forget_journey() {
         .stdout(predicate::str::contains("forgot key"));
 }
 
+#[cfg(feature = "operator_tools")]
 #[test]
 fn cli_envelope_vault_writes_wrapped_object_keys() {
     let dir = tempdir().unwrap();
@@ -291,6 +361,7 @@ fn cli_envelope_vault_writes_wrapped_object_keys() {
         .stdout(predicate::str::contains("wrapped"));
 }
 
+#[cfg(all(feature = "operator_tools", feature = "experimental_sync_crdt"))]
 #[test]
 fn merge_two_stores_converges() {
     let dir = tempdir().unwrap();
@@ -310,6 +381,7 @@ fn merge_two_stores_converges() {
         .success();
 }
 
+#[cfg(feature = "operator_tools")]
 #[test]
 fn audit_missing_root_is_usage_error() {
     mneme()
@@ -319,6 +391,7 @@ fn audit_missing_root_is_usage_error() {
         .code(2);
 }
 
+#[cfg(feature = "operator_tools")]
 #[test]
 fn cli_verify_rejects_tampered_object_bytes() {
     let dir = tempdir().unwrap();
@@ -400,6 +473,7 @@ fn head_only_verify_misses_object_tamper_full_verify_and_cli_reject() {
         .code(4);
 }
 
+#[cfg(feature = "operator_tools")]
 fn tamper_first_object_cbor(store: &Path) {
     let path = find_first_object_cbor(store).expect("store must contain at least one object");
     let mut bytes = fs::read(&path).unwrap();
@@ -408,6 +482,7 @@ fn tamper_first_object_cbor(store: &Path) {
     fs::write(&path, bytes).unwrap();
 }
 
+#[cfg(feature = "operator_tools")]
 fn find_first_object_cbor(store: &Path) -> Option<PathBuf> {
     let objects_dir = store.join("objects");
     for entry in WalkDir::new(&objects_dir)
@@ -423,6 +498,7 @@ fn find_first_object_cbor(store: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(feature = "operator_tools")]
 fn first_vault_key_file(store: &Path) -> Option<PathBuf> {
     let vault_dir = store.join("keys/vault");
     for entry in WalkDir::new(&vault_dir)
@@ -443,6 +519,7 @@ fn first_vault_key_file(store: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(feature = "operator_tools")]
 fn copy_dir_recursive(src: &Path, dst: &Path) {
     for entry in WalkDir::new(src)
         .min_depth(1)
@@ -469,6 +546,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) {
 /// not unit-test trust injection. Red before the fix (verify printed "verify ok"
 /// and recall served the stale VALUE-1); green after wiring the checkpoint-log
 /// max-sequence scan into `Store::open` / `verify_store`.
+#[cfg(feature = "operator_tools")]
 #[test]
 fn f2_replay_rollback_to_signed_snapshot_rejected_through_public_paths() {
     let dir = tempdir().unwrap();
@@ -587,6 +665,7 @@ fn f2_replay_rollback_to_signed_snapshot_rejected_through_public_paths() {
 }
 
 #[test]
+#[cfg(feature = "experimental_sync_crdt")]
 fn sync_pull_requires_peer_url() {
     let dir = tempdir().unwrap();
     mneme()
@@ -597,6 +676,7 @@ fn sync_pull_requires_peer_url() {
 }
 
 #[test]
+#[cfg(feature = "experimental_sync_crdt")]
 fn sync_pull_rejects_non_websocket_peer_url() {
     let dir = tempdir().unwrap();
     mneme()
@@ -613,6 +693,7 @@ fn sync_pull_rejects_non_websocket_peer_url() {
 }
 
 #[test]
+#[cfg(feature = "experimental_attest")]
 fn attest_emits_sigstore_statement() {
     let dir = tempdir().unwrap();
     let root = dir.path().join("root.cbor");

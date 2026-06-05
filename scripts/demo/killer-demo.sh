@@ -30,13 +30,13 @@ append_e2e_filter() {
   local filter="$2"
   {
     echo "--- filter: $filter ---"
-    RUST_TEST_THREADS=1 cargo test -p mneme-store --test e2e "$filter" -- --nocapture
+    RUST_TEST_THREADS=1 cargo test -p mneme-store --features internal_test_support --test e2e "$filter" -- --nocapture
     echo
   } 2>&1 | tee -a "$log_path"
 }
 
 echo "==> §21 killer demo — build check"
-if ! cargo check -p mneme-store --quiet 2>/dev/null; then
+if ! cargo check -p mneme-store --features internal_test_support --quiet 2>/dev/null; then
   echo "killer-demo: mneme-store does not build — demo cannot run (§21 acceptance artifact blocked)." >&2
   exit 1
 fi

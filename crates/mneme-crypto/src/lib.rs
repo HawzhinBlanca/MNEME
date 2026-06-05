@@ -1,6 +1,8 @@
 #![deny(warnings)]
 
 pub mod aead;
+#[cfg(feature = "experimental_redaction")]
+#[path = "../../../experimental/redaction/mneme-crypto-chameleon.rs"]
 pub mod chameleon;
 pub mod deterministic;
 pub mod envelope_vault;
@@ -11,6 +13,7 @@ pub mod types;
 pub mod vault;
 
 pub use aead::{open, random_nonce, seal};
+#[cfg(feature = "experimental_redaction")]
 pub use chameleon::{TrapdoorKey, chameleon_leaf_hash};
 pub use deterministic::{disable_fixture_crypto, enable_fixture_crypto};
 pub use envelope_vault::EnvelopeKeyVault;

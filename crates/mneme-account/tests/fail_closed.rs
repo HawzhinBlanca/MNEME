@@ -1,4 +1,4 @@
-//! Phase III stubs must fail closed until the gate opens.
+//! Phase III closed gates must fail closed until explicitly enabled.
 //!
 //! These tests pin the honest behavior: `bind_action` / `prove_forget` reject
 //! with `UnsupportedVersion`, never returning a fabricated receipt or proof —

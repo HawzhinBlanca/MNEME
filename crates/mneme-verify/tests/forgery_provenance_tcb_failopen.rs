@@ -1,3 +1,5 @@
+#![cfg(feature = "experimental_semantic")]
+
 //! Adversarial gate: provenance-bearing semantic receipts must not skip VO membership
 //! or filtered dominance (red-team PHASE_I_TCB_FAILOPEN_PROVENANCE).
 

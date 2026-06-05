@@ -30,7 +30,7 @@ WORKDIR /mneme
 # the exact dependency graph and fail closed on any drift.
 COPY . .
 
-RUN cargo build -p mneme-cli --locked \
+RUN cargo build -p mneme-cli --features operator_tools --locked \
     && test -x /mneme/target/debug/mneme
 
 # Runtime invocation is supplied by the driver (foundation-gate --out /work/out).

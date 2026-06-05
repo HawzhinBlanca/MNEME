@@ -1,6 +1,6 @@
 //! Generative adversarial robustness harness for the zkANN-1 receipt verifier.
 //!
-//! Mechanizes the red-team that found the forgeable-verifier fail-opens: build a GENUINE
+//! Mechanizes the red-team that found incorrect forged-recall acceptance: build a GENUINE
 //! exact-dominance receipt, then apply thousands of deterministic structural mutations to its
 //! security-bearing fields and assert the verifier ALWAYS fails closed — never `Ok`, never panic.
 //! A single accepted mutation here is a forged-recall acceptance (the worst defect class).

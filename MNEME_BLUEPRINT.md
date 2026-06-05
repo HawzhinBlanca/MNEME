@@ -615,10 +615,12 @@ This is the honest, defensible mitigation. It does not claim to detect that cont
 
 ### 14.1 `mneme-mcp` — verified memory for any MCP agent
 
-An MCP server exposing three tools so any MCP-compatible agent (Claude and others) gains verified memory with **zero model changes**:
-- `memory.remember(content, kind, namespace)` → writes via the kernel; tool-channel content auto-tiers to Quarantine.
-- `memory.recall(query, min_tier)` → `recall_verified`; returns only entries that pass the fail-closed gate.
-- `memory.forget(target)` → crypto-shred + tombstone.
+An MCP server exposing exactly four lean record tools so any MCP-compatible
+agent (Claude and others) gains verified memory with **zero model changes**:
+- `record-with-provenance(content, kind, namespace)` → writes via the kernel; tool-channel content auto-tiers to Quarantine and returns signed root evidence.
+- `recall-with-signed-chain(query, min_tier)` → `recall_verified`; returns only entries that pass the fail-closed gate and includes signed-chain evidence.
+- `erase-with-receipt-and-proof-of-absence(target)` → crypto-shred + tombstone + verified `ForgetProof` receipt + SMT proof of absence.
+- `verify()` → fail-closed store verification over HEAD, signed checkpoint chain, sidecars, object hashes, and replay floor.
 
 This directly addresses MCP's documented lack of capability attestation (Maloyan & Namiot, arXiv:2601.17549) by making the *memory server itself* attesting: every served entry carries verified provenance. This is the primary on-ramp; it lets MNEME be adopted incrementally without rewriting any agent.
 
@@ -630,8 +632,8 @@ mneme verify <store>            # fail-closed: exit 0 iff root + all reachable p
 mneme audit <root>              # print provenance, writers, tiers, tombstones for a root
 mneme recall <store> -q "..." --min-tier trusted
 mneme forget <store> --key <ns/name> --mode shred
-mneme merge <store-a> <store-b> # deterministic MST merge, prints converged root
-mneme attest <root>             # emit a Sigstore-signable statement over the root (§15.2)
+mneme merge <store-a> <store-b> # EXPERIMENTAL: deterministic MST merge (`experimental_sync_crdt`)
+mneme attest <root>             # EXPERIMENTAL: Sigstore-signable statement (`experimental_attest`)
 ```
 
 ---
@@ -651,7 +653,10 @@ The clean statement: **MNEME is Chronicle's reliability kernel pointed at agent 
 
 ### 15.2 Sigstore / cosign
 
-Root checkpoints can be signed into a Sigstore transparency log (`mneme attest`), giving third parties keyless verification of "this memory root existed at time T," interoperating with the existing model-supply-chain tooling.
+Root checkpoints can be signed into a Sigstore transparency log through the
+experimental `mneme attest` path, giving third parties keyless verification of
+"this memory root existed at time T," interoperating with the existing
+model-supply-chain tooling.
 
 ### 15.3 LanceDB / HNSW (`hnsw_rs`)
 

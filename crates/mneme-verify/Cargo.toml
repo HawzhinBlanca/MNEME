@@ -4,13 +4,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+experimental_semantic = ["dep:mneme-index", "mneme-index/experimental_semantic"]
+
 [dependencies]
 mneme-core.workspace = true
 mneme-crypto.workspace = true
 mneme-smt.workspace = true
 mneme-dag.workspace = true
 mneme-root.workspace = true
-mneme-index.workspace = true
+mneme-index = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
@@ -22,4 +26,4 @@ mneme-crypto.workspace = true
 mneme-core.workspace = true
 mneme-index.workspace = true
 mneme-root.workspace = true
-mneme-store = { path = "../mneme-store" }
+mneme-store = { path = "../mneme-store", features = ["internal_test_support"] }

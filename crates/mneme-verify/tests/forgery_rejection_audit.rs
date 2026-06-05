@@ -18,21 +18,25 @@ mod helpers;
 
 use std::collections::BTreeMap;
 
+#[cfg(feature = "experimental_semantic")]
 use helpers::{
-    SemanticFixture, build_root_chain_fixture, build_valid_recall, build_valid_recall_with_parent,
-    build_valid_semantic_recall, sample_procedure, sample_query_embedding, theme_key,
+    SemanticFixture, build_valid_semantic_recall, sample_procedure, sample_query_embedding,
+};
+use helpers::{
+    build_root_chain_fixture, build_valid_recall, build_valid_recall_with_parent, theme_key,
 };
 use mneme_cap::{Capability, Permissions, agent_cap};
+#[cfg(feature = "experimental_semantic")]
+use mneme_core::ObjectId;
 use mneme_core::{
-    Caveat, Hlc, MemoryKind, MnemeError, NodeId, ObjectId, Query, Root, RootPreimage, TrustTier,
+    Caveat, Hlc, MemoryKind, MnemeError, NodeId, Query, Root, RootPreimage, TrustTier,
 };
 use mneme_crypto::KeyPair;
 use mneme_root::StoredRoot;
 use mneme_smt::{MembershipProof, SparseMerkleTree, TOMBSTONE};
-use mneme_verify::{
-    RecallContext, SemanticRecallInput, verify_membership_proof, verify_recall, verify_root,
-    verify_semantic_recall, verify_semantic_receipt,
-};
+use mneme_verify::{RecallContext, verify_membership_proof, verify_recall, verify_root};
+#[cfg(feature = "experimental_semantic")]
+use mneme_verify::{SemanticRecallInput, verify_semantic_recall, verify_semantic_receipt};
 
 fn working_query() -> Query {
     Query {
@@ -56,6 +60,7 @@ fn run_recall(f: &helpers::RecallFixture, q: &Query) -> Result<(), MnemeError> {
     verify_recall(&f.input, q, &f.trust, &ctx).map(|_| ())
 }
 
+#[cfg(feature = "experimental_semantic")]
 fn run_semantic_receipt(f: &SemanticFixture) -> Result<(), MnemeError> {
     verify_semantic_receipt(
         &f.receipt,
@@ -283,6 +288,7 @@ fn check04b_membership_path_sibling_flipped_index_path_invalid() {
 // ===========================================================================
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn check05_procedure_replay_result_swapped_procedure_mismatch() {
     let mut f = build_valid_semantic_recall();
     assert!(
@@ -302,6 +308,7 @@ fn check05_procedure_replay_result_swapped_procedure_mismatch() {
 }
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn check05b_procedure_candidate_distance_tampered_procedure_mismatch() {
     let mut f = build_valid_semantic_recall();
     if let Some((_, _, dist)) = f.receipt.verification_object.candidates.first_mut() {
@@ -511,6 +518,7 @@ fn pipeline_object_id_swap_reusing_path_index_path_invalid() {
 // ===========================================================================
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn semantic_recall_object_swapped_object_tampered() {
     let mut f = build_valid_semantic_recall();
     let id = f.receipt.verification_object.result_ids[0];
@@ -537,6 +545,7 @@ fn semantic_recall_object_swapped_object_tampered() {
 }
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 fn semantic_recall_missing_query_embedding_fails_closed() {
     let f = build_valid_semantic_recall();
     let query = Query {

@@ -45,7 +45,7 @@ stage 02-deep-fuzz env MNEME_FUZZ_MAX_TOTAL_TIME=1800 bash scripts/ci/fuzz-meani
 stage 03-durable-1m-bench env \
   MNEME_BENCH_SCALE=1000000 MNEME_BENCH_SAMPLES=3000 MNEME_BENCH_WRITE_SAMPLES=40 \
   MNEME_BENCH_STORE_DIR="/tmp/ovn-1m-store" MNEME_BENCH_MERGE_PEER=500 MNEME_BENCH_MERGE_ITERS=1 \
-  /usr/bin/time -l cargo test --release -p mneme-store --test bench_recall bench_scale_ops -- --ignored --nocapture
+  /usr/bin/time -l cargo test --release -p mneme-store --features bench_support,internal_test_support --test bench_recall bench_scale_ops -- --ignored --nocapture
 
 # 4) Determinism stability: foundation-gate x5, assert byte-identical HEAD digests.
 stage 04-determinism-x5 bash -c '
@@ -53,7 +53,7 @@ stage 04-determinism-x5 bash -c '
   prev=""
   for i in 1 2 3 4 5; do
     d="/tmp/ovn-det-$i"; rm -rf "$d"
-    cargo run --release -q -p mneme-cli -- determinism foundation-gate --out "$d" --timestamp "1970-01-01T00:00:00Z" || exit 2
+    cargo run --release -q -p mneme-cli --features operator_tools -- determinism foundation-gate --out "$d" --timestamp "1970-01-01T00:00:00Z" || exit 2
     h=$(shasum -a256 "$d/run-a/roots/HEAD" | cut -d" " -f1)
     echo "run $i HEAD=$h"
     if [ -n "$prev" ] && [ "$h" != "$prev" ]; then echo "DETERMINISM DRIFT at run $i: $h != $prev"; exit 3; fi
@@ -66,7 +66,7 @@ stage 04-determinism-x5 bash -c '
 stage 05-contention env \
   MNEME_BENCH_CONTENTION_THREADS=14 MNEME_BENCH_CONTENTION_BASE=5000 \
   MNEME_BENCH_CONTENTION_PEER=500 MNEME_BENCH_CONTENTION_MERGES=4 \
-  cargo test --release -p mneme-store --test bench_recall bench_concurrent_merge_contention -- --ignored --nocapture
+  cargo test --release -p mneme-store --features bench_support,internal_test_support,experimental_sync_crdt --test bench_recall bench_concurrent_merge_contention -- --ignored --nocapture
 
 # 6) §21 killer demo + bypass harness.
 stage 06-killer-demo bash scripts/demo/killer-demo.sh

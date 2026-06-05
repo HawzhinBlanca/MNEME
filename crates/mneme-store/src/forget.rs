@@ -1,18 +1,18 @@
 //! Forget path with SMT tombstone + crypto-shred (§9.1, §13).
 
 use crate::Store;
+#[cfg(feature = "experimental_action_accountability")]
 use crate::action::{action_commit_forget, enforce_external_action};
 use crate::layout;
 use crate::pause;
 use mneme_cap::Capability;
 use mneme_core::{ActionReceipt, ForgetMode, ForgetTarget, MnemeError};
-use mneme_forget::{
-    RedactForgetInput, ShredForgetInput, ShredOutcome, forget_redact, forget_shred,
-    object_id_for_key,
-};
+#[cfg(feature = "experimental_redaction")]
+use mneme_forget::{RedactForgetInput, forget_redact};
+use mneme_forget::{ShredForgetInput, ShredOutcome, forget_shred, object_id_for_key};
 
-/// Outcome of a verified shred forget when P3-2 store features are enabled.
-#[cfg(feature = "phase_iii_prove_forget")]
+/// Outcome of a verified shred forget with a crypto-shred receipt.
+#[cfg(any(feature = "erasure_receipt", feature = "phase_iii_prove_forget"))]
 pub struct ForgetProven {
     pub tombstone: layout::Tombstone,
     pub root: mneme_core::Root,
@@ -26,9 +26,11 @@ impl Store {
         cap: &Capability,
         mode: ForgetMode,
     ) -> Result<(layout::Tombstone, mneme_core::Root), MnemeError> {
-        self.forget_with_action(target, cap, mode, None)
+        self.forget_internal(target, cap, mode, None)
+            .map(|outcome| (outcome.tombstone, outcome.root))
     }
 
+    #[cfg(feature = "experimental_action_accountability")]
     pub fn forget_with_action(
         &mut self,
         target: ForgetTarget,
@@ -41,7 +43,7 @@ impl Store {
     }
 
     /// Shred forget with a returned `ForgetProof` when `phase_iii_prove_forget` is enabled.
-    #[cfg(feature = "phase_iii_prove_forget")]
+    #[cfg(any(feature = "erasure_receipt", feature = "phase_iii_prove_forget"))]
     pub fn forget_with_proof(
         &mut self,
         target: ForgetTarget,
@@ -78,12 +80,23 @@ impl Store {
         }
 
         let pre_root = self.current_root()?;
-        enforce_external_action(
-            action_receipt,
-            action_commit_forget(&target, mode),
-            cap,
-            &pre_root,
-        )?;
+        #[cfg(feature = "experimental_action_accountability")]
+        {
+            enforce_external_action(
+                action_receipt,
+                action_commit_forget(&target, mode),
+                cap,
+                &pre_root,
+            )?;
+        }
+        #[cfg(not(feature = "experimental_action_accountability"))]
+        let _ = action_receipt;
+        #[cfg(not(any(
+            feature = "experimental_action_accountability",
+            feature = "erasure_receipt",
+            feature = "phase_iii_prove_forget"
+        )))]
+        let _ = &pre_root;
 
         let object_id = object_id_for_key(self.key_index.tree(), &key_hash)?;
         let object_bytes = self.objects.get(&object_id).cloned();
@@ -105,20 +118,31 @@ impl Store {
                     self.embeddings.remove(&object_id);
                 }
                 ForgetMode::Redact => {
-                    let bytes = object_bytes
-                        .as_deref()
-                        .ok_or(MnemeError::IndexPathInvalid)?;
-                    let outcome = forget_redact(RedactForgetInput {
-                        logical_key: &logical_key,
-                        key_index: self.key_index.tree(),
-                        object_bytes: bytes,
-                        operator: &self.operator,
-                        reason: "operator-redact",
-                    })?;
-                    self.objects
-                        .insert(outcome.object_id, outcome.redacted_bytes.clone());
-                    layout::write_object(&self.path, &outcome.object_id, &outcome.redacted_bytes)?;
-                    layout::write_redaction_record(&self.path, &outcome.record)?;
+                    #[cfg(feature = "experimental_redaction")]
+                    {
+                        let bytes = object_bytes
+                            .as_deref()
+                            .ok_or(MnemeError::IndexPathInvalid)?;
+                        let outcome = forget_redact(RedactForgetInput {
+                            logical_key: &logical_key,
+                            key_index: self.key_index.tree(),
+                            object_bytes: bytes,
+                            operator: &self.operator,
+                            reason: "operator-redact",
+                        })?;
+                        self.objects
+                            .insert(outcome.object_id, outcome.redacted_bytes.clone());
+                        layout::write_object(
+                            &self.path,
+                            &outcome.object_id,
+                            &outcome.redacted_bytes,
+                        )?;
+                        layout::write_redaction_record(&self.path, &outcome.record)?;
+                    }
+                    #[cfg(not(feature = "experimental_redaction"))]
+                    {
+                        return Err(MnemeError::UnsupportedVersion { got: 13 });
+                    }
                 }
             }
             pause::checkpoint(pause::AFTER_KEY_INDEX)?;
@@ -143,7 +167,7 @@ impl Store {
         match result {
             Ok((tombstone, root)) => {
                 layout::commit_transaction(&self.path)?;
-                #[cfg(feature = "phase_iii_prove_forget")]
+                #[cfg(any(feature = "erasure_receipt", feature = "phase_iii_prove_forget"))]
                 let proof = if mode != ForgetMode::Shred {
                     None
                 } else {
@@ -166,7 +190,7 @@ impl Store {
                 Ok(ForgetInternalOutcome {
                     tombstone,
                     root,
-                    #[cfg(feature = "phase_iii_prove_forget")]
+                    #[cfg(any(feature = "erasure_receipt", feature = "phase_iii_prove_forget"))]
                     proof,
                 })
             }
@@ -182,6 +206,6 @@ impl Store {
 struct ForgetInternalOutcome {
     tombstone: layout::Tombstone,
     root: mneme_core::Root,
-    #[cfg(feature = "phase_iii_prove_forget")]
+    #[cfg(any(feature = "erasure_receipt", feature = "phase_iii_prove_forget"))]
     proof: Option<mneme_core::ForgetProof>,
 }

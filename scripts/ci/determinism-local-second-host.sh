@@ -17,11 +17,7 @@ OUT_A="$ROOT/out/ci-foundation-gate"
 OUT_B="$ROOT/out/ci-foundation-gate-2"
 
 _mneme_foundation_gate() {
-  if [[ -n "${CARGO_TARGET_DIR:-}" && -x "${CARGO_TARGET_DIR}/debug/mneme" ]]; then
-    "${CARGO_TARGET_DIR}/debug/mneme" determinism foundation-gate "$@"
-  else
-    cargo run -p mneme-cli -- determinism foundation-gate "$@"
-  fi
+  cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate "$@"
 }
 
 if ! _mneme_foundation_gate --help &>/dev/null; then

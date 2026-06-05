@@ -13,7 +13,9 @@ path = "src/main.rs"
 mneme-cap.workspace = true
 mneme-core.workspace = true
 mneme-crypto.workspace = true
-mneme-store.workspace = true
+mneme-smt.workspace = true
+mneme-store = { workspace = true, features = ["erasure_receipt"] }
+mneme-verify.workspace = true
 hex.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

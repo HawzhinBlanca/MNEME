@@ -50,7 +50,7 @@ run_gate() {
 
   mneme_ci_init "$ROOT" "cross-runner-${label}"
 
-  if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+  if ! cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate --help &>/dev/null; then
     echo "determinism-cross-runner: foundation-gate unavailable — failing closed." >&2
     exit 1
   fi
@@ -59,7 +59,7 @@ run_gate() {
   echo "determinism-cross-runner: mode=CROSS-RUNNER-GATE label=$label out=$out"
   echo "  runner_os=${RUNNER_OS:-local} runner_arch=${RUNNER_ARCH:-local}"
 
-  cargo run -p mneme-cli -- determinism foundation-gate \
+  cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
     --out "$out" \
     --timestamp "$TS"
 

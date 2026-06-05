@@ -13,6 +13,13 @@ mneme-root.workspace = true
 blake3.workspace = true
 serde = { workspace = true, features = ["derive"] }
 
+[features]
+default = []
+experimental_redaction = [
+    "mneme-crypto/experimental_redaction",
+    "mneme-smt/experimental_redaction",
+]
+
 [dev-dependencies]
 tempfile.workspace = true
 
@@ -26,3 +33,4 @@ path = "tests/forget_invariants.rs"
 [[test]]
 name = "redact_invariants"
 path = "tests/redact_invariants.rs"
+required-features = ["experimental_redaction"]

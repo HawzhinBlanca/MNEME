@@ -2,8 +2,8 @@
 
 use crate::handlers::{self, MemoryHandlers};
 use crate::honesty::{
-    AINJ_MITIGATION, FORGET_DESCRIPTION, HONESTY_FOOTER, RECALL_DESCRIPTION, REMEMBER_DESCRIPTION,
-    tool_error_message,
+    AINJ_MITIGATION, ERASE_DESCRIPTION, HONESTY_FOOTER, RECALL_DESCRIPTION, RECORD_DESCRIPTION,
+    VERIFY_DESCRIPTION, tool_error_message,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -113,23 +113,27 @@ pub fn dispatch(handlers: &MemoryHandlers, method: &str, params: &Value) -> Resu
     }
 }
 
-fn remember_description() -> String {
-    format!("{REMEMBER_DESCRIPTION}{AINJ_MITIGATION} {HONESTY_FOOTER}")
+fn record_description() -> String {
+    format!("{RECORD_DESCRIPTION}{AINJ_MITIGATION} {HONESTY_FOOTER}")
 }
 
 fn recall_description() -> String {
     format!("{RECALL_DESCRIPTION}{HONESTY_FOOTER}")
 }
 
-fn forget_description() -> String {
-    format!("{FORGET_DESCRIPTION}{HONESTY_FOOTER}")
+fn erase_description() -> String {
+    format!("{ERASE_DESCRIPTION}{HONESTY_FOOTER}")
+}
+
+fn verify_description() -> String {
+    format!("{VERIFY_DESCRIPTION}{HONESTY_FOOTER}")
 }
 
 pub fn tool_definitions() -> Vec<Value> {
     vec![
         json!({
-            "name": "memory.remember",
-            "description": remember_description(),
+            "name": "record-with-provenance",
+            "description": record_description(),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -142,7 +146,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "memory.recall",
+            "name": "recall-with-signed-chain",
             "description": recall_description(),
             "inputSchema": {
                 "type": "object",
@@ -155,8 +159,8 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "memory.forget",
-            "description": forget_description(),
+            "name": "erase-with-receipt-and-proof-of-absence",
+            "description": erase_description(),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -166,12 +170,21 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["namespace", "target"]
             }
         }),
+        json!({
+            "name": "verify",
+            "description": verify_description(),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
 fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Value, String> {
     match name {
-        "memory.remember" => {
+        "record-with-provenance" => {
             let content = arg_str(args, "content")?;
             let kind = handlers::parse_kind(arg_str(args, "kind")?).map_err(tool_error_message)?;
             let namespace = arg_str(args, "namespace")?;
@@ -182,15 +195,16 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
                 .to_string();
             let session = [0x4d, 0x43, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             let out = handlers
-                .remember(content.as_bytes(), kind, namespace, &entry_name, session)
+                .record_with_provenance(content.as_bytes(), kind, namespace, &entry_name, session)
                 .map_err(tool_error_message)?;
             Ok(tool_result_json(json!({
                 "object_id_hex": out.object_id_hex,
                 "root_hash_hex": out.root_hash_hex,
+                "root": out.root,
                 "trust_tier": out.trust_tier,
             })))
         }
-        "memory.recall" => {
+        "recall-with-signed-chain" => {
             let query = arg_str(args, "query")?;
             let min_tier =
                 handlers::parse_min_tier(arg_str(args, "min_tier")?).map_err(tool_error_message)?;
@@ -198,20 +212,35 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
                 .get("namespace")
                 .and_then(|v| v.as_str())
                 .unwrap_or("user");
-            let entries = handlers
-                .recall(namespace, query, min_tier)
+            let out = handlers
+                .recall_with_signed_chain(namespace, query, min_tier)
                 .map_err(tool_error_message)?;
-            Ok(tool_result_json(json!({ "entries": entries })))
+            Ok(tool_result_json(json!({
+                "entries": out.entries,
+                "root_hash_hex": out.root_hash_hex,
+                "root": out.root,
+            })))
         }
-        "memory.forget" => {
+        "erase-with-receipt-and-proof-of-absence" => {
             let namespace = arg_str(args, "namespace")?;
             let target = arg_str(args, "target")?;
             let out = handlers
-                .forget(namespace, target)
+                .erase_with_receipt_and_proof_of_absence(namespace, target)
                 .map_err(tool_error_message)?;
-            Ok(tool_result_json(
-                json!({ "root_hash_hex": out.root_hash_hex }),
-            ))
+            Ok(tool_result_json(json!({
+                "root_hash_hex": out.root_hash_hex,
+                "root": out.root,
+                "forget_proof": out.forget_proof,
+                "absence_proof": out.absence_proof,
+            })))
+        }
+        "verify" => {
+            let out = handlers.verify().map_err(tool_error_message)?;
+            Ok(tool_result_json(json!({
+                "root_hash_hex": out.root_hash_hex,
+                "root": out.root,
+                "object_count": out.object_count,
+            })))
         }
         _ => Err(format!("unknown tool: {name}")),
     }

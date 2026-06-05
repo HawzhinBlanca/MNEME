@@ -1,3 +1,5 @@
+#![cfg(feature = "experimental_semantic")]
+
 //! Semantic index / ADS VO tamper cases (§17.2).
 
 mod helpers;

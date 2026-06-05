@@ -16,10 +16,12 @@ pub const AFTER_APPEND_CHECKPOINT: u8 = 5;
 pub const AFTER_WRITE_HEAD: u8 = 6;
 pub const BEFORE_COMMIT_INCOMPLETE: u8 = 7;
 
+#[cfg(feature = "internal_test_support")]
 pub fn test_set_pause_at(stage: u8) {
     PAUSE_AT.with(|p| p.set(stage));
 }
 
+#[cfg(feature = "internal_test_support")]
 pub fn test_clear_pause() {
     PAUSE_AT.with(|p| p.set(0));
 }

@@ -29,6 +29,7 @@ case "$LANE" in
     # Wave 0/1 + store kernel on quick lane (§18, §19 v0).
     cargo clippy -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store \
+      --features mneme-store/internal_test_support \
       --lib --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
     cargo test -p mneme-verify --test tcb_budget -- --nocapture
@@ -65,16 +66,16 @@ case "$LANE" in
     ;;
 
   determinism)
-    if cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+    if cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate --help &>/dev/null; then
       mneme_ci_clean_foundation_gate_dirs "$ROOT"
       out="$ROOT/out/ci-foundation-gate"
       for run in 1 2; do
         dest="$out"
         [[ "$run" -eq 2 ]] && dest="${out}-2"
-        cargo run -p mneme-cli -- determinism foundation-gate \
+        cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
           --out "$dest" \
           --timestamp "1970-01-01T00:00:00Z"
-        cargo run -p mneme-cli -- determinism foundation-verify \
+        cargo run -p mneme-cli --features operator_tools -- determinism foundation-verify \
           "$dest/foundation.report.json" \
           --output "$dest/foundation.verify.json"
       done
@@ -107,7 +108,7 @@ case "$LANE" in
     bash scripts/ci/fuzz-meaningful.sh
     bash scripts/ci/check-test-vectors.sh
     # Re-materialize report after workspace/fuzz (prior ci-foundation-gate tree may be gone).
-    cargo run -p mneme-cli -- determinism foundation-gate \
+    cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
       --out "$ROOT/out/ci-foundation-gate" \
       --timestamp "1970-01-01T00:00:00Z"
     bash scripts/ci/check-foundation-digests.sh

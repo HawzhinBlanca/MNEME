@@ -6,8 +6,11 @@ use e2e::helpers::{agent_store, semantic_draft};
 use mneme_cap::agent_cap;
 use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
 use mneme_crypto::KeyPair;
+#[cfg(feature = "experimental_semantic")]
 use mneme_index::default_semantic_procedure;
-use mneme_store::{Store, bench_embedding};
+use mneme_store::Store;
+#[cfg(feature = "experimental_semantic")]
+use mneme_store::bench_embedding;
 use std::time::Instant;
 
 const BENCH_ENTRY_COUNT: usize = 10_000;
@@ -65,9 +68,11 @@ fn bench_verify_recall_10k_entries() {
     );
 }
 
+#[cfg(feature = "experimental_semantic")]
 const SEMANTIC_BENCH_DIM: u32 = 8;
 
 #[test]
+#[cfg(feature = "experimental_semantic")]
 // F-7: §19's <1 ms figure is the *key-index* path; the semantic/ANN
 // `recall_verified` path had no latency gate. This populates a semantic store,
 // measures p50/p99 over the ANN path, prints a `BENCH ...` line, and asserts a
@@ -173,8 +178,9 @@ fn bench_remember_key_index_journal_append_2k_entries() {
 
 // ---------------------------------------------------------------------------
 // §22 scale-tier benchmark harness (recall_verified / raw recall / remember /
-// forget / merge) with p50/p99 percentiles. Parametrized by env so each scale
-// tier runs in its own process (clean per-tier peak RSS under `/usr/bin/time -l`).
+// forget / erasure receipt / merge) with p50/p99 percentiles. Parametrized by
+// env so each scale tier runs in its own process (clean per-tier peak RSS under
+// `/usr/bin/time -l`).
 //
 //   MNEME_BENCH_SCALE         entry count to populate            (default 10000)
 //   MNEME_BENCH_SAMPLES       recall latency samples             (default 2000)
@@ -394,7 +400,44 @@ fn bench_scale_ops() {
     }
     report("forget", scale, forget_ns);
 
+    // --- erasure receipt (public erase path: shred + tombstone + ForgetProof) -
+    #[cfg(feature = "erasure_receipt")]
+    {
+        let receipt_entries = write_samples;
+        for i in 0..receipt_entries {
+            let draft = Draft {
+                namespace: "bench-erasure".into(),
+                logical_name: format!("receipt-{i:06}"),
+                kind: MemoryKind::Semantic,
+                body: b"receipt".to_vec(),
+                parent_ids: vec![],
+                session: [0x43; 16],
+                trust_tier: None,
+                embedding: None,
+                valid_time_ms: None,
+            };
+            store
+                .remember(draft, &cap)
+                .expect("remember erasure receipt target");
+        }
+        let mut erasure_receipt_ns = Vec::with_capacity(receipt_entries);
+        for i in 0..receipt_entries {
+            let key = LogicalKey {
+                namespace: "bench-erasure".into(),
+                name: format!("receipt-{i:06}"),
+            };
+            let t = Instant::now();
+            let proven = store
+                .forget_with_proof(ForgetTarget::LogicalKey(key), &cap, ForgetMode::Shred, None)
+                .expect("forget_with_proof");
+            erasure_receipt_ns.push(t.elapsed().as_nanos());
+            std::hint::black_box(&proven.proof);
+        }
+        report("erasure_receipt", scale, erasure_receipt_ns);
+    }
+
     // --- merge (deterministic MST merge of a peer store) ----------------------
+    #[cfg(feature = "experimental_sync_crdt")]
     if merge_iters > 0 {
         let mut merge_ns = Vec::with_capacity(merge_iters);
         for iter in 0..merge_iters {
@@ -445,6 +488,7 @@ fn bench_scale_ops() {
 //   MNEME_BENCH_CONTENTION_MERGES   merges per thread     (default 4)
 // ---------------------------------------------------------------------------
 #[test]
+#[cfg(feature = "experimental_sync_crdt")]
 #[ignore = "§22 concurrent merge contention; run via scripts/ci/bench-recall-optional.sh"]
 fn bench_concurrent_merge_contention() {
     let threads = env_usize(

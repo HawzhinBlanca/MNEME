@@ -30,6 +30,7 @@ export RUSTFLAGS="${RUSTFLAGS:--Dwarnings}"
 # Launch the bench in its own process group so we can reliably kill the whole tree.
 set -m
 cargo test -p mneme-store --test bench_recall --release \
+  --features bench_support,internal_test_support,erasure_receipt \
   bench_verify_recall_10k_entries -- --ignored --nocapture --test-threads=1 &
 bench_pid=$!
 bench_pgid="$(ps -o pgid= -p "$bench_pid" 2>/dev/null | tr -d ' ')"

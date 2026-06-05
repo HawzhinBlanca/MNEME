@@ -1,0 +1,90 @@
+# MNEME Experimental Roadmap
+
+Status: roadmap after separation. Non-core code has been moved under
+`experimental/` or put behind explicit default-off features. Nothing has been
+deleted.
+
+Lean core stays focused on:
+
+- Signed provenance chain.
+- Fail-closed read-time verification with quarantine attribution.
+- Crypto-shred erasure receipt plus proof-of-absence.
+
+The public product API is the MCP four-call surface:
+
+- `record-with-provenance`
+- `recall-with-signed-chain`
+- `erase-with-receipt-and-proof-of-absence`
+- `verify`
+
+CLI `audit`, `init`, and `determinism` are operator-only behind
+`mneme-cli/operator_tools`. They are not part of the public product API.
+
+## Deferred Areas
+
+| Area | Current paths | Default flag | Why deferred |
+|---|---|---:|---|
+| Semantic/ANN retrieval | `experimental/semantic-retrieval/mneme-verify-semantic.rs`; `experimental/semantic-retrieval/mneme-index-{commit,distance,hnsw-backend,provenance,receipt,semantic,verify,wire,zkann}.rs`; semantic branches in `crates/mneme-store/src/{lib,recall,recall_at,scoped_recall}.rs` | off | Beyond exact record lookup; receipts prove procedure-faithfulness, not optimality. |
+| Bench support helpers | `experimental/bench-support/mneme-store-bench.rs`; `tests/bench_recall.rs` invoked only by bench scripts | off | Perf harness support, not product API. |
+| Cognition certificates | `experimental/cognition-cert/mneme-index-cognition-cert.rs`; `experimental/cognition-cert/cognition_cert_v1.rs`; `crates/mneme-cli/src/cert.rs`; `crates/mneme-store/src/certify.rs` | off | Broader context/output certification, not lean record API. |
+| Context Gate | `experimental/context-gate/mneme-context`; `experimental/context-gate/mneme-gate`; `experimental/context-gate/mneme-core-enclave.rs`; `experimental/context-gate/mneme-index-context-gate.rs`; `crates/mneme-store/src/context_gate.rs`; `experimental/sync-crdt/mnemed/src/context_gate.rs` | off | Production TEE/attestation ops are external to this local slice. |
+| Attestation export/parser | `crates/mneme-cli/src/attest.rs`; `experimental/attestation/mneme-attest` | off | Root statement export and non-production evidence parser. |
+| External action accountability | `experimental/action-accountability/mneme-account-sign.rs`; `experimental/action-accountability/mneme-store-action.rs`; Phase III policy tests | off | Human-sanctioned external actions are roadmap; core `ForgetProof` erasure receipt is separate. |
+| Redaction | `experimental/redaction/mneme-crypto-chameleon.rs`; `experimental/redaction/mneme-forget-redact.rs`; redaction hooks in `crates/mneme-smt/src/tree.rs` | off | Lean deletion is crypto-shred plus tombstone/proof-of-absence; chameleon redaction is accountable redaction, not deletion. |
+| CRDT sync and daemon | `experimental/sync-crdt/mneme-crdt`; `experimental/sync-crdt/mneme-store-merge.rs`; `experimental/sync-crdt/mnemed`; CLI `merge`/`sync` | off | Multi-agent merge/anti-entropy is roadmap. |
+| Federation/A2A | `experimental/federation/mneme-index-federation-cert.rs`; federation fuzz targets | off | Federation is not required for single-store compliance-of-record. |
+| ZK/privacy retrieval | `experimental/zk-privacy/mneme-index-{commitment-binding,pedersen-schnorr-zk,semantic-zk}.rs`; ZK tests/vectors | off | 12-month proof path, not v1 exact record lookup. |
+| PIOP research | `experimental/research/mneme-index-piop-research.rs`; `scripts/piop-flat-prototype` | off | Research-only; no production prover/verifier claim. |
+| Crossref reference implementation | `crates/mneme-crossref` | off runtime | Assurance/standardization infrastructure, not runtime TCB. |
+
+## Feature Map
+
+Experimental features:
+
+- `experimental_semantic`
+- `experimental_attest`
+- `experimental_cognition_cert`
+- `experimental_sync_crdt`
+- `experimental_redaction`
+- `experimental_action_accountability`
+- `experimental_context_gate`
+- `cognition_cert`
+- `context_gate`
+- `federation`
+- `commitment_binding`
+- `pedersen_schnorr_zk`
+- `piop_research`
+- `bench_support`
+- `internal_test_support`
+- `operator_tools`
+
+Core support feature:
+
+- `erasure_receipt`: enabled by `mneme-mcp` so
+  `erase-with-receipt-and-proof-of-absence` returns a verified `ForgetProof`
+  plus SMT absence proof.
+
+Compatibility aliases:
+
+- `phase_iii_bind` aliases `experimental_action_accountability`.
+- `phase_iii_prove_forget` aliases `erasure_receipt`.
+- `phase_iii_verify` remains the verifier gate needed by the erasure receipt
+  path.
+
+## Cut Candidates Pending Review
+
+These are not deleted. They need review plus a green core gate before removal.
+
+| Candidate | Note |
+|---|---|
+| `experimental/research/mneme-index-piop-research.rs` | Research seam with no prover and no recall path. |
+| `scripts/piop-flat-prototype` | Excluded prototype. |
+| `scripts/ci/crypto-fault-injection-smoke.sh` scaffold | Must become a real typed core fault-injection gate or be removed after review. |
+| Fixture dump helpers under `experimental/cognition-cert` | Generator helpers, not acceptance tests. |
+
+## Honesty Boundary
+
+Authenticated memory is not truth. MNEME proves integrity, provenance,
+authorization, and deletion of the memory-and-record layer. Model-side
+parametric residue is statistical attestation only, never cryptographic
+deletion.

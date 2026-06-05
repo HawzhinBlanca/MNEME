@@ -41,7 +41,7 @@ path = "tests/redteam_paths.rs"
 mneme-core.workspace = true
 mneme-crypto.workspace = true
 mneme-cap.workspace = true
-mneme-store.workspace = true
+mneme-store = { workspace = true, features = ["experimental_sync_crdt"] }
 mneme-gate = { workspace = true, optional = true }
 mneme-crdt.workspace = true
 mneme-smt.workspace = true

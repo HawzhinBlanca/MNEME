@@ -6,7 +6,9 @@ use mneme_cap::Capability;
 use mneme_core::{
     MnemeError, ObjectId, ObjectRecord, ObjectRef, Procedure, Query, TrustTier, from_bytes_strict,
 };
-use mneme_index::{SEMANTIC_BACKEND_ENABLED, is_key_index_procedure, procedure_id};
+#[cfg(feature = "experimental_semantic")]
+use mneme_index::SEMANTIC_BACKEND_ENABLED;
+use mneme_index::{is_key_index_procedure, procedure_id};
 
 impl Store {
     /// Internal untrusted recall builder for [`Store::recall_verified`] (§7, INV-5).
@@ -18,7 +20,7 @@ impl Store {
         _cap: &Capability,
     ) -> Result<Recall, MnemeError> {
         // Authorization is performed once by the verified-recall entry points
-        // (`recall_verified` / `bench_recall_raw`) via `authorize_read`, so this
+        // (`recall_verified` / bench-only `bench_recall_raw`) via `authorize_read`, so this
         // internal assembly does not re-verify the cap (INV-5: `recall` is
         // `pub(crate)` and unreachable by agents).
         let _pid = procedure_id(proc);
@@ -40,35 +42,44 @@ impl Store {
                     id: mneme_core::ObjectId(proof.value),
                 }],
                 receipt: Some(receipt),
+                #[cfg(feature = "experimental_semantic")]
                 semantic_receipt: None,
                 root,
             });
         }
 
-        if !SEMANTIC_BACKEND_ENABLED {
-            return Err(MnemeError::ProcedureMismatch);
+        #[cfg(not(feature = "experimental_semantic"))]
+        {
+            Err(MnemeError::ProcedureMismatch)
         }
-        let embedding = query
-            .embedding
-            .as_ref()
-            .ok_or(MnemeError::ProcedureMismatch)?;
-        let (ids, _vo) = self
-            .semantic
-            .search_deterministic(proc, embedding)
-            .map_err(index_err)?;
-        if ids.is_empty() {
-            return Err(MnemeError::IndexPathInvalid);
+
+        #[cfg(feature = "experimental_semantic")]
+        {
+            if !SEMANTIC_BACKEND_ENABLED {
+                return Err(MnemeError::ProcedureMismatch);
+            }
+            let embedding = query
+                .embedding
+                .as_ref()
+                .ok_or(MnemeError::ProcedureMismatch)?;
+            let (ids, _vo) = self
+                .semantic
+                .search_deterministic(proc, embedding)
+                .map_err(index_err)?;
+            if ids.is_empty() {
+                return Err(MnemeError::IndexPathInvalid);
+            }
+            let receipt = self
+                .semantic
+                .recall_receipt(proc, embedding, root.preimage_hash)
+                .map_err(index_err)?;
+            Ok(Recall {
+                entries: ids.iter().map(|id| ObjectRef { id: *id }).collect(),
+                receipt: None,
+                semantic_receipt: Some(receipt),
+                root,
+            })
         }
-        let receipt = self
-            .semantic
-            .recall_receipt(proc, embedding, root.preimage_hash)
-            .map_err(index_err)?;
-        Ok(Recall {
-            entries: ids.iter().map(|id| ObjectRef { id: *id }).collect(),
-            receipt: None,
-            semantic_receipt: Some(receipt),
-            root,
-        })
     }
 }
 
@@ -91,6 +102,7 @@ impl Store {
     }
 }
 
+#[cfg(feature = "experimental_semantic")]
 fn index_err(e: mneme_index::IndexError) -> MnemeError {
     match e {
         mneme_index::IndexError::SemanticNotImplemented => MnemeError::ProcedureMismatch,

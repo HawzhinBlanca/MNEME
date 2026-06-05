@@ -7,14 +7,14 @@ description = "Key-index + authenticated semantic ANN (blueprint §5.6, §9.2)"
 
 [dependencies]
 mneme-core.workspace = true
-mneme-crypto.workspace = true
-mneme-root.workspace = true
+mneme-crypto = { workspace = true, optional = true }
+mneme-root = { workspace = true, optional = true }
 mneme-smt.workspace = true
 mneme-gate = { workspace = true, optional = true }
 mneme-context = { workspace = true, optional = true }
 blake3 = "1.8"
 thiserror.workspace = true
-fast-hnsw = "1.0.1"
+fast-hnsw = { version = "1.0.1", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 # 12-month milestone (B3) ZK retrieval backend, only linked under `pedersen_schnorr_zk`.
@@ -27,31 +27,38 @@ curve25519-dalek = { version = "4.1.3", default-features = false, features = ["a
 rand = { version = "0.8", optional = true }
 
 [features]
-default = ["ads"]
-ads = []
+default = []
+experimental_semantic = ["dep:fast-hnsw"]
+# Backward-compatible alias for old commands; semantic/ADS is experimental for lean core.
+ads = ["experimental_semantic"]
 # Phase II Context Gate verification; off by default.
-context_gate = ["mneme-gate", "mneme-gate/phase_ii_gate_open", "dep:mneme-context"]
+context_gate = [
+    "cognition_cert",
+    "mneme-gate",
+    "mneme-gate/phase_ii_gate_open",
+    "dep:mneme-context",
+]
+cognition_cert = ["experimental_semantic", "dep:mneme-crypto", "dep:mneme-root"]
+federation = []
 # Tagged BLAKE3 commitment-binding envelope (§9.2). Binding only — NOT zero-knowledge, NOT SNARK, NOT Plonky2.
 # (The legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it
 # implied zero-knowledge, which the BLAKE3 envelope is not. The regression test
 # `commitment_binding_receipt_is_not_zk` in lib.rs asserts the envelope tag does not
 # contain "ZK", "PLONKY2", or "SNARK" — protecting against re-introduction.)
-commitment_binding = []
+commitment_binding = ["experimental_semantic"]
 # 12-month milestone (B3): real transparent zero-knowledge proof (Pedersen + Schnorr over
 # Ristretto) of a private retrieval-match statement — knowledge that a committed entry equals
 # a hidden query. Zero-knowledge + no trusted setup — NOT semantic truth, NOT exact-NN
 # (blueprint §3). Backend is Pedersen/Schnorr, NOT Plonky2/FRI (Plonky2 1.x is nightly-only).
 # The feature name reflects the actual backend. The `B3_DEFERRAL_STATUS` string in
 # `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
-pedersen_schnorr_zk = ["dep:curve25519-dalek", "dep:rand"]
+pedersen_schnorr_zk = ["experimental_semantic", "dep:curve25519-dalek", "dep:rand"]
 # Deprecated compatibility alias for pre-rename operator/CI commands. This enables the
 # same honest Pedersen+Schnorr backend; it does not add or claim Plonky2/FRI.
 plonky2_prover = ["pedersen_schnorr_zk"]
-# Phase IV-A research seam (UNIMPLEMENTED). Off by default; wired into NO recall/receipt/
-# verify path. The entry point returns UnsupportedVersion so it can never fabricate a proof.
-# Proves NOTHING — not exact-NN, not Plonky2/FRI, not a SNARK. Pure research placeholder for
-# the zkRAG-style global exact-NN direction. See docs/research/PHASE_IV_A_PIOP_SPIKE.md and
-# the `piop_research_seam_is_honest` regression test in lib.rs.
+# Phase IV-A research seam. Off by default; wired into no recall/receipt/verify path.
+# The entry point returns UnsupportedVersion so it can never fabricate a proof.
+# This is a research note for the zkRAG-style global exact-NN direction.
 piop_research = []
 
 [[test]]
@@ -61,11 +68,23 @@ required-features = ["pedersen_schnorr_zk"]
 
 [[test]]
 name = "cognition_cert_v1"
-path = "tests/cognition_cert_v1.rs"
+path = "../../experimental/cognition-cert/cognition_cert_v1.rs"
+required-features = ["cognition_cert"]
 
 [[test]]
 name = "zkann_exact_dominance"
 path = "tests/zkann_exact_dominance.rs"
+required-features = ["experimental_semantic"]
+
+[[test]]
+name = "zkann_generative_adversarial"
+path = "tests/zkann_generative_adversarial.rs"
+required-features = ["experimental_semantic"]
+
+[[test]]
+name = "provenance_tcb_gate"
+path = "tests/provenance_tcb_gate.rs"
+required-features = ["experimental_semantic"]
 
 [dev-dependencies]
 hex.workspace = true

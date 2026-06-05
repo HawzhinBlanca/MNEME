@@ -1,6 +1,7 @@
 #![allow(unused_imports, dead_code)]
 //! Shared tamper fixtures.
 
+#[cfg(feature = "experimental_semantic")]
 mod semantic;
 
 use mneme_core::{
@@ -14,6 +15,7 @@ use mneme_smt::SparseMerkleTree;
 use mneme_verify::RecallInput;
 use std::collections::BTreeMap;
 
+#[cfg(feature = "experimental_semantic")]
 pub use semantic::{
     SemanticFixture, build_valid_semantic_recall, sample_procedure, sample_query_embedding,
 };

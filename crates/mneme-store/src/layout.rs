@@ -115,6 +115,7 @@ pub fn init_store(path: &Path) -> Result<(), MnemeError> {
     fs::create_dir_all(path.join("objects")).map_err(|e| io_err(path, e))?;
     fs::create_dir_all(path.join("roots")).map_err(|e| io_err(path, e))?;
     fs::create_dir_all(path.join("meta")).map_err(|e| io_err(path, e))?;
+    #[cfg(feature = "experimental_redaction")]
     fs::create_dir_all(path.join("meta/redactions")).map_err(|e| io_err(path, e))?;
     let key_index = path.join("meta/key_index.json");
     if !key_index.exists() {
@@ -160,6 +161,7 @@ pub fn append_checkpoint(path: &Path, root: &StoredRoot) -> Result<(), MnemeErro
     CheckpointLog::append(path, root)
 }
 
+#[cfg(feature = "experimental_redaction")]
 pub fn write_redaction_record(
     path: &Path,
     record: &mneme_forget::RedactionRecord,
@@ -184,6 +186,7 @@ fn object_path(store: &Path, id: &[u8; 32]) -> PathBuf {
 
 /// §22 merge barrier: write many new object blobs with one fsync per shard directory
 /// (not one `sync_parent_dir` per object — the concurrent-merge ceiling).
+#[cfg(feature = "experimental_sync_crdt")]
 pub fn write_objects_batch(store: &Path, objects: &[([u8; 32], &[u8])]) -> Result<(), MnemeError> {
     if objects.is_empty() {
         return Ok(());

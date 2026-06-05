@@ -1,3 +1,10 @@
+//! Experimental semantic recall verifier.
+//!
+//! This file was moved out of `crates/mneme-verify/src` so the default lean
+//! verifier TCB covers only exact record recall, root verification, and store
+//! verification. It is compiled back into `mneme-verify` only with the
+//! `experimental_semantic` feature.
+
 use crate::recall::{RecallContext, verify_provenance, verify_writer_and_tier};
 use crate::root::verify_root;
 use mneme_core::{

@@ -5,7 +5,10 @@ pub mod context;
 pub mod dcbor;
 pub mod domain;
 pub mod embedding;
+#[cfg(feature = "experimental_context_gate")]
+#[path = "../../../experimental/context-gate/mneme-core-enclave.rs"]
 pub mod enclave;
+pub mod erasure_receipt;
 pub mod error;
 pub mod hex;
 pub mod hlc;
@@ -15,8 +18,7 @@ pub mod output;
 pub mod types;
 
 pub use accountability::{
-    ACTION_RECEIPT_VERSION, ActionReceipt, FORGET_PROOF_VERSION, ForgetProof,
-    decode_action_receipt, decode_forget_proof, encode_action_receipt, encode_forget_proof,
+    ACTION_RECEIPT_VERSION, ActionReceipt, decode_action_receipt, encode_action_receipt,
 };
 pub use context::{
     CONTEXT_ATTESTATION_VERSION, decode_context_consumption_attestation,
@@ -32,9 +34,10 @@ pub use domain::{
     hash_root_preimage, hash_sem_preimage, hash_smt_internal, hash_smt_leaf,
 };
 pub use embedding::FixedPointEmbedding;
-pub use enclave::{
-    ENCLAVE_REPORT_PLACEHOLDER_STATUS, ENCLAVE_REPORT_PLACEHOLDER_VERSION,
-    EnclaveReportPlaceholder, decode_enclave_report_placeholder, encode_enclave_report_placeholder,
+#[cfg(feature = "experimental_context_gate")]
+pub use enclave::*;
+pub use erasure_receipt::{
+    FORGET_PROOF_VERSION, ForgetProof, decode_forget_proof, encode_forget_proof,
 };
 pub use error::MnemeError;
 pub use hex::decode_hex32;

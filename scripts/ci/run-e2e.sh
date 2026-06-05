@@ -14,7 +14,7 @@ PROFILE="${MNEME_BUILD_PROFILE:-release}"
 run_store_e2e() {
   mneme_ci_init "$ROOT" e2e-store
   echo "==> store kernel e2e (tests/e2e/mod.rs) [target=${CARGO_TARGET_DIR}]"
-  cargo test -p mneme-store --test e2e -- --nocapture
+  cargo test -p mneme-store --features internal_test_support --test e2e -- --nocapture
 }
 
 run_daemon_e2e() {

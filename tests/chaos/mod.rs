@@ -4,23 +4,32 @@
 
 mod helpers;
 
+#[cfg(feature = "experimental_sync_crdt")]
+use helpers::post_fault_checks_at;
 use helpers::{
     ChaosRow, FaultStore, PostFaultVerdict, clear_readonly_tree, corrupt_random_artifact, emit_row,
-    post_fault_checks, post_fault_checks_at, set_readonly_tree,
+    post_fault_checks, set_readonly_tree,
 };
+#[cfg(feature = "experimental_sync_crdt")]
 use mneme_cap::agent_cap;
-use mneme_core::{Draft, ForgetMode, ForgetTarget, MemoryKind, MnemeError, Root};
+use mneme_core::{Draft, ForgetMode, ForgetTarget, MemoryKind};
+#[cfg(feature = "experimental_sync_crdt")]
+use mneme_core::{MnemeError, Root};
+#[cfg(feature = "experimental_sync_crdt")]
 use mneme_crypto::KeyPair;
+#[cfg(feature = "experimental_sync_crdt")]
 use mneme_root::StoredRoot;
 use mneme_store::{
     AFTER_APPEND_CHECKPOINT, AFTER_BEGIN_INCOMPLETE, AFTER_KEY_INDEX, AFTER_OBJECT_WRITE,
     AFTER_PERSIST_INDEX, AFTER_WRITE_HEAD, BEFORE_COMMIT_INCOMPLETE, Store, test_clear_pause,
     test_set_pause_at,
 };
+#[cfg(feature = "experimental_sync_crdt")]
 use mneme_verify::verify_root;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::env;
+#[cfg(feature = "experimental_sync_crdt")]
 use tempfile::tempdir;
 
 fn iterations_from_env() -> u32 {
@@ -143,6 +152,7 @@ fn fault_corrupt_blob(iter: u32, seed: u64) {
     );
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn fault_clock_skew_merge(iter: u32, seed: u64) {
     test_clear_pause();
     let dir = tempdir().unwrap();
@@ -224,6 +234,7 @@ fn fault_clock_skew_merge(iter: u32, seed: u64) {
 /// independent of real elapsed wall time, and (b) the verifier fails closed on
 /// a validly-signed-but-clock-REGRESSED root while accepting a monotonic
 /// forward-skewed one.
+#[cfg(feature = "experimental_sync_crdt")]
 fn fault_clock_skew_merge_injected(iter: u32, seed: u64) {
     test_clear_pause();
 
@@ -314,6 +325,7 @@ fn fault_clock_skew_merge_injected(iter: u32, seed: u64) {
     );
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn skew_draft(name: &str, body: &[u8]) -> Draft {
     Draft {
         namespace: "skew-inj".into(),
@@ -328,6 +340,7 @@ fn skew_draft(name: &str, body: &[u8]) -> Draft {
     }
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn build_skew_peer(
     path: &std::path::Path,
     operator: &KeyPair,
@@ -343,6 +356,7 @@ fn build_skew_peer(
 /// Forge a validly-signed successor root that chains from `cur` but carries the
 /// supplied HLC high-water mark. Signature/preimage are genuine (operator key),
 /// so the ONLY thing under test is the replay/skew gate, not signature forgery.
+#[cfg(feature = "experimental_sync_crdt")]
 fn forge_successor(cur: &Root, hlc_max: [u8; 14], operator: &KeyPair) -> Root {
     StoredRoot::assemble(
         cur.dag_head_root,
@@ -362,6 +376,7 @@ fn forge_successor(cur: &Root, hlc_max: [u8; 14], operator: &KeyPair) -> Root {
 /// A into a copy of B. Both replicas must reach IDENTICAL state roots
 /// (key_index_root, dag_head_root). Real elapsed wall time is irrelevant
 /// because the store reads no wall clock.
+#[cfg(feature = "experimental_sync_crdt")]
 fn converges_order_independent(seed: u64) -> bool {
     let dir = tempdir().unwrap();
     let path_a = dir.path().join("a");
@@ -386,6 +401,7 @@ fn converges_order_independent(seed: u64) -> bool {
     }
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn merge_into(
     local: &std::path::Path,
     peer: &std::path::Path,
@@ -397,6 +413,7 @@ fn merge_into(
     s.merge_from_path(peer).ok()
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
     std::fs::create_dir_all(dst).unwrap();
     for entry in std::fs::read_dir(src).unwrap().flatten() {
@@ -522,6 +539,7 @@ fn fault_kill_random_boundary(iter: u32, seed: u64) {
     );
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 fn fault_kill_merge_boundary(iter: u32, _seed: u64) {
     test_clear_pause();
     let dir = tempdir().unwrap();
@@ -606,17 +624,20 @@ fn fault_forget_kill(iter: u32, seed: u64) {
     );
 }
 
-/// One iteration cycles all fault families (9 rows per iter).
+/// One iteration cycles all core fault families; experimental sync adds merge rows.
 fn run_chaos_iteration(iter: u32, base_seed: u64) {
     let seed = base_seed.wrapping_add(u64::from(iter).wrapping_mul(0x9E37_79B9));
     fault_disk_full(iter, seed);
     fault_corrupt_blob(iter, seed.wrapping_add(1));
+    #[cfg(feature = "experimental_sync_crdt")]
     fault_clock_skew_merge(iter, seed.wrapping_add(2));
     fault_stale_root(iter, seed.wrapping_add(3));
     fault_forged_root(iter, seed.wrapping_add(4));
     fault_kill_random_boundary(iter, seed.wrapping_add(5));
+    #[cfg(feature = "experimental_sync_crdt")]
     fault_kill_merge_boundary(iter, seed.wrapping_add(6));
     fault_forget_kill(iter, seed.wrapping_add(7));
+    #[cfg(feature = "experimental_sync_crdt")]
     fault_clock_skew_merge_injected(iter, seed.wrapping_add(8));
 }
 
@@ -632,9 +653,13 @@ fn chaos_sustained_soak() {
     for i in 0..n {
         run_chaos_iteration(i, base_seed);
     }
+    #[cfg(feature = "experimental_sync_crdt")]
+    let rows_per_iter = 9;
+    #[cfg(not(feature = "experimental_sync_crdt"))]
+    let rows_per_iter = 6;
     eprintln!(
         "chaos_sustained_soak: completed {n} iterations ({} fault rows)",
-        n * 9
+        n * rows_per_iter
     );
 }
 

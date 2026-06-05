@@ -12,5 +12,9 @@ rand.workspace = true
 blake3.workspace = true
 hex.workspace = true
 
+[features]
+default = []
+experimental_redaction = []
+
 [dev-dependencies]
 tempfile.workspace = true

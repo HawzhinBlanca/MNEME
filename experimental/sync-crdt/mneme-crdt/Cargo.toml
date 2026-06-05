@@ -11,7 +11,7 @@ mneme-smt.workspace = true
 mneme-root.workspace = true
 mneme-dag.workspace = true
 mneme-crypto.workspace = true
-mneme-forget.workspace = true
+mneme-forget = { workspace = true, features = ["experimental_redaction"] }
 blake3.workspace = true
 
 [dev-dependencies]

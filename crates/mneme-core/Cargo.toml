@@ -9,6 +9,10 @@ blake3.workspace = true
 getrandom = "0.2"
 thiserror.workspace = true
 
+[features]
+default = []
+experimental_context_gate = []
+
 [dev-dependencies]
 hex.workspace = true
 serde_json.workspace = true

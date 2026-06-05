@@ -365,7 +365,7 @@ fn root_for_snapshot_order(
 
 #[test]
 fn appendix_b_mst_convergence_vector_matches_fixture() {
-    let raw = include_str!("../../../proof/vectors/mst/convergence_triple.json");
+    let raw = include_str!("../../../../proof/vectors/mst/convergence_triple.json");
     let fixture: serde_json::Value = serde_json::from_str(raw).expect("json fixture");
     let expected = fixture["expected_key_index_root"]
         .as_str()

@@ -1,6 +1,7 @@
 //! Chronicle-style atomic I/O: temp + fsync + rename + `.incomplete` marker (§5.8, INV-8).
 
 use mneme_core::MnemeError;
+#[cfg(feature = "experimental_sync_crdt")]
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -11,6 +12,7 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
 }
 
 /// Like [`atomic_write`] but defers directory fsync until [`flush_parent_dirs`].
+#[cfg(feature = "experimental_sync_crdt")]
 pub fn atomic_write_deferred(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
     atomic_write_inner(path, data, false)
 }
@@ -35,6 +37,7 @@ fn atomic_write_inner(path: &Path, data: &[u8], sync_dir: bool) -> Result<(), Mn
 }
 
 /// Fsync each parent directory once after a batch of [`atomic_write_deferred`] calls.
+#[cfg(feature = "experimental_sync_crdt")]
 pub fn flush_parent_dirs(
     paths: impl IntoIterator<Item = impl AsRef<Path>>,
 ) -> Result<(), MnemeError> {

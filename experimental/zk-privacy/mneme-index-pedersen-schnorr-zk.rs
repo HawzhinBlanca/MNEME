@@ -7,7 +7,7 @@
 //! (`#![feature(specialization)]` in `plonky2_field`) and therefore cannot build on this
 //! repo's pinned **stable** toolchain (`rust-toolchain.toml` = 1.86.0).
 //!
-//! Rather than fork to nightly or ship a stub, this module links a **real, transparent,
+//! Rather than fork to nightly or ship a non-working facade, this module links a **real, transparent,
 //! zero-knowledge proof** that compiles on stable and reuses the `curve25519-dalek` already
 //! present in the dependency tree: **Pedersen commitments + a Schnorr equality-of-openings
 //! NIZK over the Ristretto group** (Fiat–Shamir, no trusted setup). It shares Plonky2/V3DB's

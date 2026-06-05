@@ -1,8 +1,11 @@
 //! Deterministic procedure P execution and replay (blueprint §6.1, INV-10).
 
+#[cfg(feature = "experimental_semantic")]
 use crate::distance::integer_distance;
 use blake3::Hasher;
-use mneme_core::{DistanceMetric, FixedPointEmbedding, ObjectId, Procedure, ProcedureAlgo};
+use mneme_core::{DistanceMetric, Procedure, ProcedureAlgo};
+#[cfg(feature = "experimental_semantic")]
+use mneme_core::{FixedPointEmbedding, ObjectId};
 
 /// Domain tag for procedure hashing (§6.1).
 pub const PROC_DOMAIN: &[u8] = b"MNEME-proc-v1\x00";
@@ -30,6 +33,7 @@ pub fn default_key_procedure() -> Procedure {
 }
 
 /// Default semantic ANN procedure (90-day; ef_search > 0 distinguishes key-index P).
+#[cfg(feature = "experimental_semantic")]
 pub fn default_semantic_procedure() -> Procedure {
     Procedure {
         algo: ProcedureAlgo::Hnsw,
@@ -60,6 +64,7 @@ fn distance_tag(dist: DistanceMetric) -> u8 {
 }
 
 /// One indexed semantic entry used during procedure replay.
+#[cfg(feature = "experimental_semantic")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexedEntry {
     pub object_id: ObjectId,
@@ -69,10 +74,12 @@ pub struct IndexedEntry {
 
 /// Deterministic top-k selection: distance asc, tie-break by ascending `ObjectId`.
 ///
+#[cfg(feature = "experimental_semantic")]
 pub type CandidateRow = (ObjectId, [u8; 32], i64);
 
 /// Returns `(result_ids, all_candidates)` where `all_candidates` lists every indexed
 /// entry examined (ObjectId asc traversal order) with integer distances.
+#[cfg(feature = "experimental_semantic")]
 pub fn execute_procedure_p(
     proc: &Procedure,
     query: &FixedPointEmbedding,
@@ -107,6 +114,7 @@ pub fn execute_procedure_p(
 }
 
 /// Replay procedure over VO candidates — must reproduce `result_ids`.
+#[cfg(feature = "experimental_semantic")]
 pub fn replay_from_candidates(
     proc: &Procedure,
     candidates: &[(ObjectId, [u8; 32], i64)],
@@ -130,6 +138,7 @@ mod tests {
     use super::*;
     use crate::procedure::procedure_id;
 
+    #[cfg(feature = "experimental_semantic")]
     fn entry(byte: u8, components: Vec<i16>) -> IndexedEntry {
         let embedding = FixedPointEmbedding::new(2, 0, components).unwrap();
         IndexedEntry {
@@ -140,6 +149,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "experimental_semantic")]
     fn procedure_tie_breaks_by_object_id() {
         let proc = Procedure {
             algo: ProcedureAlgo::Hnsw,

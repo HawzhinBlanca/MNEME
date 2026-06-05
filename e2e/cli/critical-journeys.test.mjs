@@ -12,6 +12,7 @@ import { test, describe } from "node:test";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const defaultBin = path.join(repoRoot, "target/debug/mneme");
 const mnemeBin = process.env.MNEME_BIN ?? defaultBin;
+const operatorToolsEnabled = process.env.MNEME_CLI_OPERATOR_TOOLS === "1";
 
 function runMneme(args, cwd = repoRoot) {
   if (!existsSync(mnemeBin)) {
@@ -34,12 +35,18 @@ function assertNotSkipped(out) {
 }
 
 describe("mneme CLI critical journeys", () => {
-  test("help lists verify, recall, forget, merge, init", () => {
+  test("default help lists core commands and hides operator/experimental commands", () => {
     const out = runMneme(["--help"]);
     assertNotSkipped(out);
     assert.equal(out.status, 0);
-    for (const sub of ["verify", "recall", "forget", "merge", "audit", "attest", "init"]) {
+    for (const sub of ["verify", "recall", "forget", "remember"]) {
       assert.match(out.stdout, new RegExp(sub));
+    }
+    for (const operator of ["audit", "init", "determinism"]) {
+      assert.doesNotMatch(out.stdout, new RegExp(operator));
+    }
+    for (const experimental of ["merge", "sync", "attest", "certify", "verify-cert"]) {
+      assert.doesNotMatch(out.stdout, new RegExp(experimental));
     }
   });
 
@@ -51,6 +58,9 @@ describe("mneme CLI critical journeys", () => {
   });
 
   test("init then verify succeeds", () => {
+    if (!operatorToolsEnabled) {
+      return;
+    }
     const base = mkdtempSync(path.join(tmpdir(), "mneme-e2e-"));
     const store = path.join(base, "store");
     try {
@@ -67,6 +77,9 @@ describe("mneme CLI critical journeys", () => {
   });
 
   test("recall on empty initialized store fails closed", () => {
+    if (!operatorToolsEnabled) {
+      return;
+    }
     const base = mkdtempSync(path.join(tmpdir(), "mneme-e2e-"));
     const store = path.join(base, "store");
     try {

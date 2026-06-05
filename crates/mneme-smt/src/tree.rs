@@ -1,5 +1,6 @@
 use crate::defaults::{TREE_DEPTH, default_hashes, empty_root, hash_up, key_bit};
 use mneme_core::{MnemeError, hash_smt_internal, hash_smt_leaf};
+#[cfg(feature = "experimental_redaction")]
 use mneme_crypto::chameleon_leaf_hash;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -10,11 +11,15 @@ type Leaf = ([u8; 32], [u8; 32]);
 type NodeKey = (usize, [u8; 32]);
 
 /// Chameleon-randomness per key for root-stable redaction (§13.3).
+#[cfg(feature = "experimental_redaction")]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChameleonLeafConfig {
     pub trapdoor_pk: [u8; 32],
     pub slots: BTreeMap<[u8; 32], [u8; 32]>,
 }
+
+#[cfg(not(feature = "experimental_redaction"))]
+struct ChameleonLeafConfig;
 
 /// Largest dirty-key batch still updated incrementally; beyond this a single full
 /// rebuild is cheaper than recomputing many independent paths (bulk seed / load).
@@ -40,6 +45,7 @@ struct TreeCache {
 #[derive(Clone, Debug, Default)]
 pub struct SparseMerkleTree {
     pub(crate) leaves: BTreeMap<[u8; 32], [u8; 32]>,
+    #[cfg(feature = "experimental_redaction")]
     pub chameleon: Option<ChameleonLeafConfig>,
     cache: RefCell<TreeCache>,
 }
@@ -48,6 +54,7 @@ impl SparseMerkleTree {
     pub fn new() -> Self {
         Self {
             leaves: BTreeMap::new(),
+            #[cfg(feature = "experimental_redaction")]
             chameleon: None,
             cache: RefCell::new(TreeCache {
                 root: Some(empty_root()),
@@ -113,7 +120,7 @@ impl SparseMerkleTree {
             [0u8; 32],
             nodes,
             &defaults,
-            self.chameleon.as_ref(),
+            self.chameleon_config(),
         );
         cache.root = Some(root);
     }
@@ -127,13 +134,24 @@ impl SparseMerkleTree {
         let leaves = collect_leaves(&self.leaves);
         let mut nodes = BTreeMap::new();
         let defaults = default_hashes();
-        let root = hash_subtree_cached(&leaves, 0, self.chameleon.as_ref(), &defaults, &mut nodes);
+        let root = hash_subtree_cached(&leaves, 0, self.chameleon_config(), &defaults, &mut nodes);
         let mut cache = self.cache.borrow_mut();
         cache.root = Some(root);
         cache.nodes = Some(nodes);
         cache.dirty.clear();
     }
 
+    #[cfg(feature = "experimental_redaction")]
+    fn chameleon_config(&self) -> Option<&ChameleonLeafConfig> {
+        self.chameleon.as_ref()
+    }
+
+    #[cfg(not(feature = "experimental_redaction"))]
+    fn chameleon_config(&self) -> Option<&ChameleonLeafConfig> {
+        None
+    }
+
+    #[cfg(feature = "experimental_redaction")]
     pub fn enable_chameleon(&mut self, trapdoor_pk: [u8; 32]) {
         self.chameleon = Some(ChameleonLeafConfig {
             trapdoor_pk,
@@ -142,6 +160,7 @@ impl SparseMerkleTree {
         self.invalidate();
     }
 
+    #[cfg(feature = "experimental_redaction")]
     pub fn register_chameleon_slot(
         &mut self,
         key: [u8; 32],
@@ -153,6 +172,7 @@ impl SparseMerkleTree {
         Ok(())
     }
 
+    #[cfg(feature = "experimental_redaction")]
     pub fn chameleon_slot(&self, key: &[u8; 32]) -> Option<[u8; 32]> {
         self.chameleon
             .as_ref()
@@ -160,6 +180,7 @@ impl SparseMerkleTree {
     }
 
     /// Replace leaf value + chameleon randomness (root unchanged when collision valid).
+    #[cfg(feature = "experimental_redaction")]
     pub fn redact_chameleon(
         &mut self,
         key: [u8; 32],
@@ -261,10 +282,10 @@ impl SparseMerkleTree {
         for depth in 0..TREE_DEPTH {
             let (left, right) = partition(&current, depth);
             if key_bit(key, depth) {
-                path.push(hash_subtree(left, depth + 1, self.chameleon.as_ref()));
+                path.push(hash_subtree(left, depth + 1, self.chameleon_config()));
                 current = right;
             } else {
-                path.push(hash_subtree(right, depth + 1, self.chameleon.as_ref()));
+                path.push(hash_subtree(right, depth + 1, self.chameleon_config()));
                 current = left;
             }
         }
@@ -421,11 +442,14 @@ fn leaf_hash(
     value: &[u8; 32],
     chameleon: Option<&ChameleonLeafConfig>,
 ) -> [u8; 32] {
+    #[cfg(feature = "experimental_redaction")]
     if let Some(cfg) = chameleon {
         if let Some(r) = cfg.slots.get(key) {
             return chameleon_leaf_hash(key, value, r, &cfg.trapdoor_pk);
         }
     }
+    #[cfg(not(feature = "experimental_redaction"))]
+    let _ = chameleon;
     hash_smt_leaf(key, value)
 }
 

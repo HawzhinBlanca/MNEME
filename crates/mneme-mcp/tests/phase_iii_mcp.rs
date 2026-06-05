@@ -10,7 +10,7 @@ fn mcp_remember_binds_action_receipt_when_feature_on() {
     let rt = test_runtime(dir.path());
     let out = rt
         .handlers
-        .remember(
+        .record_with_provenance(
             b"hello",
             MemoryKind::Semantic,
             "tools/mcp",

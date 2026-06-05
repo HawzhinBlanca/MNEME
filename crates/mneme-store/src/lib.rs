@@ -5,16 +5,27 @@
 
 #[cfg(feature = "context_gate")]
 pub use context_gate::ContextGateRecallOpts;
+#[cfg(feature = "experimental_action_accountability")]
+#[path = "../../../experimental/action-accountability/mneme-store-action.rs"]
 mod action;
+#[cfg(feature = "experimental_action_accountability")]
 pub use action::{
     action_commit_forget, action_commit_promote, action_commit_remember, enforce_external_action,
 };
 mod atomic;
+#[cfg(feature = "bench_support")]
+#[path = "../../../experimental/bench-support/mneme-store-bench.rs"]
+mod bench_support;
+#[cfg(feature = "bench_support")]
+pub use bench_support::bench_embedding;
+#[cfg(feature = "experimental_cognition_cert")]
 mod certify;
 #[cfg(feature = "context_gate")]
 mod context_gate;
 mod forget;
 mod layout;
+#[cfg(feature = "experimental_sync_crdt")]
+#[path = "../../../experimental/sync-crdt/mneme-store-merge.rs"]
 mod merge;
 mod pause;
 mod recall;
@@ -22,23 +33,26 @@ mod recall_at;
 mod scoped_recall;
 
 use mneme_cap::Capability;
+#[cfg(feature = "internal_test_support")]
+use mneme_core::PayloadEnc;
 use mneme_core::object::HlcWire;
 use mneme_core::{
     ActionReceipt, Draft, Entry, FixedPointEmbedding, LogicalKey, MnemeError, NodeId, ObjectId,
-    ObjectRecord, PayloadEnc, Procedure, Query, Root, TrustTier, from_bytes_strict, hash_obj,
+    ObjectRecord, Procedure, Query, Root, TrustTier, from_bytes_strict, hash_obj,
     to_bytes_canonical,
 };
 use mneme_crypto::{FileKeyVault, KeyVault};
 use mneme_crypto::{KeyPair, TrustConfig, open_payload, seal_payload};
 use mneme_dag::DagIndex;
 use mneme_forget::{payload_aad, prove_absent as forget_prove_absent};
-use mneme_index::SemanticRecallReceipt;
-use mneme_index::{KeyIndex, SemanticIndex};
+use mneme_index::KeyIndex;
+#[cfg(feature = "experimental_semantic")]
+use mneme_index::{SemanticIndex, SemanticRecallReceipt};
 use mneme_root::StoredRoot;
 use mneme_smt::NonMembershipProof;
-use mneme_verify::{
-    RecallContext, RecallInput, SemanticRecallInput, verify_recall, verify_semantic_recall,
-};
+use mneme_verify::{RecallContext, RecallInput, RootReport, verify_recall, verify_store};
+#[cfg(feature = "experimental_semantic")]
+use mneme_verify::{SemanticRecallInput, verify_semantic_recall};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -82,8 +96,10 @@ impl RecallSessionCache {
 pub use forget::ForgetProven;
 
 pub use layout::Tombstone;
+#[cfg(feature = "experimental_sync_crdt")]
 pub use merge::{SyncManifest, SyncSnapshot};
 pub use mneme_core::AsOf;
+#[cfg(feature = "internal_test_support")]
 pub use pause::{
     AFTER_APPEND_CHECKPOINT, AFTER_BEGIN_INCOMPLETE, AFTER_KEY_INDEX, AFTER_OBJECT_WRITE,
     AFTER_PERSIST_INDEX, AFTER_WRITE_HEAD, BEFORE_COMMIT_INCOMPLETE, test_clear_pause,
@@ -95,6 +111,7 @@ pub struct Store {
     operator: KeyPair,
     pub trust: TrustConfig,
     key_index: KeyIndex,
+    #[cfg(feature = "experimental_semantic")]
     semantic: SemanticIndex,
     dag: DagIndex,
     objects: HashMap<[u8; 32], Vec<u8>>,
@@ -116,6 +133,7 @@ pub struct Store {
 pub struct Recall {
     pub entries: Vec<mneme_core::ObjectRef>,
     pub receipt: Option<mneme_core::Receipt>,
+    #[cfg(feature = "experimental_semantic")]
     pub semantic_receipt: Option<SemanticRecallReceipt>,
     pub root: Root,
 }
@@ -142,6 +160,7 @@ impl Store {
             operator,
             trust,
             key_index: KeyIndex::new(),
+            #[cfg(feature = "experimental_semantic")]
             semantic: SemanticIndex::new(),
             dag: DagIndex::new(),
             objects: HashMap::new(),
@@ -220,11 +239,12 @@ impl Store {
             trust.last_seen_hlc = Some(max_hlc);
         }
         mneme_root::check_replay(&root, trust.last_seen_hlc)?;
-        let mut store = Self {
+        let store = Self {
             path: path.to_path_buf(),
             operator,
             trust,
             key_index: state.key_index,
+            #[cfg(feature = "experimental_semantic")]
             semantic: SemanticIndex::new(),
             dag: state.dag,
             objects: state.objects,
@@ -237,8 +257,16 @@ impl Store {
             sequence: stored.sequence,
             recall_cache: RefCell::new(RecallSessionCache::default()),
         };
-        store.rebuild_semantic_index()?;
-        Ok(store)
+        #[cfg(feature = "experimental_semantic")]
+        {
+            let mut store = store;
+            store.rebuild_semantic_index()?;
+            Ok(store)
+        }
+        #[cfg(not(feature = "experimental_semantic"))]
+        {
+            Ok(store)
+        }
     }
 
     pub fn trust(&self) -> &TrustConfig {
@@ -262,11 +290,21 @@ impl Store {
         draft: Draft,
         cap: &Capability,
     ) -> Result<(ObjectId, Root), MnemeError> {
-        self.remember_with_action(draft, cap, None)
+        self.remember_inner(draft, cap, None)
     }
 
     /// Remember with optional Phase III `ActionReceipt` (see `phase_iii_require_action`).
+    #[cfg(feature = "experimental_action_accountability")]
     pub fn remember_with_action(
+        &mut self,
+        draft: Draft,
+        cap: &Capability,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<(ObjectId, Root), MnemeError> {
+        self.remember_inner(draft, cap, action_receipt)
+    }
+
+    fn remember_inner(
         &mut self,
         draft: Draft,
         cap: &Capability,
@@ -276,13 +314,18 @@ impl Store {
         if !cap.permits_write(&draft.namespace, draft.kind) {
             return Err(MnemeError::CapDenied);
         }
-        let pre_root = self.current_root()?;
-        action::enforce_external_action(
-            action_receipt,
-            action::action_commit_remember(&draft),
-            cap,
-            &pre_root,
-        )?;
+        #[cfg(feature = "experimental_action_accountability")]
+        {
+            let pre_root = self.current_root()?;
+            action::enforce_external_action(
+                action_receipt,
+                action::action_commit_remember(&draft),
+                cap,
+                &pre_root,
+            )?;
+        }
+        #[cfg(not(feature = "experimental_action_accountability"))]
+        let _ = action_receipt;
         let tier = draft.trust_tier.unwrap_or_else(|| cap.default_tier());
         layout::begin_transaction(&self.path)?;
         pause::checkpoint(pause::AFTER_BEGIN_INCOMPLETE)?;
@@ -314,66 +357,6 @@ impl Store {
             }
             Err(MnemeError::IncompleteTransaction) => Err(MnemeError::IncompleteTransaction),
             Err(e) => {
-                let _ = layout::abort_transaction(&self.path);
-                Err(e)
-            }
-        }
-    }
-
-    /// Batch seed for the §19 v0 recall perf bench only (not production API).
-    /// One transaction and one root commit for `count` key-index entries; avoids per-entry disk/fsync.
-    #[doc(hidden)]
-    pub fn bench_populate_semantic_entries(
-        &mut self,
-        namespace: &str,
-        count: usize,
-        cap: &Capability,
-    ) -> Result<(), MnemeError> {
-        self.verify_cap(cap)?;
-        if !cap.permits_write(namespace, mneme_core::MemoryKind::Semantic) {
-            return Err(MnemeError::CapDenied);
-        }
-        let tier = cap.default_tier();
-        layout::begin_transaction(&self.path)?;
-        let result = (|| -> Result<(), MnemeError> {
-            // §22 durable group-commit: batch the per-object vault keys into one
-            // journal fsync instead of one fsync per key (~98% of ingest cost). Done
-            // inside the closure so a vault that fails to open a batch window aborts
-            // the transaction via the error arm below (no leaked `.incomplete`).
-            self.vault.begin_batch()?;
-            let mut ids = Vec::with_capacity(count);
-            for i in 0..count {
-                let draft = Draft {
-                    namespace: namespace.into(),
-                    logical_name: format!("key-{i:05}"),
-                    kind: mneme_core::MemoryKind::Semantic,
-                    body: b"x".to_vec(),
-                    parent_ids: vec![],
-                    session: [0x42; 16],
-                    trust_tier: None,
-                    embedding: None,
-                    valid_time_ms: None,
-                };
-                let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
-                ids.push(id);
-            }
-            self.vault.flush_batch()?;
-            self.dag.seed_independent_heads(&ids)?;
-            self.key_index.tree_mut().rebuild_root_cache();
-            layout::persist_key_index(&self.path, self)?;
-            layout::persist_object_keys(&self.path, self)?;
-            layout::persist_embeddings(&self.path, self)?;
-            self.commit_root_inner()?;
-            Ok(())
-        })();
-        match result {
-            Ok(()) => layout::commit_transaction(&self.path),
-            Err(MnemeError::IncompleteTransaction) => {
-                self.vault.cancel_batch();
-                Err(MnemeError::IncompleteTransaction)
-            }
-            Err(e) => {
-                self.vault.cancel_batch();
                 let _ = layout::abort_transaction(&self.path);
                 Err(e)
             }
@@ -434,60 +417,6 @@ impl Store {
         }
     }
 
-    /// Batch seed for the §22 / F-7 semantic-recall bench only (not production API).
-    /// Like [`Store::bench_populate_semantic_entries`] but attaches a distinct
-    /// [`bench_embedding`] to every entry so they land in the HNSW semantic index
-    /// and the semantic (ANN) `recall_verified` path is exercisable under load.
-    /// One transaction / one root commit; no per-entry fsync.
-    #[doc(hidden)]
-    pub fn bench_populate_embedded_entries(
-        &mut self,
-        namespace: &str,
-        count: usize,
-        dim: u32,
-        cap: &Capability,
-    ) -> Result<(), MnemeError> {
-        self.verify_cap(cap)?;
-        if !cap.permits_write(namespace, mneme_core::MemoryKind::Semantic) {
-            return Err(MnemeError::CapDenied);
-        }
-        let tier = cap.default_tier();
-        layout::begin_transaction(&self.path)?;
-        let result = (|| -> Result<(), MnemeError> {
-            let mut ids = Vec::with_capacity(count);
-            for i in 0..count {
-                let draft = Draft {
-                    namespace: namespace.into(),
-                    logical_name: format!("key-{i:05}"),
-                    kind: mneme_core::MemoryKind::Semantic,
-                    body: b"x".to_vec(),
-                    parent_ids: vec![],
-                    session: [0x42; 16],
-                    trust_tier: None,
-                    embedding: Some(bench_embedding(i, dim)?),
-                    valid_time_ms: None,
-                };
-                let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
-                ids.push(id);
-            }
-            self.dag.seed_independent_heads(&ids)?;
-            self.key_index.tree_mut().rebuild_root_cache();
-            layout::persist_key_index(&self.path, self)?;
-            layout::persist_object_keys(&self.path, self)?;
-            layout::persist_embeddings(&self.path, self)?;
-            self.commit_root_inner()?;
-            Ok(())
-        })();
-        match result {
-            Ok(()) => layout::commit_transaction(&self.path),
-            Err(MnemeError::IncompleteTransaction) => Err(MnemeError::IncompleteTransaction),
-            Err(e) => {
-                let _ = layout::abort_transaction(&self.path);
-                Err(e)
-            }
-        }
-    }
-
     fn apply_remember_draft(
         &mut self,
         draft: &Draft,
@@ -537,6 +466,7 @@ impl Store {
         self.object_keys.insert(id_bytes, key);
         if let Some(emb) = draft.embedding.clone() {
             self.embeddings.insert(id_bytes, emb.clone());
+            #[cfg(feature = "experimental_semantic")]
             self.semantic.insert(id, emb).map_err(index_err)?;
         }
         if update_dag {
@@ -600,6 +530,7 @@ impl Store {
             }
             return Ok(entries);
         }
+        #[cfg(feature = "experimental_semantic")]
         if let Some(semantic_receipt) = recall.semantic_receipt {
             let mut seed_ids: Vec<[u8; 32]> = semantic_receipt
                 .verification_object
@@ -625,19 +556,6 @@ impl Store {
             return Ok(entries);
         }
         Err(MnemeError::ReceiptRootMismatch)
-    }
-
-    /// Benchmark-only: run the untrusted recall assembly (index fetch + membership
-    /// proof build) WITHOUT the `verify_recall` gate, so a caller can isolate the
-    /// §22 hot-path verification overhead (`recall_verified` minus `recall`). Not a
-    /// production API: this path is fail-open and must never be exposed to agents.
-    #[doc(hidden)]
-    pub fn bench_recall_raw(&self, query: &Query, cap: &Capability) -> Result<(), MnemeError> {
-        self.authorize_read(query, cap)?;
-        let proc = mneme_index::default_key_procedure();
-        let recall = self.recall(query, &proc, cap)?;
-        std::hint::black_box(&recall);
-        Ok(())
     }
 
     /// Read authorization shared by all verified-recall entry points: cap
@@ -675,10 +593,21 @@ impl Store {
         to: TrustTier,
         cap: &Capability,
     ) -> Result<Root, MnemeError> {
-        self.promote_with_action(id, to, cap, None)
+        self.promote_inner(id, to, cap, None)
     }
 
+    #[cfg(feature = "experimental_action_accountability")]
     pub fn promote_with_action(
+        &mut self,
+        id: &ObjectId,
+        to: TrustTier,
+        cap: &Capability,
+        action_receipt: Option<&ActionReceipt>,
+    ) -> Result<Root, MnemeError> {
+        self.promote_inner(id, to, cap, action_receipt)
+    }
+
+    fn promote_inner(
         &mut self,
         id: &ObjectId,
         to: TrustTier,
@@ -689,13 +618,18 @@ impl Store {
         if !cap.permits_promote() {
             return Err(MnemeError::PromoteDenied);
         }
-        let pre_root = self.current_root()?;
-        action::enforce_external_action(
-            action_receipt,
-            action::action_commit_promote(id, to),
-            cap,
-            &pre_root,
-        )?;
+        #[cfg(feature = "experimental_action_accountability")]
+        {
+            let pre_root = self.current_root()?;
+            action::enforce_external_action(
+                action_receipt,
+                action::action_commit_promote(id, to),
+                cap,
+                &pre_root,
+            )?;
+        }
+        #[cfg(not(feature = "experimental_action_accountability"))]
+        let _ = action_receipt;
         let id_bytes = *id.as_bytes();
         let bytes = self
             .objects
@@ -795,6 +729,11 @@ impl Store {
             .ok_or(MnemeError::RootInconsistent)
     }
 
+    pub fn verify_current(&self) -> Result<RootReport, MnemeError> {
+        verify_store(&self.path, &self.trust)
+    }
+
+    #[cfg(feature = "internal_test_support")]
     pub fn tamper_object_bytes(&mut self, id: &[u8; 32]) -> Result<(), MnemeError> {
         let bytes = self.objects.get_mut(id).ok_or(MnemeError::ObjectTampered)?;
         if !bytes.is_empty() {
@@ -804,6 +743,7 @@ impl Store {
         Ok(())
     }
 
+    #[cfg(feature = "internal_test_support")]
     pub fn inject_tampered_entry(
         &mut self,
         key: &LogicalKey,
@@ -872,6 +812,7 @@ impl Store {
         Ok(())
     }
 
+    #[cfg(feature = "experimental_semantic")]
     pub(crate) fn rebuild_semantic_index(&mut self) -> Result<(), MnemeError> {
         let mut semantic = SemanticIndex::new();
         for (id_bytes, emb) in &self.embeddings {
@@ -886,6 +827,13 @@ impl Store {
     }
 
     /// §22 incremental semantic rebuild on merge: O(added) inserts when no tombstones removed.
+    #[cfg(not(feature = "experimental_semantic"))]
+    pub(crate) fn rebuild_semantic_index(&mut self) -> Result<(), MnemeError> {
+        Ok(())
+    }
+
+    /// §22 incremental semantic rebuild on merge: O(added) inserts when no tombstones removed.
+    #[cfg(all(feature = "experimental_semantic", feature = "experimental_sync_crdt"))]
     pub(crate) fn apply_semantic_merge_delta(
         &mut self,
         pre_objects: &std::collections::HashSet<[u8; 32]>,
@@ -907,6 +855,17 @@ impl Store {
             .map_err(index_err)
     }
 
+    #[cfg(all(
+        not(feature = "experimental_semantic"),
+        feature = "experimental_sync_crdt"
+    ))]
+    pub(crate) fn apply_semantic_merge_delta(
+        &mut self,
+        _pre_objects: &std::collections::HashSet<[u8; 32]>,
+    ) -> Result<(), MnemeError> {
+        Ok(())
+    }
+
     pub(crate) fn commit_root_inner(&mut self) -> Result<(), MnemeError> {
         let prev = self
             .roots
@@ -917,7 +876,7 @@ impl Store {
         let stored = StoredRoot::assemble(
             self.dag.root(),
             self.key_index.root(),
-            self.semantic.semantic_commit(),
+            self.semantic_commit(),
             self.hlc.to_bytes(),
             prev,
             self.sequence,
@@ -940,28 +899,17 @@ impl Store {
     fn verify_cap(&self, cap: &Capability) -> Result<(), MnemeError> {
         cap.verify(&self.operator, &self.hlc)
     }
-}
 
-/// Deterministic, well-spread embedding for the §22 / F-7 semantic bench: a
-/// `dim`-wide fixed-point vector whose components are a reproducible hash spread of
-/// `i` across `[-1024, 1024)`. Spreading across all dims (rather than a near-collinear
-/// vector) keeps the HNSW index non-degenerate so populate stays ~linear, while
-/// determinism means a query reusing entry `m`'s vector resolves to `m` as the exact
-/// nearest neighbour. `dim >= 1`.
-#[doc(hidden)]
-pub fn bench_embedding(i: usize, dim: u32) -> Result<FixedPointEmbedding, MnemeError> {
-    if dim == 0 {
-        return Err(MnemeError::SchemaDrift);
+    fn semantic_commit(&self) -> [u8; 32] {
+        #[cfg(feature = "experimental_semantic")]
+        {
+            self.semantic.semantic_commit()
+        }
+        #[cfg(not(feature = "experimental_semantic"))]
+        {
+            [0u8; 32]
+        }
     }
-    let mut components = vec![0i16; dim as usize];
-    for (d, slot) in components.iter_mut().enumerate() {
-        // Knuth-style multiplicative mix per (i, dim) — deterministic, no RNG state.
-        let mixed = (i as u64)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add((d as u64).wrapping_mul(0x632B_E593_7F4A_1C97));
-        *slot = ((mixed >> 17) % 2048) as i16 - 1024;
-    }
-    FixedPointEmbedding::new(dim, 0, components)
 }
 
 fn provenance_objects_for_bytes(
@@ -997,6 +945,7 @@ fn provenance_objects_for_ids(
     Ok(out)
 }
 
+#[cfg(feature = "experimental_semantic")]
 fn index_err(e: mneme_index::IndexError) -> MnemeError {
     match e {
         mneme_index::IndexError::SemanticNotImplemented => MnemeError::ProcedureMismatch,

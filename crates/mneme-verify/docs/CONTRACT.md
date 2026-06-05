@@ -14,18 +14,23 @@
 
 ## Responsibility
 
-Fail-closed verifier TCB: root signature, membership/non-membership proofs, key and semantic recall receipts, and full-store verification (blueprint §9.3, §10, INV-5, INV-9).
+Fail-closed verifier TCB: root signature, membership/non-membership proofs,
+key-index recall receipts, and full-store verification (blueprint §9.3, §10,
+INV-5, INV-9). Semantic recall verification is preserved behind the
+`experimental_semantic` feature and is not part of the default lean verifier.
 
 ## Public API
 
 ```rust
-verify_root, verify_recall, verify_semantic_recall, verify_semantic_receipt
+verify_root, verify_recall
 verify_membership_proof, verify_store
 verify_signed_head_only   // diagnostic / forgery tests ONLY — see WARNING above
 SignatureOnlyHead, RootReport
-HONESTY_PROCEDURE  // re-exported honesty boundary (§3)
 TCB_LINE_BUDGET
 ```
+
+With `experimental_semantic`: `verify_semantic_recall`,
+`verify_semantic_receipt`, `SemanticRecallInput`, and `HONESTY_PROCEDURE`.
 
 Deprecated (hidden): `verify_store_head` → use `verify_signed_head_only` for tests, `verify_store` for gates.
 
@@ -34,7 +39,7 @@ Deprecated (hidden): `verify_store_head` → use `verify_signed_head_only` for t
 - **INV-5** Fail-closed reads — no entry path without verified receipt against signed root
 - **B1 / head-only verify** — `verify_signed_head_only` is signature-only; **never** substitute for `verify_store` on boot/CI/adoption paths (`adoption_lint` enforces)
 - **INV-9** Typed `MnemeError` only on trusted path (no `anyhow`, no stringly escape hatch)
-- **§3 honesty** — exported `HONESTY_PROCEDURE` and semantic gate errors: authenticated `≠` true; receipts prove procedure-faithfulness over committed data, **not** exact nearest-neighbor optimality or semantic truth
+- **§3 honesty** — semantic gate errors, when the experimental semantic feature is enabled: authenticated `≠` true; receipts prove procedure-faithfulness over committed data, **not** exact nearest-neighbor optimality or semantic truth
 
 ## Proof obligations
 
@@ -44,17 +49,19 @@ Deprecated (hidden): `verify_store_head` → use `verify_signed_head_only` for t
 | `tamper_inventory_matches_executed_verify_tests` | Verify tamper inventory equals executed `#[test]` count (147) |
 | `appendix_b_receipts` | Byte-pinned recall fixtures |
 | `tamper_*` suites (147 `#[test]`s) | Typed fail-closed rejection (§17.2) |
-| `honesty_message_is_non_empty` (semantic tamper) | §3 boundary in `ProcedureMismatch` text |
+| `honesty_message_is_non_empty` (experimental semantic tamper) | §3 boundary in `ProcedureMismatch` text |
 | `b1_adoption_no_head_only_verify_in_production_src` | No head-only verify in CLI / mnemed / MCP / store src |
 | `b1_cli_verify_subcommand_uses_verify_store` | CLI `verify` subcommand calls `verify_store` only |
 
 ## Dependencies
 
-- `mneme-core`, `mneme-crypto`, `mneme-index`, `mneme-smt`, `mneme-dag`, `mneme-root`, `mneme-cap`
+- Default: `mneme-core`, `mneme-crypto`, `mneme-smt`, `mneme-dag`, `mneme-root`.
+- With `experimental_semantic`: also `mneme-index`.
 
 ## May start when
 
-- Wave 3 (`mneme-root`) + Wave 2 (`mneme-index`, `mneme-cap`) complete.
+- Wave 3 (`mneme-root`) complete; semantic verifier work requires the Wave 2
+  `mneme-index` feature surface.
 
 ## Forbidden
 

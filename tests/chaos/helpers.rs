@@ -108,6 +108,7 @@ pub struct ChaosTarget<'a> {
     pub golden_body: Vec<u8>,
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 #[allow(clippy::too_many_arguments)] // test helper: explicit golden-recall fixture params
 pub fn post_fault_checks_at(
     path: &Path,

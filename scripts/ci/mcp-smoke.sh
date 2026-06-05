@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MCP stdio smoke — remember/recall/forget JSON-RPC roundtrip with honesty checks (READINESS B5).
+# MCP stdio smoke — four-call JSON-RPC roundtrip with honesty checks (READINESS B5).
 # Spawns `mneme-mcp` binary (not in-process dispatch); gates live agent protocol path in CI.
 set -euo pipefail
 
@@ -18,5 +18,5 @@ if ! cargo check -p mneme-mcp --quiet 2>/dev/null; then
 fi
 
 cargo test -p mneme-mcp --test stdio_roundtrip -- --nocapture
-echo "mcp-smoke: stdio remember/recall/forget roundtrip + honesty checks OK"
+echo "mcp-smoke: stdio record/recall/erase/verify roundtrip + honesty checks OK"
 exit 0

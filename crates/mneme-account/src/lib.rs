@@ -13,6 +13,7 @@ use mneme_core::{
 };
 
 #[cfg(feature = "phase_iii_bind_action")]
+#[path = "../../../experimental/action-accountability/mneme-account-sign.rs"]
 mod sign;
 
 #[cfg(feature = "phase_iii_prove_forget")]

@@ -17,7 +17,7 @@ mneme-cap.workspace = true
 mneme-verify.workspace = true
 mneme-index.workspace = true
 mneme-forget.workspace = true
-mneme-crdt.workspace = true
+mneme-crdt = { workspace = true, optional = true }
 mneme-account.workspace = true
 mneme-context = { workspace = true, optional = true }
 mneme-gate = { workspace = true, optional = true }
@@ -31,10 +31,29 @@ libc = "0.2"
 
 [features]
 default = []
-context_gate = ["mneme-index/context_gate", "dep:mneme-context", "dep:mneme-gate"]
-phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
+bench_support = []
+internal_test_support = []
+erasure_receipt = ["mneme-account/phase_iii_prove_forget", "phase_iii_verify"]
+experimental_sync_crdt = ["dep:mneme-crdt"]
+experimental_semantic = [
+    "mneme-index/experimental_semantic",
+    "mneme-verify/experimental_semantic",
+]
+experimental_cognition_cert = ["experimental_semantic", "mneme-index/cognition_cert"]
+experimental_redaction = ["mneme-forget/experimental_redaction"]
+experimental_action_accountability = [
+    "mneme-account/phase_iii_bind_action",
+    "mneme-account/phase_iii_verify",
+]
+context_gate = [
+    "experimental_cognition_cert",
+    "mneme-index/context_gate",
+    "dep:mneme-context",
+    "dep:mneme-gate",
+]
+phase_iii_bind = ["experimental_action_accountability"]
 phase_iii_verify = ["mneme-account/phase_iii_verify"]
-phase_iii_prove_forget = ["mneme-account/phase_iii_prove_forget", "phase_iii_verify"]
+phase_iii_prove_forget = ["erasure_receipt"]
 phase_iii_require_action = ["phase_iii_verify"]
 
 [dev-dependencies]
@@ -46,21 +65,25 @@ hex.workspace = true
 name = "e2e"
 path = "../../tests/e2e/mod.rs"
 harness = true
+required-features = ["internal_test_support"]
 
 [[test]]
 name = "tamper_suite"
 path = "../../tests/tamper_suite.rs"
 harness = true
+required-features = ["internal_test_support"]
 
 [[test]]
 name = "bench_recall"
 path = "../../tests/bench_recall.rs"
 harness = true
+required-features = ["bench_support", "internal_test_support"]
 
 [[test]]
 name = "chaos"
 path = "../../tests/chaos/mod.rs"
 harness = true
+required-features = ["internal_test_support"]
 
 [[test]]
 name = "phase_ii_context_gate"
@@ -70,11 +93,12 @@ required-features = ["context_gate"]
 [[test]]
 name = "phase_iii_bind"
 path = "tests/phase_iii_bind.rs"
+required-features = ["phase_iii_bind"]
 
 [[test]]
 name = "phase_iii_forget"
 path = "tests/phase_iii_forget.rs"
-required-features = ["phase_iii_prove_forget", "phase_iii_verify"]
+required-features = ["erasure_receipt"]
 
 [[test]]
 name = "phase_iii_policy"

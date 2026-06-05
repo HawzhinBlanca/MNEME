@@ -1,14 +1,18 @@
 //! `mneme` CLI — adoption-layer fail-closed gate (blueprint §14.2).
 
+#[cfg(feature = "experimental_attest")]
 mod attest;
+#[cfg(feature = "experimental_cognition_cert")]
 mod cert;
+#[cfg(feature = "operator_tools")]
 mod determinism;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
+#[cfg(feature = "experimental_cognition_cert")]
+use mneme_core::{DistanceMetric, Procedure, ProcedureAlgo, RetrievalProofLevel};
 use mneme_core::{
-    DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
-    ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
+    Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, TrustTier,
 };
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
 use mneme_store::Store;
@@ -21,7 +25,7 @@ use std::process::ExitCode;
 #[command(
     name = "mneme",
     version,
-    about = "Verifiable memory substrate — fail-closed verify, recall, forget, merge",
+    about = "Verifiable memory substrate — fail-closed verify, recall, remember, forget",
     long_about = None
 )]
 struct Cli {
@@ -48,6 +52,7 @@ enum Commands {
         pin_root: Option<String>,
     },
     /// Print provenance, writers, tiers, tombstones for a root checkpoint
+    #[cfg(feature = "operator_tools")]
     Audit { root: PathBuf },
     /// Key recall under min trust tier (verified)
     Recall {
@@ -89,15 +94,19 @@ enum Commands {
         mode: ForgetModeArg,
     },
     /// Deterministic MST merge of two stores
+    #[cfg(feature = "experimental_sync_crdt")]
     Merge { store_a: PathBuf, store_b: PathBuf },
     /// Network anti-entropy over canonical §11 WebSocket sync (blueprint §11)
+    #[cfg(feature = "experimental_sync_crdt")]
     Sync {
         #[command(subcommand)]
         command: SyncCommands,
     },
     /// Emit a Sigstore-signable attestation over a root (§15.2)
+    #[cfg(feature = "experimental_attest")]
     Attest { root: PathBuf },
     /// Emit Cognition Certificate v1 for a semantic recall (Phase I)
+    #[cfg(feature = "experimental_cognition_cert")]
     Certify {
         store: PathBuf,
         #[arg(long, default_value = "cert.cbor")]
@@ -112,6 +121,7 @@ enum Commands {
         proof_level: ProofLevelArg,
     },
     /// Offline verify Cognition Certificate v1 (Phase I)
+    #[cfg(feature = "experimental_cognition_cert")]
     VerifyCert {
         cert: PathBuf,
         #[arg(long = "ef-search", default_value_t = 64)]
@@ -120,14 +130,17 @@ enum Commands {
         k: u32,
     },
     /// Initialize a new store at PATH
+    #[cfg(feature = "operator_tools")]
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
+    #[cfg(feature = "operator_tools")]
     Determinism {
         #[command(subcommand)]
         command: DeterminismCommands,
     },
 }
 
+#[cfg(feature = "experimental_sync_crdt")]
 #[derive(Subcommand)]
 enum SyncCommands {
     /// Pull peer object delta into STORE via ws://HOST/v1/sync (DiffReq/WantObjects protocol)
@@ -181,6 +194,7 @@ enum ForgetModeArg {
     Redact,
 }
 
+#[cfg(feature = "experimental_cognition_cert")]
 #[derive(Clone, Copy, ValueEnum, Default)]
 enum ProofLevelArg {
     #[default]
@@ -188,6 +202,7 @@ enum ProofLevelArg {
     HnswAuditOnDemand,
 }
 
+#[cfg(feature = "experimental_cognition_cert")]
 impl From<ProofLevelArg> for RetrievalProofLevel {
     fn from(v: ProofLevelArg) -> Self {
         match v {
@@ -206,6 +221,7 @@ enum VaultArg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliErrorKind {
     Usage,
+    #[cfg(feature = "operator_tools")]
     StoreUnavailable,
     VerifyFailed(MnemeError),
     Kernel(MnemeError),
@@ -218,6 +234,7 @@ fn main() -> ExitCode {
         Err(kind) => {
             let (code, msg) = match kind {
                 CliErrorKind::Usage => (2, "invalid usage".to_string()),
+                #[cfg(feature = "operator_tools")]
                 CliErrorKind::StoreUnavailable => (
                     3,
                     "store kernel not available: build mneme-store and re-run".to_string(),
@@ -233,6 +250,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), CliErrorKind> {
     match cli.command {
+        #[cfg(feature = "operator_tools")]
         Commands::Init { path } => {
             if path.exists() {
                 eprintln!("mneme: init path already exists: {}", path.display());
@@ -362,6 +380,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("forgot key {key}");
             Ok(())
         }
+        #[cfg(feature = "experimental_sync_crdt")]
         Commands::Sync { command } => match command {
             SyncCommands::Pull { store, peer_url } => {
                 if peer_url.trim().is_empty() {
@@ -395,6 +414,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 Ok(())
             }
         },
+        #[cfg(feature = "experimental_sync_crdt")]
         Commands::Merge { store_a, store_b } => {
             require_store_dir(&store_a)?;
             require_store_dir(&store_b)?;
@@ -409,7 +429,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
+        #[cfg(feature = "operator_tools")]
         Commands::Audit { root } => require_path_exists(&root, "root checkpoint"),
+        #[cfg(feature = "experimental_cognition_cert")]
         Commands::Certify {
             store,
             out,
@@ -439,6 +461,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("cognition certificate v1 written to {}", out.display());
             Ok(())
         }
+        #[cfg(feature = "experimental_cognition_cert")]
         Commands::VerifyCert { cert, ef_search, k } => {
             require_file_exists(&cert, "cognition certificate")?;
             let pk = if let Some(ref seed) = cli.operator_seed {
@@ -459,6 +482,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("verify-cert ok: cognition certificate v1 valid offline");
             Ok(())
         }
+        #[cfg(feature = "experimental_attest")]
         Commands::Attest { root } => {
             require_file_exists(&root, "root checkpoint")?;
             let bytes = std::fs::read(&root).map_err(|_| CliErrorKind::Usage)?;
@@ -469,6 +493,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
+        #[cfg(feature = "operator_tools")]
         Commands::Determinism { command } => match command {
             DeterminismCommands::FoundationGate { out, timestamp } => {
                 let operator_seed = cli
@@ -504,6 +529,7 @@ fn parse_logical_key(key: &str) -> LogicalKey {
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn create_store(path: &Path, operator: KeyPair, vault: VaultArg) -> Result<Store, CliErrorKind> {
     match vault {
         VaultArg::File => Store::create(path, operator).map_err(CliErrorKind::Kernel),
@@ -566,6 +592,7 @@ fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], CliErrorKind> {
     Ok(seed)
 }
 
+#[cfg(feature = "experimental_cognition_cert")]
 fn parse_i16_list(s: &str) -> Result<Vec<i16>, CliErrorKind> {
     if s.trim().is_empty() {
         return Ok(Vec::new());
@@ -575,11 +602,17 @@ fn parse_i16_list(s: &str) -> Result<Vec<i16>, CliErrorKind> {
         .collect()
 }
 
+#[cfg(feature = "operator_tools")]
 fn require_path_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {
     require_file_exists(path, label)?;
     Err(CliErrorKind::StoreUnavailable)
 }
 
+#[cfg(any(
+    feature = "operator_tools",
+    feature = "experimental_cognition_cert",
+    feature = "experimental_attest"
+))]
 fn require_file_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {
     if !path.exists() {
         let mut msg = String::new();

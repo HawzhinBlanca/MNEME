@@ -3,14 +3,19 @@
 use crate::Store;
 use crate::layout;
 use mneme_cap::Capability;
+#[cfg(feature = "experimental_semantic")]
+use mneme_core::HlcWire;
 use mneme_core::{
-    AsOf, Entry, HlcWire, MnemeError, ObjectId, ObjectRecord, Procedure, Query, Root,
-    from_bytes_strict, valid_time_from_ext,
+    AsOf, Entry, MnemeError, ObjectId, ObjectRecord, Procedure, Query, Root, from_bytes_strict,
+    valid_time_from_ext,
 };
 use mneme_crypto::TrustConfig;
+#[cfg(feature = "experimental_semantic")]
 use mneme_index::SemanticIndex;
 use mneme_root::CheckpointLog;
-use mneme_verify::{RecallContext, SemanticRecallInput, verify_recall, verify_semantic_recall};
+use mneme_verify::{RecallContext, verify_recall};
+#[cfg(feature = "experimental_semantic")]
+use mneme_verify::{SemanticRecallInput, verify_semantic_recall};
 
 impl Store {
     /// Verified recall bound to a historical signed root or valid-time filter (Phase I).
@@ -74,8 +79,22 @@ impl Store {
                 previous.as_ref(),
             );
         }
-        let semantic = self.semantic_as_of(&historical)?;
-        self.recall_semantic_at_index(query, proc, cap, &historical, &semantic, previous.as_ref())
+        #[cfg(feature = "experimental_semantic")]
+        {
+            let semantic = self.semantic_as_of(&historical)?;
+            self.recall_semantic_at_index(
+                query,
+                proc,
+                cap,
+                &historical,
+                &semantic,
+                previous.as_ref(),
+            )
+        }
+        #[cfg(not(feature = "experimental_semantic"))]
+        {
+            Err(MnemeError::ProcedureMismatch)
+        }
     }
 
     fn recall_verified_at_valid_time(
@@ -85,28 +104,32 @@ impl Store {
         cap: &Capability,
         bound_ms: u64,
     ) -> Result<Vec<Entry>, MnemeError> {
-        let root = self.current_root()?;
         if mneme_index::is_key_index_procedure(proc) {
             let entries = self.recall_verified(query, proc, cap)?;
             return Ok(filter_entries_valid_time(entries, bound_ms));
         }
-        // Valid-time is a *content attribute*, not a signed checkpoint — there is no
-        // "signed root at valid-time t". So this is a fully VERIFIED semantic recall over
-        // the current signed root (the receipt binds to `root.semantic_commit`), followed
-        // by a post-filter on the verified entries by valid_time. The previous approach
-        // rebuilt a valid-time-filtered sub-index whose commit never matched the signed
-        // root, so `verify_semantic_receipt` always failed closed — non-functional. This
-        // version is both sound (entries are receipt-verified) and functional.
-        let previous = self.session_previous_root();
-        let entries = self.recall_semantic_at_index(
-            query,
-            proc,
-            cap,
-            &root,
-            &self.semantic,
-            previous.as_ref(),
-        )?;
-        Ok(filter_entries_valid_time(entries, bound_ms))
+        #[cfg(feature = "experimental_semantic")]
+        {
+            let root = self.current_root()?;
+            // Valid-time is a *content attribute*, not a signed checkpoint — there is no
+            // "signed root at valid-time t". So this is a fully VERIFIED semantic recall over
+            // the current signed root (the receipt binds to `root.semantic_commit`), followed
+            // by a post-filter on the verified entries by valid_time.
+            let previous = self.session_previous_root();
+            let entries = self.recall_semantic_at_index(
+                query,
+                proc,
+                cap,
+                &root,
+                &self.semantic,
+                previous.as_ref(),
+            )?;
+            Ok(filter_entries_valid_time(entries, bound_ms))
+        }
+        #[cfg(not(feature = "experimental_semantic"))]
+        {
+            Err(MnemeError::ProcedureMismatch)
+        }
     }
 
     fn recall_verified_bound_to_root(
@@ -120,7 +143,14 @@ impl Store {
         if mneme_index::is_key_index_procedure(proc) {
             return self.recall_key_at_index(query, proc, cap, root, &self.key_index, previous);
         }
-        self.recall_semantic_at_index(query, proc, cap, root, &self.semantic, previous)
+        #[cfg(feature = "experimental_semantic")]
+        {
+            self.recall_semantic_at_index(query, proc, cap, root, &self.semantic, previous)
+        }
+        #[cfg(not(feature = "experimental_semantic"))]
+        {
+            Err(MnemeError::ProcedureMismatch)
+        }
     }
 
     fn recall_key_at_index(
@@ -166,6 +196,7 @@ impl Store {
         Ok(entries)
     }
 
+    #[cfg(feature = "experimental_semantic")]
     fn recall_semantic_at_index(
         &self,
         query: &Query,
@@ -220,6 +251,7 @@ impl Store {
         Ok(Some(stored.to_root()))
     }
 
+    #[cfg(feature = "experimental_semantic")]
     fn session_previous_root(&self) -> Option<Root> {
         if self.roots.len() > 1 {
             Some(self.roots[self.roots.len() - 2].clone())
@@ -228,6 +260,7 @@ impl Store {
         }
     }
 
+    #[cfg(feature = "experimental_semantic")]
     fn semantic_as_of(&self, root: &Root) -> Result<SemanticIndex, MnemeError> {
         let mut index = SemanticIndex::new();
         for (id, bytes) in &self.objects {
@@ -249,6 +282,7 @@ impl Store {
     }
 }
 
+#[cfg(feature = "experimental_semantic")]
 fn hlc_wire_bytes(h: &HlcWire) -> [u8; 14] {
     mneme_core::Hlc {
         wall_ms: h.wall_ms,
