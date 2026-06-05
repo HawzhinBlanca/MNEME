@@ -233,6 +233,7 @@ pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
 }
 
 /// Per-checkpoint key-index snapshot for bi-temporal `recall_verified_at` (Phase I P1-2).
+#[cfg(feature = "bitemporal_recall")]
 pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result<(), MnemeError> {
     let dir = path.join("meta/snapshots").join(seq.to_string());
     fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
@@ -250,6 +251,7 @@ pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result
 }
 
 /// Load a historical key index snapshot written at commit `seq`.
+#[cfg(feature = "bitemporal_recall")]
 pub fn load_key_index_at_seq(path: &Path, seq: u64) -> Result<KeyIndex, MnemeError> {
     let snap = path
         .join("meta/snapshots")

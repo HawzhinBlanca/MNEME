@@ -1,11 +1,18 @@
+#[cfg(any(feature = "experimental_semantic", feature = "bitemporal_recall"))]
 use super::helpers::{agent_store, semantic_draft_with_embedding, theme_key};
 #[cfg(feature = "experimental_semantic")]
 use mneme_cap::agent_cap;
-use mneme_core::{AsOf, Query, TrustTier};
+#[cfg(feature = "bitemporal_recall")]
+use mneme_core::AsOf;
+#[cfg(all(feature = "experimental_semantic", feature = "bitemporal_recall"))]
+use mneme_core::{Draft, MemoryKind};
 #[cfg(feature = "experimental_semantic")]
-use mneme_core::{Draft, FixedPointEmbedding, MemoryKind, ProvenanceFilter};
+use mneme_core::{FixedPointEmbedding, ProvenanceFilter};
+#[cfg(any(feature = "experimental_semantic", feature = "bitemporal_recall"))]
+use mneme_core::{Query, TrustTier};
 #[cfg(feature = "experimental_semantic")]
 use mneme_crypto::KeyPair;
+#[cfg(feature = "bitemporal_recall")]
 use mneme_index::default_key_procedure;
 #[cfg(feature = "experimental_semantic")]
 use mneme_index::default_semantic_procedure;
@@ -13,6 +20,7 @@ use mneme_index::default_semantic_procedure;
 use mneme_store::Store;
 
 #[test]
+#[cfg(feature = "bitemporal_recall")]
 fn e2e_recall_verified_at_matches_current_root() {
     let (mut store, cap, _dir) = agent_store();
     let draft = semantic_draft_with_embedding("phase", "bitemporal", b"body", {
@@ -64,6 +72,7 @@ fn e2e_provenance_scoped_recall_honors_filter() {
 /// the post-filter.
 #[test]
 #[cfg(feature = "experimental_semantic")]
+#[cfg(feature = "bitemporal_recall")]
 fn e2e_recall_verified_at_valid_time_semantic_excludes_and_is_functional() {
     let (mut store, cap, _dir) = agent_store();
     let emb = FixedPointEmbedding::new(2, 0, vec![1, 2]).unwrap();

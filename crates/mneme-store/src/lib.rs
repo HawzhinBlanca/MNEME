@@ -29,6 +29,7 @@ mod layout;
 mod merge;
 mod pause;
 mod recall;
+#[cfg(feature = "bitemporal_recall")]
 mod recall_at;
 mod scoped_recall;
 
@@ -888,6 +889,10 @@ impl Store {
         pause::checkpoint(pause::AFTER_APPEND_CHECKPOINT)?;
         layout::write_head(&self.path, &stored)?;
         pause::checkpoint(pause::AFTER_WRITE_HEAD)?;
+        // Per-commit full key-index snapshot powers bi-temporal `recall_verified_at`
+        // only. It is O(N) write + O(N x writes) disk, so the lean default omits it;
+        // enable `bitemporal_recall` to retain point-in-time recall.
+        #[cfg(feature = "bitemporal_recall")]
         layout::snapshot_key_index_at_seq(&self.path, self.sequence, self)?;
         Ok(())
     }
