@@ -21,6 +21,20 @@ pub fn normalize_tool_namespace(namespace: &str) -> String {
     format!("tools/{ns}")
 }
 
+/// Maximum bytes for an agent-supplied logical-key field (namespace / name).
+/// The logical key is stored verbatim in the `object_keys` sidecar, so an
+/// unbounded field would bloat it; 4 KiB is far above any realistic key while
+/// still bounding a single malformed/abusive `record` call. Fails closed
+/// (`SchemaDrift`) rather than silently storing a multi-megabyte key.
+const MAX_LOGICAL_KEY_FIELD_BYTES: usize = 4096;
+
+fn validate_logical_key_field(value: &str) -> Result<(), MnemeError> {
+    if value.len() > MAX_LOGICAL_KEY_FIELD_BYTES {
+        return Err(MnemeError::SchemaDrift);
+    }
+    Ok(())
+}
+
 /// MCP memory tool backend: tool-channel writes, verified reads only.
 pub struct MemoryHandlers {
     store: Arc<Mutex<Store>>,
@@ -63,6 +77,8 @@ impl MemoryHandlers {
         if name.trim().is_empty() {
             return Err(MnemeError::SchemaDrift);
         }
+        validate_logical_key_field(namespace)?;
+        validate_logical_key_field(name)?;
         let namespace = normalize_tool_namespace(namespace);
         let draft = Draft {
             namespace,
@@ -99,6 +115,8 @@ impl MemoryHandlers {
         name: &str,
         min_tier: TrustTier,
     ) -> Result<RecallWithSignedChainResult, MnemeError> {
+        validate_logical_key_field(namespace)?;
+        validate_logical_key_field(name)?;
         let query = Query {
             logical_key: LogicalKey {
                 namespace: normalize_tool_namespace(namespace),
@@ -345,5 +363,25 @@ pub fn parse_min_tier(s: &str) -> Result<TrustTier, MnemeError> {
         "trusted" => Ok(TrustTier::Trusted),
         "identity" => Ok(TrustTier::Identity),
         _ => Err(MnemeError::SchemaDrift),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logical_key_field_within_limit_ok() {
+        assert!(validate_logical_key_field("agent/instruction").is_ok());
+        assert!(validate_logical_key_field(&"x".repeat(MAX_LOGICAL_KEY_FIELD_BYTES)).is_ok());
+    }
+
+    #[test]
+    fn logical_key_field_over_limit_fails_closed() {
+        let too_long = "x".repeat(MAX_LOGICAL_KEY_FIELD_BYTES + 1);
+        assert_eq!(
+            validate_logical_key_field(&too_long).unwrap_err(),
+            MnemeError::SchemaDrift
+        );
     }
 }

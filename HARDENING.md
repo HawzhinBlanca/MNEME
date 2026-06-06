@@ -192,3 +192,22 @@ Fixed by binding each cfg branch's result and returning it as the function tail
 Evidence: clippy `-D warnings` clean for mneme-mcp + mneme-account (both cfgs);
 mneme-mcp read_frame unit tests (6) + stdio roundtrip (2) pass. No determinism
 impact (transport + gated account code are not in the foundation gate).
+
+## 2026-06-06 — Path-traversal audit (clean) + logical-key input bound
+
+**Audit (verified clean).** Traced every agent-supplied string (`namespace`,
+`name`, `query`) for filesystem-path injection. None reaches a path: the store
+is hash-addressed throughout — `LogicalKey::hash` BLAKE3-hashes namespace+name
+(domain-separated) into the key hash, objects are stored by content hash, and
+all `path.join(...)` use fixed names (the journal helper's `name` arg is always
+a string constant). No path-traversal vector. No fix needed.
+
+**Hardening (public API input governance).** The one real gap: agent
+`namespace`/`name` are stored verbatim in the `object_keys` sidecar (the logical
+key), bounded only by the 16 MiB frame cap — a multi-MB logical key would bloat
+that sidecar. Added `validate_logical_key_field` (≤ 4 KiB/field, fail-closed
+`SchemaDrift`) at both `record_with_provenance` and `recall_with_signed_chain`.
+4 KiB is far above any realistic key. Evidence: clippy `-D warnings` clean;
+2 new unit tests (within-limit ok, over-limit fails closed) + existing
+record/recall + stdio roundtrips pass. No determinism impact (foundation gate
+drives the store directly, not the MCP handler).
