@@ -109,3 +109,31 @@ Evidence: clippy `-D warnings` clean; new `journal_outgrew_base` unit test +
 existing layout tests pass; e2e 39, tamper 2, chaos 2 (crash/corruption soak,
 exercises the open path), determinism OK with pinned digests `25e3…/e14b…/b479…`
 unchanged.
+
+## 2026-06-06 — Replay-floor scan: O(commits) → O(1) verifications per open
+
+**Found + optimized (perf, security-critical path).** `mneme-root::
+max_signed_checkpoint` runs on every store open (A-REPLAY / INV-6 replay floor)
+and read + dcbor-parsed + **Ed25519-verified every** `roots/<seq>.root.cbor` to
+find the max validly-signed sequence. `roots/` grows one file per commit, so
+open was O(commits) with a signature verification per checkpoint (~1M verifies ≈
+50 s at 1M commits — the dominant cost).
+
+Optimization: still read + parse every checkpoint so I/O errors propagate exactly
+as before (an *unreadable* max checkpoint must fail closed, else an attacker
+could lower the replay floor by hiding it), but defer the expensive Ed25519 check
+to a **descending-by-seq scan that stops at the first valid checkpoint** — which
+is the max signed sequence. Behaviorally identical (same max, same hlc, same
+skip/propagate rules); only the verification *count* drops from O(commits) to
+O(1) in the common case.
+
+Evidence: clippy `-D warnings` clean; `mneme-root` 11+ tests incl `check_replay`;
+`validation-lane tamper` OK (`tamper_root_hlc_replay` + A-REPLAY forgery cases);
+chaos soak 2 (stale/forged-root replay detection); determinism OK, pinned digests
+`25e3…/e14b…/b479…` unchanged.
+
+**Design follow-up (human):** `roots/` itself still grows one small file per
+commit (the audit/replay ledger). Per-commit I/O+parse on open remains O(commits)
+even with O(1) crypto; at very large commit counts the 1-file-per-commit inode
+load is the next ceiling. Whether/how to prune or pack the ledger is a policy
+decision — logged to HUMAN_TASKS.md.

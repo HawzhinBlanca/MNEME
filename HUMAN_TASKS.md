@@ -30,6 +30,16 @@ Status legend: ☐ open · ☑ done · ⏳ in progress (human)
   fits easily (~6 GiB after the write-amp fix). A long-running soak (hours/days,
   big disk) for endurance numbers would need a dedicated machine.
 
+## Design decisions (policy, not pure engineering)
+
+- ☐ **Checkpoint ledger (`roots/`) growth.** One small signed file per commit,
+  unbounded (the audit + replay-floor ledger). The replay-floor *scan* is now
+  O(1) in crypto (HARDENING.md 2026-06-06), but per-commit I/O + the inode count
+  remain O(commits) at very large scale. Decide whether v1 prunes/packs old
+  checkpoints (faster open, smaller disk) or keeps the full ledger for audit.
+  My lean default: keep the full ledger for v1; revisit if a deployment shows
+  open latency from inode load.
+
 ## Notes for review
 
 - ☐ **Node.js 20 action deprecation** in workflows (`actions/checkout@v4`,

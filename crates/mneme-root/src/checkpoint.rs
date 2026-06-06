@@ -63,7 +63,15 @@ pub fn max_signed_checkpoint(
         Ok(r) => r,
         Err(_) => return Ok(None),
     };
-    let mut best: Option<(u64, [u8; 14])> = None;
+    // Read + parse every checkpoint (propagating I/O errors exactly as before:
+    // an *unreadable* checkpoint must fail closed, otherwise an attacker could
+    // lower the replay floor by making the max checkpoint unreadable). Skipping
+    // unparseable / seq-mismatched files matches the prior "never trust, only
+    // ignore" contract. The Ed25519 signature check — the dominant per-checkpoint
+    // cost — is deferred to a descending-by-seq scan that stops at the first
+    // valid checkpoint, which is the max signed sequence: identical result, but
+    // O(1) signature verifications on open instead of O(commits).
+    let mut candidates: Vec<(u64, StoredRoot)> = Vec::new();
     for entry in read {
         let path = entry.map_err(|e| io_err(&dir, e))?.path();
         let seq = match path
@@ -80,14 +88,17 @@ pub fn max_signed_checkpoint(
             Ok(s) => s,
             Err(_) => continue,
         };
-        if stored.sequence == seq
-            && checkpoint_signature_valid(&stored, operator_keys)
-            && best.map(|(b, _)| seq > b).unwrap_or(true)
-        {
-            best = Some((seq, stored.hlc_max));
+        if stored.sequence == seq {
+            candidates.push((seq, stored));
         }
     }
-    Ok(best)
+    candidates.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    for (seq, stored) in candidates {
+        if checkpoint_signature_valid(&stored, operator_keys) {
+            return Ok(Some((seq, stored.hlc_max)));
+        }
+    }
+    Ok(None)
 }
 
 /// Field-compare every on-disk checkpoint `roots/<n>.root.cbor` against the
