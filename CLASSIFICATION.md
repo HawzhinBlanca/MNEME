@@ -133,7 +133,7 @@ Source anchors:
 | `experimental/context-gate/mneme-index-context-gate.rs` | DEFER | Re-included only by `context_gate` at `crates/mneme-index/src/lib.rs:16-18`. |
 | `experimental/federation/mneme-index-federation-cert.rs` | DEFER | Re-included only by `federation` at `crates/mneme-index/src/lib.rs:23-25`. |
 | `experimental/zk-privacy/mneme-index-*.rs` | DEFER | Re-included by ZK features at `crates/mneme-index/src/lib.rs:51-61`. |
-| `experimental/research/mneme-index-piop-research.rs` | CUT candidate | Research-only seam re-included only by `piop_research` at `crates/mneme-index/src/lib.rs:63-65`; current code reports no prover. |
+| `experimental/research/mneme-index-piop-research.rs` | DELETED 2026-06-06 | Default-off research seam; removed with its `piop_research` feature. No CORE dep. |
 
 ### `mneme-forget`, `mneme-account`
 
@@ -201,36 +201,39 @@ Source anchors:
 | `tests/chaos/mod.rs` | CORE | Disk-full/corruption/random-kill chaos suite at `tests/chaos/mod.rs:1-20`; requires `internal_test_support` in `crates/mneme-store/Cargo.toml:82-86`. |
 | `tests/bench_recall.rs` | CORE perf gate | Ignored by default and explicitly invoked by bench scripts; test target requires `bench_support,internal_test_support` at `crates/mneme-store/Cargo.toml:76-80`. |
 | `fuzz/` | CORE + DEFER mix | Fuzz crate explicitly enables experimental index features for experimental fuzz lanes at `fuzz/Cargo.toml:14`. |
-| `scripts/ci/crypto-fault-injection-smoke.sh` | CUT candidate | Scaffold/fault-injection smoke is not a real core acceptance gate. |
-| `scripts/piop-flat-prototype` | CUT candidate | Excluded research prototype; not workspace core. |
+| `scripts/ci/crypto-fault-injection-smoke.sh` | CORE gate (KEPT) | Active, passing step of `validation-lane crypto` (real `fault_injection` tests). |
+| `scripts/piop-flat-prototype` | DELETED 2026-06-06 | Excluded research prototype; removed. |
 
-## Explicit CUT Candidates Pending Review
+## CUT Candidates — resolved 2026-06-06
 
-No CUT candidate is deleted in this branch.
+Reviewed and acted on. Two genuinely-dead candidates were **deleted** (with a
+green quick lane and confirmation no CORE test depended on them); two were found
+to be **active** and were **kept** (cutting them would reduce coverage).
 
-| Candidate | Bucket | Why |
-|---|---:|---|
-| `experimental/research/mneme-index-piop-research.rs` | CUT candidate | Research seam with no prover or recall path. |
-| `scripts/piop-flat-prototype` | CUT candidate | Excluded prototype, not a core gate. |
-| `scripts/ci/crypto-fault-injection-smoke.sh` scaffold | CUT candidate | Not a real typed forgery/fault-injection gate. |
-| Fixture dump helpers under `experimental/cognition-cert` | CUT candidate | Generator helpers, not acceptance tests. |
+| Candidate | Decision | Basis |
+|---|---|---|
+| `experimental/research/mneme-index-piop-research.rs` | DELETED | default-off `piop_research` seam, no prover/recall path; removed the feature, `mod`, `pub use`, and guard-test. No CORE dep. |
+| `scripts/piop-flat-prototype` | DELETED | workspace-`exclude`d prototype; sole caller `phase-iv-cost-report.sh` already `-f`-guards its absence. |
+| `scripts/ci/crypto-fault-injection-smoke.sh` | KEPT | active, passing step of `validation-lane crypto` (2 `fault_injection` tests exist + run) — a real gate, not a scaffold. |
+| `experimental/cognition-cert/cognition_cert_v1.rs` | KEPT | a real `[[test]]` (roundtrip, `required-features=["cognition_cert"]`), not a fixture-only helper. |
 
-## Remaining Uncertain Items
+## Uncertain Items — operator decisions (2026-06-06)
 
-1. Whether `mneme-crossref` should stay DEFER standardization or be promoted to
-   CORE assurance infrastructure.
-2. Whether "deletion propagated" for v1 means signed tombstone propagation
-   within one store lineage only, or a multi-peer CRDT propagation guarantee.
-   The user classified CRDT sync as DEFER, so this branch keeps multi-peer
-   propagation out of core.
-3. Whether broad compatibility exports in `mneme-core::interface` should be
-   hidden before a public Rust SDK is declared.
-4. Whether the `mneme-account` crate should be renamed/split so core erasure
-   receipt support no longer shares a crate with deferred external
-   `ActionReceipt` accountability.
+1. RESOLVED → **DEFER.** `mneme-crossref` stays DEFER (assurance/standardization),
+   not CORE TCB: it is a cross-impl vector check (CI assurance), not on the
+   runtime trusted path; promoting it would inflate the "core" surface without a
+   runtime guarantee.
+2. RESOLVED → **single-store lineage for v1.** "Deletion propagated" means signed
+   tombstone propagation within one store lineage; multi-peer CRDT propagation
+   stays DEFER (consistent with CRDT sync being deferred).
+3. OPEN. Whether broad compatibility exports in `mneme-core::interface` should be
+   hidden before a public Rust SDK is declared. (Defer until an SDK is declared.)
+4. OPEN. Whether `mneme-account` should be split so core `ForgetProof` no longer
+   shares a crate with deferred `ActionReceipt`. (Cosmetic; gating already
+   separates them. Low priority.)
 
 ## Review Rule
 
-No CUT deletion until this classification is reviewed. Every DEFER item is
-separated or feature-gated; any future cut needs a green core gate and proof
-that no CORE test depended on it.
+CUT deletions are now reviewed (above). Every DEFER item is separated or
+feature-gated; any further cut needs a green core gate and proof that no CORE
+test depended on it (as done for the two deletions on 2026-06-06).

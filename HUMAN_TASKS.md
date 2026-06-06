@@ -10,15 +10,14 @@ Status legend: ☐ open · ☑ done · ⏳ in progress (human)
 
 - ☐ **Merge PR #9** (`codex/lean-core-classification`). Fully green CI, mergeable;
   meets all 5 README LEAN conditions. Awaiting your review + merge.
-- ☐ **Approve CUT-candidate deletions** (none deleted yet, per the review rule):
-  `experimental/research/mneme-index-piop-research.rs`,
-  `scripts/piop-flat-prototype`,
-  `scripts/ci/crypto-fault-injection-smoke.sh` scaffold,
-  fixture-dump helpers under `experimental/cognition-cert`.
-- ☐ **`mneme-crossref` classification** — keep DEFER (assurance) or promote to
-  CORE? (My recommendation: keep DEFER.)
-- ☐ **Deletion-propagation scope for v1** — single-store signed lineage (current)
-  vs multi-peer CRDT propagation. (My recommendation: single-store for v1.)
+- ☑ **CUT-candidate deletions** (resolved 2026-06-06 on "do all"): deleted the two
+  genuinely-dead ones (`piop-research.rs` + its `piop_research` feature;
+  `scripts/piop-flat-prototype`); **kept** `crypto-fault-injection-smoke.sh`
+  (active crypto-lane gate) and `cognition_cert_v1.rs` (a real test) — cutting
+  those would reduce coverage. See CLASSIFICATION.md / EXPERIMENTAL.md.
+- ☑ **`mneme-crossref` classification** → kept **DEFER** (assurance, not runtime TCB).
+- ☑ **Deletion-propagation scope for v1** → **single-store signed lineage**;
+  multi-peer CRDT propagation stays DEFER.
 
 ## Infrastructure (optional, beyond what CI already proves)
 
@@ -42,12 +41,14 @@ Status legend: ☐ open · ☑ done · ⏳ in progress (human)
 
 ## CI coverage gaps (low priority)
 
-- ☐ **Clippy coverage** does not include `mneme-mcp`, `mneme-account`,
-  `mneme-cli`, `mnemed` (the standard `cargo clippy -p ...` list is wave-0/1 +
-  store/verify). Latent clippy issues in those crates are caught only by hand
-  (one was found + fixed in `mneme-account`, see HARDENING.md 2026-06-06).
-  Consider widening the CI clippy lane to the full workspace — but it may surface
-  more latent lints in `mneme-cli`/`mnemed` to clean up first.
+- ☑ **Clippy coverage widened** (2026-06-06): `validation-lane quick` now lints
+  `mneme-account`, `mneme-mcp` (lib+tests) and `mneme-cli` (bins+tests) in
+  addition to wave-0/1 + store/verify. Fixed the latent lints this surfaced
+  (`mneme-account` needless_return earlier; 3 const-`assert!` sentinels in
+  phase_ii/iii test files now use `black_box`).
+- ☐ **`mnemed` clippy** still not in the CI clippy lane — it could not be verified
+  locally (its build script needs `protoc`, and Docker was unavailable mid-pass).
+  Add `-p mnemed` to the quick-lane clippy once verified (CI runners have protoc).
 
 ## Notes for review
 

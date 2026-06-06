@@ -34,7 +34,6 @@ CLI `audit`, `init`, and `determinism` are operator-only behind
 | CRDT sync and daemon | `experimental/sync-crdt/mneme-crdt`; `experimental/sync-crdt/mneme-store-merge.rs`; `experimental/sync-crdt/mnemed`; CLI `merge`/`sync` | off | Multi-agent merge/anti-entropy is roadmap. |
 | Federation/A2A | `experimental/federation/mneme-index-federation-cert.rs`; federation fuzz targets | off | Federation is not required for single-store compliance-of-record. |
 | ZK/privacy retrieval | `experimental/zk-privacy/mneme-index-{commitment-binding,pedersen-schnorr-zk,semantic-zk}.rs`; ZK tests/vectors | off | 12-month proof path, not v1 exact record lookup. |
-| PIOP research | `experimental/research/mneme-index-piop-research.rs`; `scripts/piop-flat-prototype` | off | Research-only; no production prover/verifier claim. |
 | Bi-temporal / point-in-time recall | `crates/mneme-store/src/recall_at.rs`; `recall_verified_at`; per-commit snapshot in `commit_root_inner`; `layout::{snapshot,load}_key_index_at_seq`; `tests/e2e/phase_i_gates.rs` bi-temporal tests | off | Sole consumer of per-commit full key-index snapshots (O(N) write, O(N×writes) disk). Not in the MCP four-call surface, so deferred behind `bitemporal_recall`. `AsOf` stays in frozen `mneme-core`. |
 | Crossref reference implementation | `crates/mneme-crossref` | off runtime | Assurance/standardization infrastructure, not runtime TCB. |
 
@@ -54,7 +53,6 @@ Experimental features:
 - `federation`
 - `commitment_binding`
 - `pedersen_schnorr_zk`
-- `piop_research`
 - `bitemporal_recall`
 - `bench_support`
 - `internal_test_support`
@@ -73,16 +71,18 @@ Compatibility aliases:
 - `phase_iii_verify` remains the verifier gate needed by the erasure receipt
   path.
 
-## Cut Candidates Pending Review
+## Cut Candidates — resolved 2026-06-06
 
-These are not deleted. They need review plus a green core gate before removal.
+Reviewed and acted on. Two were genuinely dead and were **deleted**; two were
+found to be **active** (a passing gate / a real test) and were **kept** — cutting
+them would have reduced coverage, the opposite of the goal.
 
-| Candidate | Note |
+| Candidate | Decision |
 |---|---|
-| `experimental/research/mneme-index-piop-research.rs` | Research seam with no prover and no recall path. |
-| `scripts/piop-flat-prototype` | Excluded prototype. |
-| `scripts/ci/crypto-fault-injection-smoke.sh` scaffold | Must become a real typed core fault-injection gate or be removed after review. |
-| Fixture dump helpers under `experimental/cognition-cert` | Generator helpers, not acceptance tests. |
+| `experimental/research/mneme-index-piop-research.rs` | **DELETED** — default-off research seam, no prover/recall path, no CORE dep (feature `piop_research` + `mod`/`pub use`/guard-test removed). |
+| `scripts/piop-flat-prototype` | **DELETED** — excluded prototype; the only caller (`phase-iv-cost-report.sh`) already skips when absent. |
+| `scripts/ci/crypto-fault-injection-smoke.sh` | **KEPT** — it is an active, passing step of `validation-lane crypto` (2 `fault_injection` tests exist + run). Not dead; removing it would drop a real gate. |
+| `experimental/cognition-cert/cognition_cert_v1.rs` | **KEPT** — a real `[[test]]` target (roundtrip tests, `required-features=["cognition_cert"]`), not a fixture-only helper. |
 
 ## Honesty Boundary
 

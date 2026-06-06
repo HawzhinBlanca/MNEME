@@ -60,10 +60,6 @@ mod pedersen_schnorr_zk;
 #[path = "../../../experimental/zk-privacy/mneme-index-semantic-zk.rs"]
 mod semantic_zk;
 
-#[cfg(feature = "piop_research")]
-#[path = "../../../experimental/research/mneme-index-piop-research.rs"]
-mod piop_research;
-
 #[cfg(feature = "experimental_semantic")]
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use error::IndexError;
@@ -136,11 +132,6 @@ pub use pedersen_schnorr_zk::{
 // *deferral* (Plonky2/FRI SNARK target not shipped), not the actual backend.
 #[cfg(feature = "pedersen_schnorr_zk")]
 pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
-
-#[cfg(feature = "piop_research")]
-pub use piop_research::{
-    PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, PIOP_RESEARCH_VERSION, prove_exact_nn_piop,
-};
 
 /// Semantic backend enabled when the `experimental_semantic` feature is on.
 /// Privacy path is `commitment_binding` only — a tagged BLAKE3 binding envelope,
@@ -251,32 +242,6 @@ mod tests {
         assert_eq!(
             prove_pedersen_schnorr(&bad),
             Err(MnemeError::ZkProofInvalid)
-        );
-    }
-
-    #[cfg(feature = "piop_research")]
-    #[test]
-    fn piop_research_seam_is_honest() {
-        use super::piop_research::{
-            PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop,
-        };
-        // Research seam must never claim to prove anything.
-        assert!(PIOP_RESEARCH_HONESTY.contains("not implemented"));
-        assert!(PIOP_RESEARCH_HONESTY.contains("does not prove"));
-        assert!(PIOP_RESEARCH_HONESTY.contains("NOT a SNARK"));
-        assert!(PIOP_RESEARCH_STATUS.contains("not implemented"));
-        // Fail-closed Err — must not panic on the research entry point.
-        assert_eq!(
-            prove_exact_nn_piop(&[0u8; 32], &[0u8; 32], &[0u8; 32], 1),
-            Err(MnemeError::UnsupportedVersion { got: 0 })
-        );
-    }
-
-    #[test]
-    fn piop_research_feature_is_not_default() {
-        assert!(
-            !cfg!(feature = "piop_research"),
-            "piop_research must remain off-by-default and research-only; remove it from default features."
         );
     }
 

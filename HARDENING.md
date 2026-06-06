@@ -248,3 +248,26 @@ continuous coverage.
   boundaries (`AFTER_BEGIN_INCOMPLETE` / `AFTER_KEY_INDEX` / `AFTER_PERSIST_INDEX`
   / `BEFORE_COMMIT_INCOMPLETE`) are exercised by the chaos suite (kill-during-
   forget → incomplete detected). No fix needed.
+
+## 2026-06-06 — Operator "do all": CUT deletions, clippy widening, decisions
+
+Acted on the pending review items.
+
+- **CUT candidates resolved.** Deleted the two genuinely-dead ones with a green
+  quick lane + no-CORE-dep proof: `experimental/research/mneme-index-piop-research.rs`
+  (removed the `piop_research` feature, `mod`/`pub use`/guard-test) and
+  `scripts/piop-flat-prototype` (excluded prototype; sole caller `-f`-guards
+  absence). **Kept** `crypto-fault-injection-smoke.sh` (active passing crypto-lane
+  gate) and `cognition_cert_v1.rs` (a real `[[test]]`) — cutting active gates/tests
+  would reduce coverage. Classification + EXPERIMENTAL updated.
+- **CI clippy coverage widened.** `validation-lane quick` now lints
+  `mneme-account`, `mneme-mcp` (lib+tests) and `mneme-cli` (bins+tests). This
+  surfaced 3 latent `clippy::assertions_on_constants` (`assert!(<CONST>_OPEN)`) in
+  `phase_iii_forget` / `phase_iii_bind` / `phase_ii_context_gate` tests — fixed to
+  `assert!(std::hint::black_box(...))`, matching the established convention.
+  `mnemed` deferred (protoc/Docker unavailable locally; see HUMAN_TASKS).
+- **Operator decisions.** `mneme-crossref` → DEFER; deletion-propagation → single-
+  store lineage for v1 (multi-peer CRDT stays DEFER).
+
+Evidence: `validation-lane quick` OK (fmt + widened clippy + TCB guard +
+kill/resume + mcp smoke); `cargo test -p mneme-index` 4 pass; no piop refs remain.

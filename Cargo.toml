@@ -22,7 +22,7 @@ members = [
     "experimental/sync-crdt/mnemed",
 ]
 default-members = ["crates/mneme-store"]
-exclude = ["fuzz", "scripts/piop-flat-prototype"]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

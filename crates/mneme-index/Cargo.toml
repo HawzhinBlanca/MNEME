@@ -56,10 +56,6 @@ pedersen_schnorr_zk = ["experimental_semantic", "dep:curve25519-dalek", "dep:ran
 # Deprecated compatibility alias for pre-rename operator/CI commands. This enables the
 # same honest Pedersen+Schnorr backend; it does not add or claim Plonky2/FRI.
 plonky2_prover = ["pedersen_schnorr_zk"]
-# Phase IV-A research seam. Off by default; wired into no recall/receipt/verify path.
-# The entry point returns UnsupportedVersion so it can never fabricate a proof.
-# This is a research note for the zkRAG-style global exact-NN direction.
-piop_research = []
 
 [[test]]
 name = "semantic_zk_recall"

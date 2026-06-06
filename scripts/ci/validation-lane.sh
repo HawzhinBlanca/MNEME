@@ -29,8 +29,11 @@ case "$LANE" in
     # Wave 0/1 + store kernel on quick lane (§18, §19 v0).
     cargo clippy -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store \
+      -p mneme-account -p mneme-mcp \
       --features mneme-store/internal_test_support \
       --lib --tests -- -D warnings
+    # mneme-cli is a binary crate (no lib target) — lint its bins + tests.
+    cargo clippy -p mneme-cli --bins --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
     cargo test -p mneme-verify --test tcb_budget -- --nocapture
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
