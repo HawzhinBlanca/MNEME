@@ -635,20 +635,43 @@ fn hex_encode(bytes: &[u8; 32]) -> String {
 }
 
 fn parse_hex32(s: &str) -> Result<[u8; 32], MnemeError> {
-    if s.len() != 64 {
-        return Err(MnemeError::SchemaDrift);
-    }
-    let mut out = [0u8; 32];
-    for i in 0..32 {
-        out[i] =
-            u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).map_err(|_| MnemeError::SchemaDrift)?;
-    }
-    Ok(out)
+    // Delegate to the canonical byte-safe decoder. The earlier local impl sliced
+    // `&str` by byte range after only a byte-length check, which PANICS when a
+    // corrupted/tampered sidecar packs 64 bytes of multibyte UTF-8 at a
+    // non-char boundary (e.g. "€"+61 ASCII == 64 bytes). Sidecars are untrusted
+    // on-disk data — fail closed, never panic (INV fail-closed default).
+    mneme_core::decode_hex32(s)
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> MnemeError {
     MnemeError::IoFailed {
         path: path.display().to_string(),
         kind: e.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex32_rejects_multibyte_utf8_without_panic() {
+        // 3-byte '€' + 61 ASCII == 64 bytes but not 64 chars. The previous
+        // byte-range `&str` slice panicked on this corrupted-sidecar shape; the
+        // canonical decoder must fail closed with a typed error instead.
+        let s = format!("\u{20AC}{}", "a".repeat(61));
+        assert_eq!(s.len(), 64);
+        assert_eq!(parse_hex32(&s).unwrap_err(), MnemeError::SchemaDrift);
+    }
+
+    #[test]
+    fn parse_hex32_roundtrips_canonical_lowercase() {
+        let id = [0xABu8; 32];
+        assert_eq!(parse_hex32(&hex_encode(&id)).unwrap(), id);
+    }
+
+    #[test]
+    fn parse_hex32_rejects_wrong_length() {
+        assert_eq!(parse_hex32("dead").unwrap_err(), MnemeError::SchemaDrift);
     }
 }

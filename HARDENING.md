@@ -36,3 +36,24 @@ clean; `cargo test -p mneme-dag` 15 passed.
 **Follow-ups:** none blocking. `mneme-dag::sequence()` keeps an infallible
 `u64::try_from(usize).expect(...)` (cannot fail on supported targets); left as-is
 to avoid a needless signature change.
+
+## 2026-06-06 — Real bug: panic-on-corruption in sidecar hex decode (fail-closed)
+
+**Found + fixed (genuine latent panic bug).** `mneme-store/src/layout.rs::parse_hex32`
+validated only the *byte* length (`s.len() == 64`) then sliced the `&str` by
+byte range (`&s[i*2..i*2+2]`). A corrupted/tampered sidecar packing 64 bytes of
+multibyte UTF-8 (e.g. `"€"` + 61 ASCII == 64 bytes, not 64 chars) makes that
+slice land on a non-char boundary → **panic**, not a typed error. `parse_hex32`
+decodes 10 untrusted on-disk sidecar fields (key-index, object-keys, tombstones,
+embeddings), so a single bad byte on disk could crash store open/recall — a
+fail-closed violation.
+
+Reproduced the panic (`byte index 2 is not a char boundary`). Fixed by
+delegating to the canonical byte-safe `mneme_core::decode_hex32` (already
+hardened + tested for this exact multibyte case), which also removes the
+duplicated decoder. Added 3 regression tests in `layout.rs` (multibyte→
+`SchemaDrift` without panic, lowercase roundtrip, wrong-length reject).
+
+Evidence: `clippy -p mneme-store --lib --tests -D warnings` clean; new tests
+pass; `validation-lane determinism` OK with pinned digests
+`25e3…/e14b…/b479…` unchanged (decode is byte-identical for valid hex).
