@@ -33,7 +33,7 @@ jobs:
       PHASE_GATE_LEVEL: quick
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/phase-program
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -56,7 +56,7 @@ jobs:
       PHASE_GATE_LEVEL: ${{ github.event.inputs.level || 'full' }}
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/phase-program-full
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:

@@ -57,3 +57,30 @@ duplicated decoder. Added 3 regression tests in `layout.rs` (multibyte→
 Evidence: `clippy -p mneme-store --lib --tests -D warnings` clean; new tests
 pass; `validation-lane determinism` OK with pinned digests
 `25e3…/e14b…/b479…` unchanged (decode is byte-identical for valid hex).
+
+## 2026-06-06 — Same-class slice sweep (clean) + Node 20→24 CI action bump
+
+**Sweep (verified clean).** After the hour-2 `&str`-byte-slice panic, swept the
+whole workspace for the same bug class: `&s[a..b]` / `s.get(a..b)` / `split_at`
+on untrusted input. Every other site is guarded:
+- `layout.rs:184/206` `&hex[..2]` — `hex` is always `hex_encode(id)` (64 ASCII
+  chars), never untrusted.
+- `mneme-index-wire.rs` `&bytes[1..]` / `&input[pos..]` — `is_empty()` /
+  `pos >= len` guards (the fuzz-hardened "never panics" parsers).
+- `mneme-store-merge.rs` `split_at(NONCE_LEN)` — `len() < NONCE_LEN` guard.
+- `pedersen-schnorr-zk.rs` `proof_bytes[0..64]` — `len() != PROOF_LEN` guard.
+- `mneme-smt/tree.rs` slice is on fixed 32-byte arrays (depth-bounded).
+
+Conclusion: the hour-2 bug was an isolated outlier; slicing discipline is
+otherwise sound. No code change.
+
+**Node 20→24 action bump.** GitHub forces node24 on JS actions 2026-06-16,
+which would break the node20-pinned actions powering CI (incl. the
+two-physical-host determinism pipeline). Verified the first node24 major for
+each via `gh api` (v5 of the artifact actions is still node20) and bumped:
+`actions/checkout@v4→v5`, `actions/setup-node@v4→v5`,
+`actions/upload-artifact@v4→v6`, `actions/download-artifact@v4→v7`. Pure 1:1
+`uses:` version swaps across 6 workflows (27/27). The upload@v6→download@v7 path
+in the determinism compare job is the only behavioural risk — validated
+empirically by CI (cross-runner `compare digests` must stay green). `rust-cache@v2`
+left as-is (third-party, not in GitHub's deprecation notice).

@@ -38,7 +38,7 @@ jobs:
       MNEME_RUNNER_LABEL: ${{ matrix.label }}
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/cross-runner-${{ matrix.label }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -52,7 +52,7 @@ jobs:
         run: bash scripts/ci/determinism-cross-runner.sh gate --label "${{ matrix.label }}"
 
       - name: Upload cross-runner report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: foundation-gate-${{ matrix.label }}
           path: |
@@ -66,10 +66,10 @@ jobs:
     needs: foundation-gate-matrix
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download runner reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           # NO merge-multiple: keep each runner's report under its own artifact
           # subdir (artifacts/foundation-gate-gh-{ubuntu,macos}/...). Merging would
@@ -122,7 +122,7 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/ssh-peer
       MNEME_DETERMINISM_TS: "1970-01-01T00:00:00Z"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -156,14 +156,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Docker simulation foundation gate (two isolated containers)
         run: bash scripts/ci/determinism-two-machine.sh --docker
 
       - name: Upload docker-sim evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: determinism-docker-sim
           path: |

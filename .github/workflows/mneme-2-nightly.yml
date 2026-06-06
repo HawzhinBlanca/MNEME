@@ -18,7 +18,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-zk
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.86.0
@@ -37,7 +37,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-envelope
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.86.0
@@ -73,14 +73,14 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/mneme2-live-mcp
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.86.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: mneme2-live-mcp
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -97,6 +97,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: dek-from-aws.sh is executable and bash-clean
         run: bash -n scripts/kms/dek-from-aws.sh
