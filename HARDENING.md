@@ -84,3 +84,28 @@ each via `gh api` (v5 of the artifact actions is still node20) and bumped:
 in the determinism compare job is the only behavioural risk — validated
 empirically by CI (cross-runner `compare digests` must stay green). `rust-cache@v2`
 left as-is (third-party, not in GitHub's deprecation notice).
+
+## 2026-06-06 — Bound unbounded sidecar journals (on-open compaction)
+
+**Found + fixed (scalability/reliability).** Store `open`
+(`open_pinned_with_vault`) replays the per-sidecar append-only journals
+(`key_index` / `object_keys` / `embeddings`) into memory but never truncated
+them afterward. Single-entry `remember`/`forget` only *append* to those journals
+(full `persist_*` that truncates them runs only on batch/rekey), so a long-lived
+single-write store — the common agent-memory case — grew the journals
+O(total writes) and replayed the whole journal on every cold open (O(writes)
+startup). Less severe than the fixed 46 GB snapshot, but real.
+
+Fix: `layout::compact_oversized_sidecars` runs once on open and folds any journal
+that has outgrown its base snapshot back in, via the existing crash-safe
+`persist_*` path (atomic base write then journal drop; replay is idempotent so a
+crash in between re-applies the same state). Threshold-gated
+(`JOURNAL_COMPACT_FLOOR_BYTES = 256 KiB`, overridable via
+`MNEME_JOURNAL_COMPACT_FLOOR_BYTES`) so small/short-lived stores never pay an
+O(N) rewrite on open. Digest-neutral: the signed root derives from the in-memory
+index roots, not sidecar bytes.
+
+Evidence: clippy `-D warnings` clean; new `journal_outgrew_base` unit test +
+existing layout tests pass; e2e 39, tamper 2, chaos 2 (crash/corruption soak,
+exercises the open path), determinism OK with pinned digests `25e3…/e14b…/b479…`
+unchanged.

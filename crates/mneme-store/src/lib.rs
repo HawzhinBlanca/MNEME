@@ -258,6 +258,11 @@ impl Store {
             sequence: stored.sequence,
             recall_cache: RefCell::new(RecallSessionCache::default()),
         };
+        // Bound append-only sidecar journals: fold any that have outgrown their
+        // base snapshot back in (crash-safe, digest-neutral), so a long-lived
+        // single-write store does not grow journals O(total writes) or replay
+        // the whole journal on every cold open.
+        layout::compact_oversized_sidecars(&store.path, &store)?;
         #[cfg(feature = "experimental_semantic")]
         {
             let mut store = store;

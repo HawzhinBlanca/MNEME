@@ -555,6 +555,56 @@ fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
     Ok(())
 }
 
+/// On-open journal compaction floor. A journal below this is cheap to replay, so
+/// skip the O(N) base rewrite; above it (and once the journal outgrows its base
+/// snapshot) compaction bounds disk + cold-open replay cost.
+const JOURNAL_COMPACT_FLOOR_BYTES: u64 = 256 * 1024;
+
+/// Compaction floor in bytes; overridable via `MNEME_JOURNAL_COMPACT_FLOOR_BYTES`
+/// (operators can tune it; tests set 0 to force compaction at any size).
+fn journal_compact_floor() -> u64 {
+    std::env::var("MNEME_JOURNAL_COMPACT_FLOOR_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(JOURNAL_COMPACT_FLOOR_BYTES)
+}
+
+fn journal_outgrew_base(meta: &Path, base_name: &str, journal_name: &str) -> bool {
+    let jsize = fs::metadata(meta.join(journal_name))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    if jsize < journal_compact_floor() {
+        return false;
+    }
+    let bsize = fs::metadata(meta.join(base_name))
+        .map(|m| m.len())
+        .unwrap_or(0);
+    jsize > bsize
+}
+
+/// One-time, threshold-gated sidecar compaction, run on store open. Single-entry
+/// `remember`/`forget` append to per-sidecar journals (key_index / object_keys /
+/// embeddings) that are only folded back into their base snapshot by a full
+/// persist (batch / rekey). Without this, a long-lived single-write store grows
+/// those journals O(total writes) and replays the whole journal on every open.
+/// Fold any oversized journal back into its base via the crash-safe `persist_*`
+/// path (atomic base write then journal drop; replay is idempotent, so a crash
+/// in between re-applies the same state). Digest-neutral: the signed root derives
+/// from the in-memory index roots, not the sidecar file bytes.
+pub fn compact_oversized_sidecars(path: &Path, store: &Store) -> Result<(), MnemeError> {
+    let meta = path.join("meta");
+    if journal_outgrew_base(&meta, "key_index.json", "key_index.journal") {
+        persist_key_index(path, store)?;
+    }
+    if journal_outgrew_base(&meta, "object_keys.json", "object_keys.journal") {
+        persist_object_keys(path, store)?;
+    }
+    if journal_outgrew_base(&meta, "embeddings.json", "embeddings.journal") {
+        persist_embeddings(path, store)?;
+    }
+    Ok(())
+}
+
 fn apply_key_index_journal(path: &Path, sidecar: &mut KeyIndexSidecar) -> Result<(), MnemeError> {
     let journal = path.join("meta/key_index.journal");
     if !journal.exists() {
@@ -673,5 +723,24 @@ mod tests {
     #[test]
     fn parse_hex32_rejects_wrong_length() {
         assert_eq!(parse_hex32("dead").unwrap_err(), MnemeError::SchemaDrift);
+    }
+
+    #[test]
+    fn journal_outgrew_base_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = dir.path().join("meta");
+        fs::create_dir_all(&meta).unwrap();
+        // No journal -> not oversized.
+        assert!(!journal_outgrew_base(&meta, "k.json", "k.journal"));
+        // Journal below the floor -> not oversized regardless of base.
+        fs::write(meta.join("k.journal"), vec![0u8; 1024]).unwrap();
+        assert!(!journal_outgrew_base(&meta, "k.json", "k.journal"));
+        // Above floor and larger than base -> oversized (compact).
+        fs::write(meta.join("k.journal"), vec![0u8; 300 * 1024]).unwrap();
+        fs::write(meta.join("k.json"), vec![0u8; 1024]).unwrap();
+        assert!(journal_outgrew_base(&meta, "k.json", "k.journal"));
+        // Above floor but base is larger -> not oversized (no churn).
+        fs::write(meta.join("k.json"), vec![0u8; 400 * 1024]).unwrap();
+        assert!(!journal_outgrew_base(&meta, "k.json", "k.journal"));
     }
 }
