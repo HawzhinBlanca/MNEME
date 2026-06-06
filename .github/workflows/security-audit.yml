@@ -1,0 +1,52 @@
+# Dependency vulnerability scan against the RustSec advisory database.
+#
+# The workspace pins Rust 1.86.0 (rust-toolchain.toml), but cargo-audit only
+# parses Cargo.lock — it never builds the project — so this job uses the stable
+# toolchain solely to build/run the tool (`--locked` pins cargo-audit's own
+# compatible dependency set). Runs when dependencies change and weekly to catch
+# newly-published advisories against an unchanged lockfile.
+name: Security Audit
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/security-audit.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/security-audit.yml"
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: security-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    name: cargo audit (RustSec)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # Stable toolchain for the tool only — cargo-audit reads Cargo.lock and
+      # never compiles the workspace, so this does not relax the 1.86.0 build pin.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: security-audit
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies (RustSec advisory DB)
+        run: cargo audit

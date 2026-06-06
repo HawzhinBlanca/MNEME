@@ -137,3 +137,22 @@ commit (the audit/replay ledger). Per-commit I/O+parse on open remains O(commits
 even with O(1) crypto; at very large commit counts the 1-file-per-commit inode
 load is the next ceiling. Whether/how to prune or pack the ledger is a policy
 decision — logged to HUMAN_TASKS.md.
+
+## 2026-06-06 — Add dependency-CVE scanning (RustSec) to CI
+
+**Gap closed (supply-chain security).** The repo had no dependency-vulnerability
+scanning. Added `.github/workflows/security-audit.yml`: `cargo audit` against the
+RustSec advisory DB on every dependency change and weekly (to catch
+newly-published advisories against an unchanged lockfile). The job uses the
+stable toolchain only for the tool (cargo-audit parses `Cargo.lock`, never builds
+the workspace, so the 1.86.0 build pin is unaffected) with `--locked`.
+
+Verified the current lockfile is clean before adding the gate: ran cargo-audit in
+a `rust:latest` container (the 1.86.0 local toolchain can't compile cargo-audit —
+its deps need rustc ≥1.89) — loaded 1120 advisories, scanned 341 dependencies,
+**0 vulnerabilities** (exit 0). So the new CI check passes on PR #9.
+
+Note: cargo-audit is not locally runnable under the project's pinned 1.86.0
+toolchain; use `docker run --rm -v "$PWD/Cargo.lock:/work/Cargo.lock:ro" \
+rust:latest sh -c 'cargo install cargo-audit --locked && cargo audit --file \
+/work/Cargo.lock'` to reproduce locally.
