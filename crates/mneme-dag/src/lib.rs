@@ -239,14 +239,18 @@ fn topo_sort(entries: &[(ObjectId, Vec<[u8; 32]>)]) -> Result<DagEntries, MnemeE
 
     let mut ordered = Vec::with_capacity(entries.len());
     while let Some(id_bytes) = queue.pop_front() {
-        ordered.push((
-            ids.remove(&id_bytes).expect("id present"),
-            parents.remove(&id_bytes).unwrap_or_default(),
-        ));
+        // Fail closed rather than panic if a kernel invariant is ever violated
+        // (id already drained, untracked child, or indegree underflow). These
+        // are unreachable for inputs that pass the validation above, but the
+        // provenance path must never panic — INV fail-closed default.
+        let id = ids.remove(&id_bytes).ok_or(MnemeError::ProvenanceBroken)?;
+        ordered.push((id, parents.remove(&id_bytes).unwrap_or_default()));
         if let Some(kids) = children.get(&id_bytes) {
             for child in kids {
-                let deg = indegree.get_mut(child).expect("child tracked");
-                *deg -= 1;
+                let deg = indegree
+                    .get_mut(child)
+                    .ok_or(MnemeError::ProvenanceBroken)?;
+                *deg = deg.checked_sub(1).ok_or(MnemeError::ProvenanceBroken)?;
                 if *deg == 0 {
                     queue.push_back(*child);
                 }
