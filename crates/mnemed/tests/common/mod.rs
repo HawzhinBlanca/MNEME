@@ -31,6 +31,7 @@ impl TestHarness {
         let config = ServerConfig {
             http_addr: "127.0.0.1:0".parse().expect("addr"),
             grpc_addr: Some("127.0.0.1:0".parse().expect("addr")),
+            unix_socket: None,
             rate_limit_per_minute: 120,
         };
         let server = start_with_state(config, state).await.expect("start");
@@ -65,11 +66,8 @@ impl TestHarness {
     pub fn store(&self) -> mnemed::state::SharedStore {
         self.server.state.store.clone()
     }
-}
 
-impl Drop for TestHarness {
-    fn drop(&mut self) {
-        // RunningServer shutdown requires async; tests use #[tokio::test] and drop is sync.
-        // Tokio runtime keeps server alive for test duration; OS reclaims port on process exit.
+    pub async fn shutdown(self) {
+        self.server.shutdown().await;
     }
 }

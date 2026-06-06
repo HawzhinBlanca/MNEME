@@ -3,7 +3,7 @@
 use crate::state::{ApiError, AppState, capability_from_header, check_rate_limit, verify_cap};
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -12,6 +12,8 @@ use mneme_cap::Capability;
 use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
 use mneme_core::{MnemeError, ObjectId};
 use serde::{Deserialize, Serialize};
+
+const AUTH_VERIFY_BODY_LIMIT_BYTES: usize = 8 * 1024;
 
 #[derive(Serialize)]
 struct ErrorBody {
@@ -99,7 +101,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/memory/{namespace}/{name}", delete(forget))
         .route("/v1/memory/promote", post(promote))
         .route("/v1/prove-absent/{namespace}/{name}", get(prove_absent))
-        .route("/v1/auth/verify", post(auth_verify))
+        .route(
+            "/v1/auth/verify",
+            post(auth_verify).layer(DefaultBodyLimit::max(AUTH_VERIFY_BODY_LIMIT_BYTES)),
+        )
         .with_state(state)
 }
 
@@ -304,6 +309,7 @@ async fn auth_verify(
     Json(body): Json<AuthVerifyBody>,
 ) -> Result<Json<AuthVerifyResponse>, ApiError> {
     let cap = parse_capability_b64(&body.capability_b64)?;
+    check_rate_limit(&state, &cap)?;
     verify_cap(&state, &cap)?;
     Ok(Json(AuthVerifyResponse {
         valid: true,

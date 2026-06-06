@@ -1,4 +1,6 @@
 mod common;
+mod unix_ready;
+
 use common::TestHarness;
 use mneme_cap::agent_cap;
 use mneme_core::{Draft, MemoryKind, ObjectId};
@@ -8,6 +10,48 @@ use mnemed::unix::{KernelRequest, UnixServer, request_json};
 use serde_json::json;
 use std::path::PathBuf;
 use tempfile::tempdir;
+use tokio::task::JoinHandle;
+use unix_ready::wait_for_unix_socket_accepting;
+
+type RedteamUnixServerResult = Result<(), std::io::Error>;
+
+const REDTEAM_UNIX_SERVER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+struct RedteamUnixServer {
+    shutdown_tx: tokio::sync::watch::Sender<()>,
+    handle: JoinHandle<RedteamUnixServerResult>,
+}
+
+impl RedteamUnixServer {
+    async fn shutdown(self) {
+        self.shutdown_tx.send(()).expect("send shutdown");
+        let result = tokio::time::timeout(REDTEAM_UNIX_SERVER_SHUTDOWN_TIMEOUT, self.handle)
+            .await
+            .expect("redteam Unix server exits before timeout")
+            .expect("redteam Unix server task joins");
+        assert!(
+            result.is_ok(),
+            "redteam Unix server returned error: {result:?}"
+        );
+    }
+}
+
+async fn spawn_redteam_unix_server(sock: PathBuf, state: mnemed::AppState) -> RedteamUnixServer {
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
+    let handle = tokio::spawn({
+        let sock = sock.clone();
+        async move {
+            UnixServer::new(sock, state)
+                .serve_until_shutdown(shutdown_rx)
+                .await
+        }
+    });
+    wait_for_unix_socket_accepting(&sock).await;
+    RedteamUnixServer {
+        shutdown_tx,
+        handle,
+    }
+}
 
 async fn remember_http(h: &TestHarness) -> ObjectId {
     let resp = reqwest::Client::new()
@@ -46,6 +90,7 @@ async fn redteam_http_recall_rejects_out_of_band_object_tamper() {
         resp.json::<serde_json::Value>().await.unwrap()["code"],
         "verify_failed"
     );
+    h.shutdown().await;
 }
 
 #[tokio::test]
@@ -91,6 +136,8 @@ async fn redteam_grpc_recall_rejects_out_of_band_object_tamper() {
         msg.contains("ObjectTampered") || msg.contains("verify") || msg.contains("tamper"),
         "unexpected gRPC error: {msg}"
     );
+    drop(client);
+    h.shutdown().await;
 }
 
 #[tokio::test]
@@ -121,13 +168,9 @@ async fn redteam_unix_recall_verified_rejects_out_of_band_object_tamper() {
             .unwrap();
         store.tamper_object_bytes(id.as_bytes()).unwrap();
     }
-    let sock_path = sock.clone();
-    let handle = tokio::spawn(async move {
-        UnixServer::new(sock, state).serve().await.ok();
-    });
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let server = spawn_redteam_unix_server(sock.clone(), state).await;
     match request_json(
-        &sock_path,
+        &sock,
         &KernelRequest::RecallVerified {
             cap_b64,
             namespace: "unix".into(),
@@ -149,5 +192,5 @@ async fn redteam_unix_recall_verified_rejects_out_of_band_object_tamper() {
             panic!("tampered recall succeeded: {payload}");
         }
     }
-    handle.abort();
+    server.shutdown().await;
 }

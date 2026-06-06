@@ -15,8 +15,12 @@ use pb::{
     RememberRequest, RememberResponse,
 };
 
+pub const GRPC_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+
 pub fn service(state: AppState) -> MemoryServiceServer<GrpcMemoryService> {
     MemoryServiceServer::new(GrpcMemoryService { state })
+        .max_decoding_message_size(GRPC_MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(GRPC_MAX_MESSAGE_BYTES)
 }
 
 pub struct GrpcMemoryService {
@@ -57,6 +61,7 @@ impl MemoryService for GrpcMemoryService {
         let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
         let kind = parse_kind_grpc(&req.kind)?;
         let mut store = self.state.store.lock().map_err(grpc_internal)?;
         let draft = Draft {
@@ -85,6 +90,7 @@ impl MemoryService for GrpcMemoryService {
         let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
         let min_tier = parse_tier_grpc(&req.min_tier)?;
         let store = self.state.store.lock().map_err(grpc_internal)?;
         let query = Query {
@@ -118,6 +124,7 @@ impl MemoryService for GrpcMemoryService {
         let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
         let mut store = self.state.store.lock().map_err(grpc_internal)?;
         let (_tomb, root) = store
             .forget(
@@ -139,6 +146,16 @@ impl MemoryService for GrpcMemoryService {
         request: Request<ProveAbsentRequest>,
     ) -> Result<Response<ProveAbsentResponse>, Status> {
         let req = request.into_inner();
+        if req.capability_b64.trim().is_empty() {
+            return Err(Status::unauthenticated("missing capability"));
+        }
+        let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
+        check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
+        verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
+        if !cap.permits_read(&req.namespace, TrustTier::Quarantine) {
+            return Err(grpc_status_mneme(mneme_core::MnemeError::CapDenied));
+        }
         let store = self.state.store.lock().map_err(grpc_internal)?;
         let key = LogicalKey {
             namespace: req.namespace,
@@ -173,6 +190,13 @@ fn grpc_status_mneme(err: mneme_core::MnemeError) -> Status {
 
 fn grpc_internal(_: impl std::fmt::Display) -> Status {
     Status::internal("store lock poisoned")
+}
+
+fn validate_logical_key_grpc(namespace: &str, name: &str) -> Result<(), Status> {
+    if namespace.trim().is_empty() || name.trim().is_empty() {
+        return Err(Status::invalid_argument("namespace and name required"));
+    }
+    Ok(())
 }
 
 fn parse_kind_grpc(s: &str) -> Result<MemoryKind, Status> {

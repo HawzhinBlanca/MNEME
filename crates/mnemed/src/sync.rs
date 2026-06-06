@@ -36,6 +36,7 @@ use mneme_store::SyncSnapshot;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+pub const SYNC_MAX_FRAME: usize = 4 * 1024 * 1024;
 const MSG_HELLO: u8 = 0x01;
 const MSG_ROOT_PROOF: u8 = 0x02;
 /// §11 canonical: MST-diff request (peer announces its local key-index root).
@@ -88,7 +89,10 @@ async fn ws_handler(
     Query(params): Query<SyncAuthQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     authorize_sync(&state, &headers, &params)?;
-    Ok(ws.on_upgrade(move |socket| handle_sync(socket, state)))
+    Ok(ws
+        .max_message_size(SYNC_MAX_FRAME)
+        .max_frame_size(SYNC_MAX_FRAME)
+        .on_upgrade(move |socket| handle_sync(socket, state)))
 }
 
 fn authorize_sync(
@@ -118,12 +122,91 @@ fn sync_cap(headers: &HeaderMap, params: &SyncAuthQuery) -> Result<Capability, A
     capability_from_header(value)
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SyncReceiveStatus {
+    Message,
+    Closed,
+    Failed,
+}
+
+enum SyncReceiveOutcome {
+    Message(Message),
+    Closed,
+    Failed,
+}
+
+#[cfg(test)]
+impl SyncReceiveOutcome {
+    fn status(&self) -> SyncReceiveStatus {
+        match self {
+            SyncReceiveOutcome::Message(_) => SyncReceiveStatus::Message,
+            SyncReceiveOutcome::Closed => SyncReceiveStatus::Closed,
+            SyncReceiveOutcome::Failed => SyncReceiveStatus::Failed,
+        }
+    }
+}
+
+fn classify_sync_receive(received: Option<Result<Message, axum::Error>>) -> SyncReceiveOutcome {
+    match received {
+        Some(Ok(msg)) => SyncReceiveOutcome::Message(msg),
+        Some(Err(err)) => {
+            tracing::debug!("sync websocket receive failed: {err}");
+            SyncReceiveOutcome::Failed
+        }
+        None => SyncReceiveOutcome::Closed,
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SyncSendStatus {
+    Sent,
+    Failed,
+}
+
+enum SyncSendOutcome {
+    Sent,
+    Failed,
+}
+
+#[cfg(test)]
+impl SyncSendOutcome {
+    fn status(&self) -> SyncSendStatus {
+        match self {
+            SyncSendOutcome::Sent => SyncSendStatus::Sent,
+            SyncSendOutcome::Failed => SyncSendStatus::Failed,
+        }
+    }
+}
+
+fn classify_sync_send(result: Result<(), axum::Error>) -> SyncSendOutcome {
+    match result {
+        Ok(()) => SyncSendOutcome::Sent,
+        Err(err) => {
+            tracing::debug!("sync websocket response send failed: {err}");
+            SyncSendOutcome::Failed
+        }
+    }
+}
+
+async fn send_sync_response(socket: &mut WebSocket, bytes: Vec<u8>) -> SyncSendOutcome {
+    classify_sync_send(socket.send(Message::Binary(bytes.into())).await)
+}
+
 async fn handle_sync(mut socket: WebSocket, state: AppState) {
-    while let Some(Ok(msg)) = socket.recv().await {
+    loop {
+        let msg = match classify_sync_receive(socket.recv().await) {
+            SyncReceiveOutcome::Message(msg) => msg,
+            SyncReceiveOutcome::Closed | SyncReceiveOutcome::Failed => break,
+        };
         match msg {
             Message::Binary(data) => {
                 if data.is_empty() {
                     continue;
+                }
+                if data.len() > SYNC_MAX_FRAME {
+                    break;
                 }
                 let response = match data[0] {
                     MSG_HELLO => handle_hello(&state, &data[1..]).await,
@@ -140,8 +223,9 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
                     _ => None,
                 };
                 if let Some(bytes) = response {
-                    if socket.send(Message::Binary(bytes.into())).await.is_err() {
-                        break;
+                    match send_sync_response(&mut socket, bytes).await {
+                        SyncSendOutcome::Sent => {}
+                        SyncSendOutcome::Failed => break,
                     }
                 }
                 if data[0] == MSG_BYE {
@@ -460,4 +544,38 @@ pub fn encode_hello(state: &AppState, node_id: [u8; 16]) -> Option<Vec<u8>> {
     out.push(MSG_HELLO);
     out.extend(body);
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_receive_classifier_marks_clean_close() {
+        assert_eq!(
+            classify_sync_receive(None).status(),
+            SyncReceiveStatus::Closed
+        );
+    }
+
+    #[test]
+    fn sync_receive_classifier_preserves_messages() {
+        let outcome = classify_sync_receive(Some(Ok(Message::Close(None))));
+
+        assert_eq!(outcome.status(), SyncReceiveStatus::Message);
+        assert!(matches!(
+            outcome,
+            SyncReceiveOutcome::Message(Message::Close(None))
+        ));
+    }
+
+    #[test]
+    fn sync_send_classifier_marks_success() {
+        assert_eq!(classify_sync_send(Ok(())).status(), SyncSendStatus::Sent);
+    }
+
+    #[test]
+    fn sync_send_outcome_status_marks_failure() {
+        assert_eq!(SyncSendOutcome::Failed.status(), SyncSendStatus::Failed);
+    }
 }

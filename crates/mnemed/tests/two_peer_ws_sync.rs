@@ -13,11 +13,18 @@ use mneme_crypto::KeyPair;
 use mnemed::state::RateLimiter;
 use mnemed::{AppState, RunningServer, ServerConfig, cap_to_b64, start_with_state};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tempfile::TempDir;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
+
+type WsTestResult<T> = Result<T, String>;
+type ClientWebSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+const TWO_PEER_WS_BINARY_FRAME_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capability) {
     let mut store = state.store.lock().expect("lock");
@@ -55,6 +62,7 @@ async fn serve(state: AppState) -> RunningServer {
     let config = ServerConfig {
         http_addr: "127.0.0.1:0".parse().unwrap(),
         grpc_addr: None,
+        unix_socket: None,
         rate_limit_per_minute: 1000,
     };
     start_with_state(config, state).await.expect("start")
@@ -74,27 +82,46 @@ fn authed_ws_request(
     req
 }
 
+async fn recv_ws_binary_frame(ws: &mut ClientWebSocket, context: &str) -> WsTestResult<Vec<u8>> {
+    loop {
+        match tokio::time::timeout(TWO_PEER_WS_BINARY_FRAME_TIMEOUT, ws.next()).await {
+            Ok(Some(Ok(Message::Binary(data)))) => return Ok(data.to_vec()),
+            Ok(Some(Ok(Message::Ping(_)))) | Ok(Some(Ok(Message::Pong(_)))) => continue,
+            Ok(Some(Ok(other))) => {
+                return Err(format!("{context} expected binary frame, got {other:?}"));
+            }
+            Ok(Some(Err(err))) => return Err(format!("{context} websocket read failed: {err}")),
+            Ok(None) => return Err(format!("{context} websocket closed before binary frame")),
+            Err(_) => return Err(format!("{context} timed out waiting for binary frame")),
+        }
+    }
+}
+
 /// Pull the peer daemon's snapshot over WebSocket and merge it into `local`.
-async fn pull_and_merge(local: &AppState, peer: &RunningServer, cap: &Capability) {
+async fn pull_and_merge(
+    local: &AppState,
+    peer: &RunningServer,
+    cap: &Capability,
+) -> WsTestResult<()> {
     let (mut ws, _) = connect_async(authed_ws_request(peer, cap))
         .await
-        .expect("ws connect");
+        .map_err(|err| format!("snapshot pull websocket connect failed: {err}"))?;
     ws.send(Message::Binary(
         mnemed::sync::encode_snapshot_request().into(),
     ))
     .await
-    .expect("send req");
-    let frame = loop {
-        match ws.next().await.expect("frame").expect("ok") {
-            Message::Binary(data) => break data,
-            _ => continue,
-        }
-    };
-    let snapshot = mnemed::sync::decode_snapshot(&frame).expect("decode snapshot");
-    let mut store = local.store.lock().expect("lock");
+    .map_err(|err| format!("snapshot pull request send failed: {err}"))?;
+    let frame = recv_ws_binary_frame(&mut ws, "snapshot pull response").await?;
+    let snapshot = mnemed::sync::decode_snapshot(&frame)
+        .ok_or_else(|| "snapshot pull decode returned no snapshot".to_string())?;
+    let mut store = local
+        .store
+        .lock()
+        .map_err(|_| "snapshot pull local store lock poisoned".to_string())?;
     store
         .merge_from_snapshot(&snapshot)
-        .expect("merge snapshot");
+        .map_err(|err| format!("snapshot pull merge failed: {err:?}"))?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -111,8 +138,12 @@ async fn two_daemons_converge_over_websocket() {
     let server_b = serve(state_b.clone()).await;
 
     // A pulls B (now holds the union); then B pulls the updated A.
-    pull_and_merge(&state_a, &server_b, &cap).await;
-    pull_and_merge(&state_b, &server_a, &cap).await;
+    pull_and_merge(&state_a, &server_b, &cap)
+        .await
+        .expect("A pulls B snapshot");
+    pull_and_merge(&state_b, &server_a, &cap)
+        .await
+        .expect("B pulls A snapshot");
 
     let key_a = LogicalKey {
         namespace: "peer".into(),
@@ -167,7 +198,9 @@ async fn plaintext_recall_after_websocket_sync() {
     remember(&state_a, "peer", "only-a", b"alpha-secret", &cap);
 
     let server_a = serve(state_a.clone()).await;
-    pull_and_merge(&state_b, &server_a, &cap).await; // sealed snapshot over the wire
+    pull_and_merge(&state_b, &server_a, &cap)
+        .await
+        .expect("B pulls sealed snapshot from A"); // sealed snapshot over the wire
 
     let query = Query {
         logical_key: LogicalKey {
@@ -231,28 +264,31 @@ async fn wire_object_tamper_is_not_ingested() {
 /// Phase 2a: incremental anti-entropy over a real WebSocket — pull the peer's
 /// manifest, then fetch ONLY the missing object delta, then merge. Converges the
 /// content roots while transferring just the delta (not the full snapshot).
-async fn pull_incremental(local: &AppState, peer: &RunningServer, cap: &Capability) -> usize {
+async fn pull_incremental(
+    local: &AppState,
+    peer: &RunningServer,
+    cap: &Capability,
+) -> WsTestResult<usize> {
     let (mut ws, _) = connect_async(authed_ws_request(peer, cap))
         .await
-        .expect("ws connect");
+        .map_err(|err| format!("incremental pull websocket connect failed: {err}"))?;
 
     // 1) manifest (structure only, no object bytes)
     ws.send(Message::Binary(
         mnemed::sync::encode_manifest_request().into(),
     ))
     .await
-    .expect("send manifest req");
-    let manifest_frame = loop {
-        match ws.next().await.expect("frame").expect("ok") {
-            Message::Binary(d) => break d,
-            _ => continue,
-        }
-    };
-    let manifest = mnemed::sync::decode_manifest(&manifest_frame).expect("decode manifest");
+    .map_err(|err| format!("incremental manifest request send failed: {err}"))?;
+    let manifest_frame = recv_ws_binary_frame(&mut ws, "incremental manifest response").await?;
+    let manifest = mnemed::sync::decode_manifest(&manifest_frame)
+        .ok_or_else(|| "incremental manifest decode returned no manifest".to_string())?;
 
     // 2) compute the missing delta locally, fetch only those object bytes
     let missing = {
-        let store = local.store.lock().expect("lock");
+        let store = local
+            .store
+            .lock()
+            .map_err(|_| "incremental local store lock poisoned".to_string())?;
         store.missing_object_ids(&manifest)
     };
     let delta = if missing.is_empty() {
@@ -260,29 +296,28 @@ async fn pull_incremental(local: &AppState, peer: &RunningServer, cap: &Capabili
     } else {
         ws.send(Message::Binary(
             mnemed::sync::encode_want_objects(&missing)
-                .expect("want")
+                .ok_or_else(|| "incremental want-objects encode failed".to_string())?
                 .into(),
         ))
         .await
-        .expect("send want");
-        let have_frame = loop {
-            match ws.next().await.expect("frame").expect("ok") {
-                Message::Binary(d) => break d,
-                _ => continue,
-            }
-        };
-        mnemed::sync::decode_have_objects(&have_frame).expect("decode have")
+        .map_err(|err| format!("incremental want-objects request send failed: {err}"))?;
+        let have_frame = recv_ws_binary_frame(&mut ws, "incremental have-objects response").await?;
+        mnemed::sync::decode_have_objects(&have_frame)
+            .ok_or_else(|| "incremental have-objects decode returned no objects".to_string())?
     };
     let fetched = delta.len();
 
     // 3) merge manifest + delta
     {
-        let mut store = local.store.lock().expect("lock");
+        let mut store = local
+            .store
+            .lock()
+            .map_err(|_| "incremental merge store lock poisoned".to_string())?;
         store
             .merge_from_manifest(&manifest, delta)
-            .expect("merge manifest");
+            .map_err(|err| format!("incremental manifest merge failed: {err:?}"))?;
     }
-    fetched
+    Ok(fetched)
 }
 
 #[tokio::test]
@@ -297,14 +332,20 @@ async fn two_daemons_converge_incrementally_over_websocket() {
     let server_a = serve(state_a.clone()).await;
     let server_b = serve(state_b.clone()).await;
 
-    let fetched_b = pull_incremental(&state_a, &server_b, &cap).await;
+    let fetched_b = pull_incremental(&state_a, &server_b, &cap)
+        .await
+        .expect("A pulls B incrementally");
     assert_eq!(fetched_b, 1, "A fetched only B's single missing object");
-    let fetched_a = pull_incremental(&state_b, &server_a, &cap).await;
+    let fetched_a = pull_incremental(&state_b, &server_a, &cap)
+        .await
+        .expect("B pulls A incrementally");
     assert_eq!(fetched_a, 1, "B fetched only A's single missing object");
 
     // Re-pull is a no-op delta (idempotent).
     assert_eq!(
-        pull_incremental(&state_a, &server_b, &cap).await,
+        pull_incremental(&state_a, &server_b, &cap)
+            .await
+            .expect("A re-pulls B incrementally"),
         0,
         "converged: empty delta"
     );

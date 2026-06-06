@@ -37,6 +37,10 @@ path = "tests/unix_api.rs"
 name = "redteam_paths"
 path = "tests/redteam_paths.rs"
 
+[[test]]
+name = "source_invariants"
+path = "tests/source_invariants.rs"
+
 [dependencies]
 mneme-core.workspace = true
 mneme-crypto.workspace = true
