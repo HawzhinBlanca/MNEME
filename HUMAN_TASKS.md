@@ -40,6 +40,15 @@ Status legend: ☐ open · ☑ done · ⏳ in progress (human)
   My lean default: keep the full ledger for v1; revisit if a deployment shows
   open latency from inode load.
 
+## CI coverage gaps (low priority)
+
+- ☐ **Clippy coverage** does not include `mneme-mcp`, `mneme-account`,
+  `mneme-cli`, `mnemed` (the standard `cargo clippy -p ...` list is wave-0/1 +
+  store/verify). Latent clippy issues in those crates are caught only by hand
+  (one was found + fixed in `mneme-account`, see HARDENING.md 2026-06-06).
+  Consider widening the CI clippy lane to the full workspace — but it may surface
+  more latent lints in `mneme-cli`/`mnemed` to clean up first.
+
 ## Notes for review
 
 - ☐ **Node.js 20 action deprecation** in workflows (`actions/checkout@v4`,

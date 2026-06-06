@@ -164,3 +164,31 @@ cargo-audit` initially picked 1.86.0 and failed its MSRV. Fixed with job-level
 verified: toml→`cargo 1.86.0`, env→`cargo 1.96.0`). Lesson for the loop: when
 Docker-verifying a CI change, mount the **whole repo** incl. `rust-toolchain.toml`
 — mounting only `Cargo.lock` masked the override.
+
+## 2026-06-06 — MCP transport: bound the per-frame read (DoS hardening)
+
+**Hardening (public API surface).** The stdio JSON-RPC loop read requests via
+`stdin.lock().lines()`, which allocates each newline-delimited frame without
+bound — a single huge frame (no newline) OOMs the server instead of a clean
+rejection. Local stdio so low severity (the agent host is the client), but the
+four-tool MCP surface is *the* product and should bound its input.
+
+Replaced `lines()` with a `read_frame` reader capped at `MAX_FRAME_BYTES`
+(16 MiB) using buffered `fill_buf`/`consume` (no byte-at-a-time): over-cap frames
+are drained to the next newline (stream resynchronises) and answered with a
+JSON-RPC error (`-32600` too-large / `-32700` bad-UTF-8); CRLF stripped to match
+`lines()` semantics. 6 unit tests (in-memory `Cursor`) cover split/EOF, CRLF,
+trailing-no-newline, oversize+resync, exact-cap, invalid-UTF-8.
+
+**Latent issue fixed in passing.** `cargo clippy -p mneme-mcp` (which lints the
+whole workspace dep tree) failed on `mneme-account/src/lib.rs:69`
+(`clippy::needless_return`, fatal under that crate's `#![deny(warnings)]`) — a
+cfg'd early return that clippy flags once the other branch is stripped. CI's
+clippy command does not cover `mneme-account`/`mneme-mcp`, so it was latent.
+Fixed by binding each cfg branch's result and returning it as the function tail
+(no `return`, no `let_and_return`). mneme-account tests: 12 (default) + 4
+(phase_iii_bind_action) pass; both cfg configs clippy-clean.
+
+Evidence: clippy `-D warnings` clean for mneme-mcp + mneme-account (both cfgs);
+mneme-mcp read_frame unit tests (6) + stdio roundtrip (2) pass. No determinism
+impact (transport + gated account code are not in the foundation gate).

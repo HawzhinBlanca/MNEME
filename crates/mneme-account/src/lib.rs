@@ -63,19 +63,22 @@ pub fn bind_action(
     root: &Root,
     cognition_cert_commit: Option<[u8; 32]>,
 ) -> Result<ActionReceipt, MnemeError> {
+    // Bind the result in each cfg branch and return it as the function tail, so
+    // neither branch needs an early `return` (which clippy flags as needless
+    // once the other branch is cfg-stripped; `#![deny(warnings)]` makes it fatal).
     #[cfg(feature = "phase_iii_bind_action")]
-    {
+    let out = {
         let _ = std::hint::black_box(PHASE_III_BIND_ACTION_OPEN);
-        return sign::bind_action_impl(
+        sign::bind_action_impl(
             action_commit,
             capability,
             sanctioner_signer,
             root,
             cognition_cert_commit,
-        );
-    }
+        )
+    };
     #[cfg(not(feature = "phase_iii_bind_action"))]
-    {
+    let out = {
         let _ = (
             action_commit,
             capability,
@@ -86,7 +89,8 @@ pub fn bind_action(
         Err(MnemeError::UnsupportedVersion {
             got: ACTION_RECEIPT_VERSION,
         })
-    }
+    };
+    out
 }
 
 #[cfg(not(feature = "phase_iii_prove_forget"))]

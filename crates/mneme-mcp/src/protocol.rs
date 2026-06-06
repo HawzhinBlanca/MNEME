@@ -36,11 +36,95 @@ struct JsonRpcError {
     message: String,
 }
 
+/// Per-frame size cap for the stdio JSON-RPC transport. A single newline-
+/// delimited request larger than this is rejected with a JSON-RPC error instead
+/// of being buffered without bound (`BufRead::lines` would allocate the whole
+/// line). 16 MiB is far above any legitimate tool call.
+const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+enum Frame {
+    Line(String),
+    TooLarge,
+    BadEncoding,
+    Eof,
+}
+
+/// Read one newline-delimited frame, capped at `max` bytes, using buffered
+/// `fill_buf`/`consume` (no byte-at-a-time reads). On overflow it keeps draining
+/// to the next newline so the stream resynchronises, then reports `TooLarge`.
+fn read_frame(reader: &mut impl BufRead, max: usize) -> io::Result<Frame> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut overflow = false;
+    loop {
+        let chunk = match reader.fill_buf() {
+            Ok(c) => c,
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if chunk.is_empty() {
+            if buf.is_empty() && !overflow {
+                return Ok(Frame::Eof);
+            }
+            break;
+        }
+        if let Some(nl) = chunk.iter().position(|&b| b == b'\n') {
+            if !overflow && buf.len() + nl <= max {
+                buf.extend_from_slice(&chunk[..nl]);
+            } else {
+                overflow = true;
+            }
+            reader.consume(nl + 1);
+            break;
+        }
+        let len = chunk.len();
+        if !overflow && buf.len() + len <= max {
+            buf.extend_from_slice(chunk);
+        } else {
+            overflow = true;
+        }
+        reader.consume(len);
+    }
+    if overflow {
+        return Ok(Frame::TooLarge);
+    }
+    match String::from_utf8(buf) {
+        Ok(mut s) => {
+            if s.ends_with('\r') {
+                s.pop();
+            }
+            Ok(Frame::Line(s))
+        }
+        Err(_) => Ok(Frame::BadEncoding),
+    }
+}
+
 pub fn run_stdio_loop(handlers: &MemoryHandlers) -> io::Result<()> {
     let stdin = io::stdin();
+    let mut reader = stdin.lock();
     let mut stdout = io::stdout();
-    for line in stdin.lock().lines() {
-        let line = line?;
+    loop {
+        let line = match read_frame(&mut reader, MAX_FRAME_BYTES)? {
+            Frame::Eof => break,
+            Frame::TooLarge => {
+                write_error(
+                    &mut stdout,
+                    Value::Null,
+                    -32600,
+                    "request frame exceeds maximum size".into(),
+                )?;
+                continue;
+            }
+            Frame::BadEncoding => {
+                write_error(
+                    &mut stdout,
+                    Value::Null,
+                    -32700,
+                    "request frame is not valid UTF-8".into(),
+                )?;
+                continue;
+            }
+            Frame::Line(line) => line,
+        };
         if line.trim().is_empty() {
             continue;
         }
@@ -257,4 +341,59 @@ fn tool_result_json(value: Value) -> Value {
         "content": [{ "type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_default() }],
         "isError": false
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn read_frame_splits_lines_then_eof() {
+        let mut r = Cursor::new(b"abc\ndef\n".to_vec());
+        assert!(matches!(read_frame(&mut r, 1024).unwrap(), Frame::Line(s) if s == "abc"));
+        assert!(matches!(read_frame(&mut r, 1024).unwrap(), Frame::Line(s) if s == "def"));
+        assert!(matches!(read_frame(&mut r, 1024).unwrap(), Frame::Eof));
+    }
+
+    #[test]
+    fn read_frame_strips_trailing_cr() {
+        let mut r = Cursor::new(b"abc\r\n".to_vec());
+        assert!(matches!(read_frame(&mut r, 1024).unwrap(), Frame::Line(s) if s == "abc"));
+    }
+
+    #[test]
+    fn read_frame_trailing_line_without_newline() {
+        let mut r = Cursor::new(b"tail".to_vec());
+        assert!(matches!(read_frame(&mut r, 1024).unwrap(), Frame::Line(s) if s == "tail"));
+        assert!(matches!(read_frame(&mut r, 1024).unwrap(), Frame::Eof));
+    }
+
+    #[test]
+    fn read_frame_caps_oversized_and_resyncs() {
+        // A line over the cap, then a normal line: the big line is rejected as
+        // TooLarge and the reader resynchronises to the next frame.
+        let mut data = vec![b'x'; 100];
+        data.push(b'\n');
+        data.extend_from_slice(b"ok\n");
+        let mut r = Cursor::new(data);
+        assert!(matches!(read_frame(&mut r, 10).unwrap(), Frame::TooLarge));
+        assert!(matches!(read_frame(&mut r, 10).unwrap(), Frame::Line(s) if s == "ok"));
+        assert!(matches!(read_frame(&mut r, 10).unwrap(), Frame::Eof));
+    }
+
+    #[test]
+    fn read_frame_exact_cap_is_accepted() {
+        let mut r = Cursor::new(b"0123456789\n".to_vec());
+        assert!(matches!(read_frame(&mut r, 10).unwrap(), Frame::Line(s) if s == "0123456789"));
+    }
+
+    #[test]
+    fn read_frame_rejects_invalid_utf8() {
+        let mut r = Cursor::new(vec![0xff, 0xfe, b'\n']);
+        assert!(matches!(
+            read_frame(&mut r, 1024).unwrap(),
+            Frame::BadEncoding
+        ));
+    }
 }
