@@ -211,3 +211,40 @@ that sidecar. Added `validate_logical_key_field` (≤ 4 KiB/field, fail-closed
 2 new unit tests (within-limit ok, over-limit fails closed) + existing
 record/recall + stdio roundtrips pass. No determinism impact (foundation gate
 drives the store directly, not the MCP handler).
+
+## 2026-06-06 — Audits: object integrity + overflow/allocation (both clean, no fix)
+
+Two high-value areas searched; both already correct (recorded for the trail, no
+code change — batched with the next real change rather than a doc-only CI run).
+
+- **Object-blob integrity on recall (bit-rot / content-hash mismatch).**
+  `mneme-verify::verify_recall` computes `hash_obj(object_bytes)` and rejects with
+  `ObjectTampered` if it != the receipt's `object_id` (`recall.rs:37-40`), and that
+  `object_id` is SMT-membership-proven against the signed root (`:82-94`); parent
+  blobs are hash-checked in `verify_provenance` (`:105`). On cold open
+  `walk_objects` re-keys each blob by `hash_obj(bytes)`, so on-disk bit-rot also
+  surfaces as not-found -> `ObjectTampered`. Exercised by the tamper suite
+  (`storage_tamper_rejected`). Integrity model is sound.
+- **Integer overflow / unbounded allocation on untrusted lengths.** dCBOR caps
+  every declared length by remaining input before `with_capacity` (§17.4,
+  `dcbor.rs:240/255/269`); `mneme-smt::wire::read_path` caps at `MAX_PATH_LEN`
+  **and** uses `try_reserve_exact` (fallible alloc, no OOM) and rejects trailing
+  bytes; `len as usize` / u16/u32->usize casts are lossless on the 64-bit target.
+  No truncation or alloc-DoS vector found.
+
+Status note: after 8 landed increments + 5 clean audits (slice, path-traversal,
+object-integrity, overflow, forget-path crash-safety), the high-value
+store-kernel + verifier surface is covered. Net-new hourly hardening has hit
+diminishing returns; a daily cadence is now more appropriate, with standing
+assurance (weekly CVE scan, two-host determinism, tamper/chaos gates) carrying
+continuous coverage.
+
+- **Forget/erase crypto-shred crash/corruption resilience (clean).**
+  `forget_internal` uses the same `.incomplete` transaction guard as `remember`
+  (`begin_transaction` → mutate in a closure → `commit_root_inner` durable →
+  `commit_transaction` clears the guard only on `Ok`), so any error leaves
+  `.incomplete` and the next open fails closed. The erasure-receipt branch mints
+  **and self-verifies** the `ForgetProof` (`verify_forget_proof_bound`). Crash
+  boundaries (`AFTER_BEGIN_INCOMPLETE` / `AFTER_KEY_INDEX` / `AFTER_PERSIST_INDEX`
+  / `BEFORE_COMMIT_INCOMPLETE`) are exercised by the chaos suite (kill-during-
+  forget → incomplete detected). No fix needed.
