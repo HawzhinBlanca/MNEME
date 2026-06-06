@@ -156,3 +156,11 @@ Note: cargo-audit is not locally runnable under the project's pinned 1.86.0
 toolchain; use `docker run --rm -v "$PWD/Cargo.lock:/work/Cargo.lock:ro" \
 rust:latest sh -c 'cargo install cargo-audit --locked && cargo audit --file \
 /work/Cargo.lock'` to reproduce locally.
+
+Gotcha (cost one CI cycle): `rust-toolchain.toml` (channel 1.86.0) overrides the
+`@stable` action for cargo commands run in the repo, so `cargo install
+cargo-audit` initially picked 1.86.0 and failed its MSRV. Fixed with job-level
+`RUSTUP_TOOLCHAIN: stable` (env beats the toolchain file in rustup precedence;
+verified: toml→`cargo 1.86.0`, env→`cargo 1.96.0`). Lesson for the loop: when
+Docker-verifying a CI change, mount the **whole repo** incl. `rust-toolchain.toml`
+— mounting only `Cargo.lock` masked the override.

@@ -34,6 +34,12 @@ jobs:
     name: cargo audit (RustSec)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # cargo-audit's MSRV exceeds the workspace's pinned 1.86.0; force the stable
+    # toolchain for this job so `rust-toolchain.toml` does not pin the *tool*
+    # build to 1.86.0. cargo-audit only parses Cargo.lock — it never builds the
+    # workspace — so the 1.86.0 build pin is unaffected.
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@v5
 
