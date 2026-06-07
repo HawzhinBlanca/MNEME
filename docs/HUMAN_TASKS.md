@@ -15,12 +15,6 @@ and update this file only when a genuinely human-gated item changes.
 | SSH peer re-verification | Configure a distinct physical peer and CI secrets: `MNEME_SECOND_HOST` and `MNEME_DETERMINISM_SSH_KEY`. | Cross-runner determinism proof and dual-workspace checks remain the no-secret proof path; SSH is for continuous ops re-verification. |
 | Cloud KMS/HSM continuous proof | Provide a real `AWS_KMS_KEY_ID`, cloud credentials, or a GCP/PKCS#11 endpoint. | `EnvelopeKeyVault`, `scripts/kms/dek-from-aws.sh`, and the HSM/KMS adapter contract compile and document the seam. |
 
-## Local Toolchain Remediation
-
-| Task | Human input needed | Current in-repo substitute |
-|---|---|---|
-| Restore protobuf codegen execution on this Mac | Approve, reinstall, or otherwise repair the local `protoc` execution path. Current evidence: the vendored `protoc-bin-vendored-macos-aarch_64` binary exits before printing a version, and Homebrew `protoc` is blocked by macOS library-load policy for its `abseil` dependency. | Source-level cert hardening checks and `mneme-core` embedding tests still run; `mneme-cli` and `mnemed` Cargo gates remain blocked until protobuf codegen can execute. |
-
 ## Hardware, Formal Methods, And Governance
 
 | Task | Human input needed | Why local agents should not fake it |
