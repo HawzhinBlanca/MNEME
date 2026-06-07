@@ -22,7 +22,7 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 ## P0 — Honesty defects in shipped source + the one confirmed correctness bug
 *(cheap, brand-critical, do first; ~1–2 days total)*
 
-### WO-1 — A-REPLAY HLC regression check is numerically wrong  **[CONFIRMED]**
+### WO-1 — A-REPLAY HLC regression check is numerically wrong  **[CONFIRMED]** ✅ DONE
 - **Where:** `crates/mneme-root/src/lib.rs:127` `check_replay` does `current.hlc_max < last`
   on two `[u8;14]` arrays (lexicographic from byte 0); `crates/mneme-core/src/hlc.rs:64`
   `to_bytes()` writes `wall_ms` **little-endian** → numeric order scrambled (e.g. 256 sorts < 255).
@@ -34,44 +34,44 @@ tests/tamper/determinism/cross-impl) stays green after each change.
   boundary (e.g. 255 → 256) and asserts `check_replay` rejects the true regression and accepts the
   true advance; all existing root/store/e2e tests stay green.
 
-### WO-2 — False `aws-kms` Cargo-feature claim in shipped docstring  **[CONFIRMED]**
+### WO-2 — False `aws-kms` Cargo-feature claim in shipped docstring  **[CONFIRMED]** ✅ DONE
 - **Where:** `crates/mneme-crypto/src/envelope_vault.rs:2` claims master key "via `aws-kms` feature".
   No `[features]` section and no aws/kms dep exist in `mneme-crypto/Cargo.toml`.
 - **Fix:** reword to "master key from `MNEME_KMS_MASTER_KEY_HEX` (e.g. an AWS KMS data key fetched
   out-of-process by `scripts/kms/dek-from-aws.sh`)". Remove the phantom feature reference.
 - **Acceptance:** `grep -rn 'aws-kms' crates/mneme-crypto` returns nothing implying a Cargo feature.
 
-### WO-3 — MCP `CONTRACT.md` describes an rmcp server that doesn't exist  **[EVIDENCE]**
+### WO-3 — MCP `CONTRACT.md` describes an rmcp server that doesn't exist  **[EVIDENCE]** ✅ DONE
 - The transport is a hand-rolled JSON-RPC 2.0 stdio loop (serde_json); there is no `rmcp` dep.
 - **Fix:** rewrite to describe the real public surface (`MemoryHandlers`/`dispatch`/`tool_definitions`/
   `open_runtime`) and the hand-rolled loop; drop the `rmcp`/`MnemeMcpServer ServerHandler` claim.
 - **Acceptance:** CONTRACT matches `crates/mneme-mcp/src/*`; no `rmcp` reference remains.
 
-### WO-4 — Stale "Skeleton/placeholder" comment contradicts the code  **[EVIDENCE]**
+### WO-4 — Stale "Skeleton/placeholder" comment contradicts the code  **[EVIDENCE]** ✅ DONE
 - `crates/mneme-core/src/accountability.rs:88` calls `ForgetProof` a skeleton whose `shred_commit`/
   `absence_path` "nothing populates or verifies yet" — but they ARE populated
   (`mneme-account/.../forget.rs`) and verified (`mneme-account/.../verify.rs`).
 - **Fix:** update the comment to reflect that they are populated+verified. (See also WO-19.)
 
-### WO-5 — Remove the stale protoc "blocker" from `HUMAN_TASKS.md`  **[CONFIRMED]**
+### WO-5 — Remove the stale protoc "blocker" from `HUMAN_TASKS.md`  **[CONFIRMED]** ✅ DONE
 - The entry claims `mneme-cli`/`mnemed` Cargo gates "remain blocked until protobuf codegen can
   execute." Both build clean via vendored protoc; `env -u PROTOC cargo build -p mnemed` with the
   proto touched (forced codegen) succeeds; vendored + Homebrew protoc both run `--version`.
 - **Fix:** delete or rewrite the entry to reflect that codegen works (vendored protoc).
 
-### WO-6 — `TCB_MANIFEST.md` is out of sync with the trusted surface  **[EVIDENCE]**
+### WO-6 — `TCB_MANIFEST.md` is out of sync with the trusted surface  **[EVIDENCE]** ✅ DONE
 - Tier-2 lists `verify_ads_vo` but the code calls `verify_semantic_receipt_tcb_gate`, and never names
   `procedure.rs`/`provenance.rs`/`commit.rs`/`semantic_zk.rs`/`zkann.rs`. The manifest's own rule
   ("untrusted-byte parsers must be in the guard lint set") is violated for the semantic path.
 - **Fix:** name the real entry point + every transitive trusted file. (Pairs with WO-9.)
 
-### WO-7 — `mnemed audit` subcommand is a non-functional stub  **[CONFIRMED]**
+### WO-7 — `mneme audit` subcommand is a non-functional stub  **[CONFIRMED]** ✅ DONE
 - `crates/mneme-cli/src/main.rs:412` routes `Audit` to `require_path_exists()` → always exit 3,
   despite help text "Print provenance, writers, tiers, tombstones."
 - **Fix:** implement it (read-only provenance/writer/tier/tombstone dump) OR change the help text to
   honestly say "not yet implemented" and return a typed `Unsupported`.
 
-### WO-8 — Missing root `LICENSE` file  **[EVIDENCE]**
+### WO-8 — Missing root `LICENSE` file  **[EVIDENCE]** ✅ DONE
 - `Cargo.toml` declares Apache-2.0 but no `LICENSE` file exists. Blocking for any OSS release (L4).
 - **Fix:** add the Apache-2.0 `LICENSE` text at repo root.
 
@@ -198,3 +198,19 @@ P0 (1–2 d) → P1 correctness/hardening (1–2 wk) → P2 L1+L3 delivery (1 wk
 After each P0/P1/P2 item, the watch sweep should stay green; P3 items unlock the per-layer ceilings
 documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, `docs/HUMAN_TASKS.md`,
 `docs/TCB_MANIFEST.md`.
+
+---
+
+## Completion log (2026-06-08 session, branch `harden/differential-adversarial`)
+
+| WO | Status | Evidence |
+|----|--------|----------|
+| WO-1 | DONE | `cmp_wire` in `hlc.rs`; `check_replay` uses numeric compare; test `check_replay_rejects_numeric_hlc_regression_across_byte_boundary` |
+| WO-2 | DONE | `envelope_vault.rs` docstring; `grep -rn 'aws-kms' crates/mneme-crypto` clean |
+| WO-3 | DONE | `mneme-mcp/docs/CONTRACT.md` describes hand-rolled JSON-RPC + `MemoryHandlers`/`dispatch` |
+| WO-4 | DONE | `accountability.rs` ForgetProof comment matches `mneme-account` populate/verify |
+| WO-5 | DONE | protoc blocker row removed from `HUMAN_TASKS.md` |
+| WO-6 | DONE | `TCB_MANIFEST.md` names `verify_semantic_receipt_tcb_gate` + transitive files |
+| WO-7 | DONE | `mneme audit` help text + honest `StoreUnavailable` exit (not fake path check) |
+| WO-8 | DONE | root `LICENSE` (Apache-2.0) added |
+| P0 gate | GREEN | `scripts/ci/validation-lane.sh quick` after all P0 fixes |
