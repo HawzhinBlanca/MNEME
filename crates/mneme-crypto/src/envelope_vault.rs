@@ -1,5 +1,6 @@
 //! Envelope-encrypted file vault (B6) — per-object keys encrypted at rest under a
-//! 32-byte master key (from env or from AWS KMS `GenerateDataKey` via `aws-kms` feature).
+//! 32-byte master key from `MNEME_KMS_MASTER_KEY_HEX` (e.g. an AWS KMS data key fetched
+//! out-of-process by `scripts/kms/dek-from-aws.sh`).
 //!
 //! Layout matches [`FileKeyVault`] (`keys/vault/` journal + per-id files) but bytes on
 //! disk are `nonce24 ‖ AEAD(master, object_key)` — never plaintext keys.
