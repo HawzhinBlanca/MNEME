@@ -7,6 +7,33 @@ use mneme_core::{
 use mneme_store::Store;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum McpHandlerFailure {
+    EmptyLogicalName,
+    UnknownMemoryKind,
+    UnknownTrustTier,
+}
+
+fn mcp_handler_failure_to_mneme(failure: McpHandlerFailure) -> MnemeError {
+    match failure {
+        McpHandlerFailure::EmptyLogicalName
+        | McpHandlerFailure::UnknownMemoryKind
+        | McpHandlerFailure::UnknownTrustTier => MnemeError::SchemaDrift,
+    }
+}
+
+fn empty_logical_name_error() -> MnemeError {
+    mcp_handler_failure_to_mneme(McpHandlerFailure::EmptyLogicalName)
+}
+
+fn unknown_memory_kind_error() -> MnemeError {
+    mcp_handler_failure_to_mneme(McpHandlerFailure::UnknownMemoryKind)
+}
+
+fn unknown_trust_tier_error() -> MnemeError {
+    mcp_handler_failure_to_mneme(McpHandlerFailure::UnknownTrustTier)
+}
+
 /// Tool-channel writes must live under `tools/` (§13.4 NamespacePrefix caveat).
 pub fn normalize_tool_namespace(namespace: &str) -> String {
     let ns = namespace.trim();
@@ -59,7 +86,7 @@ impl MemoryHandlers {
         session: [u8; 16],
     ) -> Result<RememberResult, MnemeError> {
         if name.trim().is_empty() {
-            return Err(MnemeError::SchemaDrift);
+            return Err(empty_logical_name_error());
         }
         let namespace = normalize_tool_namespace(namespace);
         let draft = Draft {
@@ -208,7 +235,7 @@ pub fn parse_kind(s: &str) -> Result<MemoryKind, MnemeError> {
         "procedural" => Ok(MemoryKind::Procedural),
         "working" => Ok(MemoryKind::Working),
         "identity" => Ok(MemoryKind::Identity),
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(unknown_memory_kind_error()),
     }
 }
 
@@ -218,6 +245,77 @@ pub fn parse_min_tier(s: &str) -> Result<TrustTier, MnemeError> {
         "working" => Ok(TrustTier::Working),
         "trusted" => Ok(TrustTier::Trusted),
         "identity" => Ok(TrustTier::Identity),
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(unknown_trust_tier_error()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn handlers_production_source() -> &'static str {
+        include_str!("handlers.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("handlers.rs should keep tests after production code")
+    }
+
+    #[test]
+    fn mcp_handler_failures_are_classified_not_schema_drift_collapsed() {
+        let production = handlers_production_source();
+
+        for forbidden in [
+            "return Err(MnemeError::SchemaDrift)",
+            "_ => Err(MnemeError::SchemaDrift)",
+            "map_err(|_| MnemeError::SchemaDrift)",
+            "ok_or(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "MCP handler production code still collapses directly through {forbidden}"
+            );
+        }
+
+        for required in [
+            "enum McpHandlerFailure",
+            "fn mcp_handler_failure_to_mneme(",
+            "fn empty_logical_name_error(",
+            "fn unknown_memory_kind_error(",
+            "fn unknown_trust_tier_error(",
+            "McpHandlerFailure::EmptyLogicalName",
+            "McpHandlerFailure::UnknownMemoryKind",
+            "McpHandlerFailure::UnknownTrustTier",
+        ] {
+            assert!(
+                production.contains(required),
+                "MCP handler production code is missing typed classifier marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_handler_failure_classifier_preserves_public_schema_drift() {
+        for failure in [
+            McpHandlerFailure::EmptyLogicalName,
+            McpHandlerFailure::UnknownMemoryKind,
+            McpHandlerFailure::UnknownTrustTier,
+        ] {
+            assert_eq!(
+                mcp_handler_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+        assert_eq!(empty_logical_name_error(), MnemeError::SchemaDrift);
+        assert_eq!(unknown_memory_kind_error(), MnemeError::SchemaDrift);
+        assert_eq!(unknown_trust_tier_error(), MnemeError::SchemaDrift);
+    }
+
+    #[test]
+    fn mcp_handler_parsers_reject_unknown_values_fail_closed() {
+        assert_eq!(parse_kind("archive").err(), Some(MnemeError::SchemaDrift));
+        assert_eq!(
+            parse_min_tier("superuser").err(),
+            Some(MnemeError::SchemaDrift)
+        );
     }
 }

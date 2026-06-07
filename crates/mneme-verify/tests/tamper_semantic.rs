@@ -70,7 +70,7 @@ sem_tamper!(
     MnemeError::ProcedureMismatch
 );
 sem_tamper!(
-    sem_receipt_query_commit,
+    sem_receipt_result_ids_extra,
     |f| {
         f.receipt
             .verification_object

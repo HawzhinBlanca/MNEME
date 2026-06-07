@@ -8,6 +8,13 @@ use crate::error::CrossrefError;
 use crate::procedure::{CandidateRow, Procedure, procedure_id, replay_from_candidates};
 use std::collections::{HashMap, HashSet};
 
+pub const HONESTY_PROCEDURE: &str = concat!(
+    "MNEME semantic receipts prove procedure-faithfulness over authenticated data, ",
+    "not semantic truth, not exact nearest-neighbor optimality, and not true nearest neighbors. ",
+    "ExactDominance v1 is top-k over prover-asserted distances, not top-k by true ",
+    "query-to-embedding distance until verifiers recompute candidate distances."
+);
+
 /// zkANN-1 retrieval proof level (tags match `RetrievalProofLevel`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetrievalProofLevel {
@@ -255,6 +262,102 @@ fn dominance_over_candidates(
 #[cfg(test)]
 mod soundness_tests {
     use super::*;
+
+    fn concat_const_value(source: &str, const_name: &str) -> String {
+        let marker = format!("pub const {const_name}: &str = concat!(");
+        let body = source
+            .split_once(&marker)
+            .map(|(_, after)| after)
+            .and_then(|after| after.split_once("\n);").map(|(body, _)| body))
+            .unwrap_or_else(|| {
+                panic!("{const_name} concat! constant should remain source-visible")
+            });
+        let mut value = String::new();
+        for line in body.lines() {
+            let literal = line.trim().trim_end_matches(',');
+            if literal.is_empty() {
+                continue;
+            }
+            let segment = literal
+                .strip_prefix('"')
+                .and_then(|literal| literal.strip_suffix('"'))
+                .unwrap_or_else(|| panic!("{const_name} segment should be a string literal"));
+            value.push_str(segment);
+        }
+        value
+    }
+
+    #[test]
+    fn exported_honesty_boundary_keeps_distance_caveat() {
+        let production = include_str!("semantic_commit.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("semantic_commit tests should follow production code");
+        let lib = include_str!("lib.rs");
+        let index_verify = include_str!("../../mneme-index/src/verify.rs");
+
+        assert!(
+            production.contains("pub const HONESTY_PROCEDURE"),
+            "crossref should export the same operator-facing semantic honesty boundary"
+        );
+        assert!(
+            lib.contains("pub use semantic_commit::HONESTY_PROCEDURE"),
+            "crossref should re-export the honesty boundary at the crate root"
+        );
+        assert_eq!(HONESTY_PROCEDURE, crate::HONESTY_PROCEDURE);
+        assert_eq!(
+            concat_const_value(production, "HONESTY_PROCEDURE"),
+            HONESTY_PROCEDURE,
+            "source-visible crossref honesty constant should match its runtime value"
+        );
+        assert_eq!(
+            concat_const_value(index_verify, "HONESTY_NOT_EXACT_NN"),
+            HONESTY_PROCEDURE,
+            "crossref honesty boundary must not drift from mneme-index/mneme-verify export"
+        );
+        assert!(
+            HONESTY_PROCEDURE.contains("procedure-faithfulness"),
+            "honesty boundary must preserve the procedure-faithfulness claim"
+        );
+        assert!(
+            HONESTY_PROCEDURE.contains("not exact nearest-neighbor"),
+            "honesty boundary must not drift into exact-NN language"
+        );
+        assert!(
+            HONESTY_PROCEDURE.contains("prover-asserted distances"),
+            "ExactDominance v1 must stay scoped to prover-asserted distances"
+        );
+        assert!(
+            HONESTY_PROCEDURE.contains("not top-k by true query-to-embedding distance"),
+            "ExactDominance v1 must preserve the distance-recompute caveat"
+        );
+    }
+
+    #[test]
+    fn external_sdk_docs_preserve_honesty_symbols_and_distance_caveat() {
+        let interop = include_str!("../../../docs/phase-program/INTEROP_SDK_STUB.md");
+        let crossref_notes = include_str!("../../../docs/phase-program/PHASE_IV_CROSSREF_NOTES.md");
+        let docs = [interop, crossref_notes].join("\n");
+
+        for stale in ["HONESTY_NOT_EXACT_NN", "verify::HONESTY_NOT_EXACT_NN"] {
+            assert!(
+                !docs.contains(stale),
+                "external verifier docs should not reference stale/internal honesty symbol `{stale}`"
+            );
+        }
+
+        for required in [
+            "mneme_verify::HONESTY_PROCEDURE",
+            "mneme_crossref::HONESTY_PROCEDURE",
+            "top-k over prover-asserted distances",
+            "not top-k by true query-to-embedding distance",
+        ] {
+            assert!(
+                docs.contains(required),
+                "external verifier docs must preserve `{required}`"
+            );
+        }
+    }
 
     fn cand(id: u8, ec: u8, d: i64) -> CandidateRow {
         ([id; 32], [ec; 32], d)

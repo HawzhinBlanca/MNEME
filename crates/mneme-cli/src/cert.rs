@@ -22,8 +22,7 @@ pub fn run_certify(
     level: RetrievalProofLevel,
     out: &Path,
 ) -> Result<(), MnemeError> {
-    let embedding = FixedPointEmbedding::new(u32::from(dim), scale, components.to_vec())
-        .map_err(|_| MnemeError::SchemaDrift)?;
+    let embedding = certify_embedding_from_components(components, dim, scale)?;
     let proc = Procedure {
         algo: ProcedureAlgo::Hnsw,
         ef_search: 64,
@@ -48,6 +47,14 @@ pub fn run_certify(
     Ok(())
 }
 
+fn certify_embedding_from_components(
+    components: &[i16],
+    dim: u16,
+    scale: i8,
+) -> Result<FixedPointEmbedding, MnemeError> {
+    FixedPointEmbedding::new(u32::from(dim), scale, components.to_vec())
+}
+
 pub fn run_verify_cert(
     path: &Path,
     trust: &TrustConfig,
@@ -59,4 +66,60 @@ pub fn run_verify_cert(
     })?;
     verify_cognition_certificate_v1(&bytes, trust, proc)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cert_production_source() -> &'static str {
+        include_str!("cert.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("cert.rs should keep tests after production code")
+    }
+
+    #[test]
+    fn certify_embedding_errors_are_preserved_not_schema_drift_collapsed() {
+        let production = cert_production_source();
+
+        for forbidden in [
+            "map_err(|_| MnemeError::SchemaDrift)",
+            "return Err(MnemeError::SchemaDrift)",
+            "Err(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "cert production code still collapses embedding errors directly through {forbidden}"
+            );
+        }
+
+        for required in [
+            "fn certify_embedding_from_components(",
+            "FixedPointEmbedding::new(u32::from(dim), scale, components.to_vec())",
+        ] {
+            assert!(
+                production.contains(required),
+                "cert production code is missing embedding preservation marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn certify_embedding_from_components_rejects_dimension_mismatch() {
+        assert_eq!(
+            certify_embedding_from_components(&[1], 2, 0).err(),
+            Some(MnemeError::SchemaDrift)
+        );
+    }
+
+    #[test]
+    fn certify_embedding_from_components_accepts_matching_shape() {
+        let embedding =
+            certify_embedding_from_components(&[1, -2], 2, 0).expect("matching embedding shape");
+
+        assert_eq!(embedding.dim, 2);
+        assert_eq!(embedding.scale, 0);
+        assert_eq!(embedding.components, vec![1, -2]);
+    }
 }

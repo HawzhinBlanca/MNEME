@@ -578,7 +578,7 @@ fn e2e_bypass_b2_unverified_recall_surface_closed() {
 }
 
 #[test]
-fn e2e_bypass_verify_store_head_with_tampered_object() {
+fn e2e_bypass_verify_signed_head_only_with_tampered_object() {
     test_clear_pause();
     let (mut store, cap, store_dir) = agent_store();
     let (id, _) = store
@@ -601,7 +601,7 @@ fn e2e_bypass_verify_store_head_with_tampered_object() {
     );
     bypass_attempt(
         "A-DB",
-        "verify_store_head",
+        "verify_signed_head_only",
         "BYPASS_POSSIBLE:no_object_scan",
     );
 }

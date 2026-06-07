@@ -6,8 +6,10 @@ use mneme_core::{
     TrustTier,
 };
 use mneme_crdt::{decode_sync_message, encode_sync_message};
+use mneme_store::Store;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::MutexGuard;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
@@ -64,6 +66,37 @@ enum KernelErrWriteOutcome {
     PeerUnavailable,
     TimedOut,
     Failed(std::io::ErrorKind),
+}
+
+type TimedUnixReadExact = Result<Result<usize, std::io::Error>, tokio::time::error::Elapsed>;
+type TimedUnixWriteAll = Result<Result<(), std::io::Error>, tokio::time::error::Elapsed>;
+type TimedUnixConnect = Result<Result<UnixStream, std::io::Error>, tokio::time::error::Elapsed>;
+
+enum UnixReadExactOutcome {
+    Read,
+    Failed(std::io::Error),
+    TimedOut,
+}
+
+enum UnixConnectOutcome {
+    Connected(UnixStream),
+    Failed(std::io::Error),
+    TimedOut,
+}
+
+enum UnixWriteAllOutcome {
+    Written,
+    Failed(std::io::Error),
+    TimedOut,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum UnixKernelFailure {
+    InvalidLogicalKey,
+    BodyBase64Decode,
+    SyncFrameBase64Decode,
+    SyncFrameDecode(MnemeError),
+    StoreUnavailable(&'static str),
 }
 
 pub struct UnixServer {
@@ -283,10 +316,7 @@ pub async fn request_json_with_timeout(
         ));
     }
 
-    let mut stream = match tokio::time::timeout(io_timeout, UnixStream::connect(path)).await {
-        Ok(result) => result?,
-        Err(_) => return Err(request_timeout_error()),
-    };
+    let mut stream = connect_unix_stream_with_timeout(path, io_timeout).await?;
     let len = (frame.len() as u32).to_be_bytes();
     write_all_with_timeout(&mut stream, &len, io_timeout, request_timeout_error).await?;
     write_all_with_timeout(&mut stream, &frame, io_timeout, request_timeout_error).await?;
@@ -302,6 +332,25 @@ pub async fn request_json_with_timeout(
     let mut buf = vec![0u8; resp_len];
     read_exact_with_timeout(&mut stream, &mut buf, io_timeout, request_timeout_error).await?;
     serde_json::from_slice(&buf).map_err(std::io::Error::other)
+}
+
+async fn connect_unix_stream_with_timeout(
+    path: &PathBuf,
+    io_timeout: Duration,
+) -> Result<UnixStream, std::io::Error> {
+    match classify_unix_connect(tokio::time::timeout(io_timeout, UnixStream::connect(path)).await) {
+        UnixConnectOutcome::Connected(stream) => Ok(stream),
+        UnixConnectOutcome::Failed(e) => Err(e),
+        UnixConnectOutcome::TimedOut => Err(request_timeout_error()),
+    }
+}
+
+fn classify_unix_connect(connect_result: TimedUnixConnect) -> UnixConnectOutcome {
+    match connect_result {
+        Ok(Ok(stream)) => UnixConnectOutcome::Connected(stream),
+        Ok(Err(e)) => UnixConnectOutcome::Failed(e),
+        Err(_) => UnixConnectOutcome::TimedOut,
+    }
 }
 
 fn normalize_io_timeout(io_timeout: Duration) -> Duration {
@@ -398,10 +447,18 @@ async fn read_exact_with_timeout(
     io_timeout: Duration,
     timeout_error: fn() -> std::io::Error,
 ) -> Result<(), std::io::Error> {
-    match tokio::time::timeout(io_timeout, stream.read_exact(buf)).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err(timeout_error()),
+    match classify_unix_read_exact(tokio::time::timeout(io_timeout, stream.read_exact(buf)).await) {
+        UnixReadExactOutcome::Read => Ok(()),
+        UnixReadExactOutcome::Failed(e) => Err(e),
+        UnixReadExactOutcome::TimedOut => Err(timeout_error()),
+    }
+}
+
+fn classify_unix_read_exact(read_result: TimedUnixReadExact) -> UnixReadExactOutcome {
+    match read_result {
+        Ok(Ok(_)) => UnixReadExactOutcome::Read,
+        Ok(Err(e)) => UnixReadExactOutcome::Failed(e),
+        Err(_) => UnixReadExactOutcome::TimedOut,
     }
 }
 
@@ -411,10 +468,18 @@ async fn write_all_with_timeout(
     io_timeout: Duration,
     timeout_error: fn() -> std::io::Error,
 ) -> Result<(), std::io::Error> {
-    match tokio::time::timeout(io_timeout, stream.write_all(buf)).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err(timeout_error()),
+    match classify_unix_write_all(tokio::time::timeout(io_timeout, stream.write_all(buf)).await) {
+        UnixWriteAllOutcome::Written => Ok(()),
+        UnixWriteAllOutcome::Failed(e) => Err(e),
+        UnixWriteAllOutcome::TimedOut => Err(timeout_error()),
+    }
+}
+
+fn classify_unix_write_all(write_result: TimedUnixWriteAll) -> UnixWriteAllOutcome {
+    match write_result {
+        Ok(Ok(())) => UnixWriteAllOutcome::Written,
+        Ok(Err(e)) => UnixWriteAllOutcome::Failed(e),
+        Err(_) => UnixWriteAllOutcome::TimedOut,
     }
 }
 
@@ -549,16 +614,56 @@ fn cap_from_b64(b64: &str) -> Result<mneme_cap::Capability, MnemeError> {
     capability_from_header(b64).map_err(|_| MnemeError::CapDenied)
 }
 
+fn unix_kernel_failure_to_mneme(failure: UnixKernelFailure) -> MnemeError {
+    match failure {
+        UnixKernelFailure::InvalidLogicalKey
+        | UnixKernelFailure::BodyBase64Decode
+        | UnixKernelFailure::SyncFrameBase64Decode => MnemeError::SchemaDrift,
+        UnixKernelFailure::SyncFrameDecode(err) => err,
+        UnixKernelFailure::StoreUnavailable(context) => MnemeError::IoFailed {
+            path: format!("unix kernel {context} store"),
+            kind: "store lock poisoned".into(),
+        },
+    }
+}
+
+fn invalid_logical_key_error() -> MnemeError {
+    unix_kernel_failure_to_mneme(UnixKernelFailure::InvalidLogicalKey)
+}
+
+fn decode_unix_body_b64(body_b64: &str) -> Result<Vec<u8>, MnemeError> {
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body_b64.trim())
+        .map_err(|_| unix_kernel_failure_to_mneme(UnixKernelFailure::BodyBase64Decode))
+}
+
+fn decode_unix_sync_frame_b64(bytes_b64: &str) -> Result<SyncMessage, MnemeError> {
+    let bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, bytes_b64.trim())
+            .map_err(|_| unix_kernel_failure_to_mneme(UnixKernelFailure::SyncFrameBase64Decode))?;
+    decode_sync_message(&bytes)
+        .map_err(|err| unix_kernel_failure_to_mneme(UnixKernelFailure::SyncFrameDecode(err)))
+}
+
+fn lock_unix_store<'a>(
+    state: &'a AppState,
+    context: &'static str,
+) -> Result<MutexGuard<'a, Store>, MnemeError> {
+    state
+        .store
+        .lock()
+        .map_err(|_| unix_kernel_failure_to_mneme(UnixKernelFailure::StoreUnavailable(context)))
+}
+
 fn validate_logical_key(namespace: &str, name: &str) -> Result<(), MnemeError> {
     if namespace.trim().is_empty() || name.trim().is_empty() {
-        return Err(MnemeError::SchemaDrift);
+        return Err(invalid_logical_key_error());
     }
     Ok(())
 }
 
 fn head(state: &AppState, cap_b64: &str) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
-    let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    let store = lock_unix_store(state, "head")?;
     cap.verify(state.operator.as_ref(), store.current_hlc())?;
     let root = store.current_root()?;
     Ok(serde_json::json!({
@@ -576,9 +681,8 @@ fn remember(
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
-    let body = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body_b64.trim())
-        .map_err(|_| MnemeError::SchemaDrift)?;
-    let mut store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    let body = decode_unix_body_b64(&body_b64)?;
+    let mut store = lock_unix_store(state, "remember")?;
     let draft = Draft {
         namespace,
         logical_name: name,
@@ -605,7 +709,7 @@ fn recall(
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
-    let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    let store = lock_unix_store(state, "recall")?;
     let query = Query {
         logical_key: LogicalKey { namespace, name },
         min_tier: TrustTier::Working,
@@ -629,7 +733,7 @@ fn forget(
     } else {
         ForgetMode::Shred
     };
-    let mut store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    let mut store = lock_unix_store(state, "forget")?;
     let key = LogicalKey { namespace, name };
     store.forget(ForgetTarget::LogicalKey(key), &cap, forget_mode)?;
     Ok(serde_json::json!({ "forgot": true }))
@@ -646,7 +750,7 @@ fn prove_absent(
     if !cap.permits_read(&namespace, TrustTier::Quarantine) {
         return Err(MnemeError::CapDenied);
     }
-    let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    let store = lock_unix_store(state, "prove_absent")?;
     cap.verify(state.operator.as_ref(), store.current_hlc())?;
     let key = LogicalKey { namespace, name };
     let _proof = store.prove_absent(&key)?;
@@ -663,11 +767,8 @@ fn sync_frame(
     if !cap.permits_read("sync", TrustTier::Quarantine) {
         return Err(MnemeError::CapDenied);
     }
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(bytes_b64.trim())
-        .map_err(|_| MnemeError::SchemaDrift)?;
-    let msg = decode_sync_message(&bytes)?;
-    let store = state.store.lock().map_err(|_| MnemeError::SchemaDrift)?;
+    let msg = decode_unix_sync_frame_b64(&bytes_b64)?;
+    let store = lock_unix_store(state, "sync_frame")?;
     cap.verify(state.operator.as_ref(), store.current_hlc())?;
     let out = match msg {
         SyncMessage::Hello { .. } => {
@@ -696,17 +797,51 @@ fn sync_frame(
 mod tests {
     use super::*;
 
+    type UnixConnectionJoin = Option<Result<Result<(), std::io::Error>, tokio::task::JoinError>>;
+
+    fn panic_connection_task_boom() {
+        panic!("connection task boom");
+    }
+
+    fn expect_unix_connection_result_error(
+        joined: UnixConnectionJoin,
+        context: &str,
+    ) -> std::io::Error {
+        match observe_connection_result(joined) {
+            Ok(()) => panic!("{context}: expected Unix connection result failure"),
+            Err(err) => err,
+        }
+    }
+
+    fn expect_unix_connection_result_success(joined: UnixConnectionJoin, context: &str) {
+        observe_connection_result(joined).unwrap_or_else(|err| {
+            panic!("{context}: Unix connection result unexpectedly failed: {err}")
+        });
+    }
+
+    fn expect_encoded_kernel_response(resp: &KernelResponse, context: &str) -> Vec<u8> {
+        encode_kernel_response(resp)
+            .unwrap_or_else(|err| panic!("{context}: Unix kernel response encoding failed: {err}"))
+    }
+
+    fn expect_kernel_response_text(encoded: &[u8], context: &str) -> String {
+        std::str::from_utf8(encoded)
+            .unwrap_or_else(|err| {
+                panic!("{context}: Unix kernel response UTF-8 decode failed: {err}")
+            })
+            .to_owned()
+    }
+
     #[tokio::test]
     async fn connection_task_panic_surfaces_as_server_error() {
         let mut connections: JoinSet<Result<(), std::io::Error>> = JoinSet::new();
         connections.spawn(async {
-            panic!("connection task boom");
-            #[allow(unreachable_code)]
+            panic_connection_task_boom();
             Ok::<(), std::io::Error>(())
         });
 
-        let err = observe_connection_result(connections.join_next().await)
-            .expect_err("connection task panic must fail the Unix server");
+        let err =
+            expect_unix_connection_result_error(connections.join_next().await, "connection panic");
 
         assert_eq!(err.kind(), std::io::ErrorKind::Other);
         assert!(
@@ -717,11 +852,13 @@ mod tests {
 
     #[test]
     fn connection_io_error_is_observed_not_server_fatal() {
-        observe_connection_result(Some(Ok(Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "client closed",
-        )))))
-        .expect("per-connection I/O errors should not fail the Unix server");
+        expect_unix_connection_result_success(
+            Some(Ok(Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "client closed",
+            )))),
+            "per-connection I/O error",
+        );
     }
 
     #[test]
@@ -764,39 +901,39 @@ mod tests {
 
     #[test]
     fn kernel_response_encoder_preserves_error_response_payload() {
-        let encoded = encode_kernel_response(&KernelResponse::Err {
-            code: "framing".into(),
-            message: "bad frame".into(),
-        })
-        .expect("encode error response");
+        let encoded = expect_encoded_kernel_response(
+            &KernelResponse::Err {
+                code: "framing".into(),
+                message: "bad frame".into(),
+            },
+            "kernel error response",
+        );
 
         assert!(
             !encoded.is_empty(),
             "encoded kernel error response must not be empty"
         );
         assert!(
-            std::str::from_utf8(&encoded)
-                .expect("utf8 response")
-                .contains("framing"),
+            expect_kernel_response_text(&encoded, "kernel error response").contains("framing"),
             "encoded response should preserve the error code"
         );
     }
 
     #[test]
     fn kernel_response_encoder_preserves_ok_response_payload() {
-        let encoded = encode_kernel_response(&KernelResponse::Ok {
-            payload: serde_json::json!({ "sequence": 7 }),
-        })
-        .expect("encode ok response");
+        let encoded = expect_encoded_kernel_response(
+            &KernelResponse::Ok {
+                payload: serde_json::json!({ "sequence": 7 }),
+            },
+            "kernel ok response",
+        );
 
         assert!(
             !encoded.is_empty(),
             "encoded kernel ok response must not be empty"
         );
         assert!(
-            std::str::from_utf8(&encoded)
-                .expect("utf8 response")
-                .contains("sequence"),
+            expect_kernel_response_text(&encoded, "kernel ok response").contains("sequence"),
             "encoded response should preserve the payload"
         );
     }
@@ -807,7 +944,38 @@ mod tests {
         connections.spawn(async { std::future::pending::<Result<(), std::io::Error>>().await });
         connections.abort_all();
 
-        observe_connection_result(connections.join_next().await)
-            .expect("shutdown-aborted connection tasks should not fail the Unix server");
+        expect_unix_connection_result_success(
+            connections.join_next().await,
+            "shutdown-aborted connection task",
+        );
+    }
+
+    #[test]
+    fn unix_kernel_failure_classifier_preserves_schema_failures() {
+        assert_eq!(
+            unix_kernel_failure_to_mneme(UnixKernelFailure::InvalidLogicalKey),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            unix_kernel_failure_to_mneme(UnixKernelFailure::BodyBase64Decode),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            unix_kernel_failure_to_mneme(UnixKernelFailure::SyncFrameBase64Decode),
+            MnemeError::SchemaDrift
+        );
+    }
+
+    #[test]
+    fn unix_kernel_failure_classifier_preserves_store_unavailable_context() {
+        let err = unix_kernel_failure_to_mneme(UnixKernelFailure::StoreUnavailable("head"));
+
+        match err {
+            MnemeError::IoFailed { path, kind } => {
+                assert_eq!(path, "unix kernel head store");
+                assert_eq!(kind, "store lock poisoned");
+            }
+            other => panic!("expected Unix store-unavailable I/O error, got {other:?}"),
+        }
     }
 }

@@ -15,7 +15,7 @@ fn theme_key(ns: &str, name: &str) -> LogicalKey {
 }
 
 #[test]
-fn b1_verify_store_head_signature_only_full_verify_rejects_tamper() {
+fn b1_verify_signed_head_only_signature_only_full_verify_rejects_tamper() {
     let dir = tempdir().unwrap();
     let operator = KeyPair::generate();
     let agent = KeyPair::generate();

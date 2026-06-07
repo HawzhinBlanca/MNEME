@@ -374,10 +374,12 @@ Raw logs (this run): `out/benchmarks/s22-20260530T115152Z/`
 ## 11. Branch / CI note (per task rule)
 
 On branch `cursor/readiness-adversarial-audit-not-ready`, `tests/e2e/mod.rs` uses
-the deprecated `mneme_verify::verify_store_head`, so the bench test only compiles
-clean under `-Dwarnings` if that is addressed (3 deprecation warnings). This does
-not affect any measured number — the benches were built and run in release without
-`-Dwarnings`. Flagged for the owning team; not fixed here (out of one-task scope).
+the old `mneme_verify::verify_store_head` name (the alias has since been removed;
+current tests use `verify_signed_head_only`), so the bench test only compiled
+clean under `-Dwarnings` after that naming drift was addressed. This does not
+affect any measured number — the benches were built and run in release without
+`-Dwarnings`. Flagged for the owning team at the time; the contract now points
+head-only tests at `verify_signed_head_only`.
 
 ---
 

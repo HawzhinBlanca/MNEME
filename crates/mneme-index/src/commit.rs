@@ -3,6 +3,23 @@
 use blake3::Hasher;
 use mneme_core::{DomainTag, MnemeError, ObjectId};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SemanticCommitFailure {
+    VerifyPathAtIndexRootMismatch,
+    VerifyPathWithIndexRootMismatch,
+}
+
+fn semantic_commit_failure_to_mneme(failure: SemanticCommitFailure) -> MnemeError {
+    match failure {
+        SemanticCommitFailure::VerifyPathAtIndexRootMismatch
+        | SemanticCommitFailure::VerifyPathWithIndexRootMismatch => MnemeError::IndexPathInvalid,
+    }
+}
+
+fn semantic_commit_error(failure: SemanticCommitFailure) -> MnemeError {
+    semantic_commit_failure_to_mneme(failure)
+}
+
 fn hash_sem_domain(payload: &[u8]) -> [u8; 32] {
     let mut h = Hasher::new();
     h.update(DomainTag::Sem.bytes());
@@ -143,7 +160,9 @@ impl SemanticMerkleTree {
             idx /= 2;
         }
         if current != *root {
-            return Err(MnemeError::IndexPathInvalid);
+            return Err(semantic_commit_error(
+                SemanticCommitFailure::VerifyPathAtIndexRootMismatch,
+            ));
         }
         Ok(())
     }
@@ -166,7 +185,9 @@ impl SemanticMerkleTree {
             idx /= 2;
         }
         if current != *root {
-            return Err(MnemeError::IndexPathInvalid);
+            return Err(semantic_commit_error(
+                SemanticCommitFailure::VerifyPathWithIndexRootMismatch,
+            ));
         }
         Ok(())
     }
@@ -178,6 +199,47 @@ mod tests {
 
     fn oid(byte: u8) -> ObjectId {
         ObjectId([byte; 32])
+    }
+
+    #[test]
+    fn semantic_commit_failures_are_classified_not_error_collapsed() {
+        let production = include_str!("commit.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("commit.rs should keep tests after production code");
+
+        let forbidden = "return Err(MnemeError::IndexPathInvalid";
+        assert!(
+            !production.contains(forbidden),
+            "semantic commit production code still collapses directly through {forbidden}"
+        );
+
+        for required in [
+            "enum SemanticCommitFailure",
+            "VerifyPathAtIndexRootMismatch",
+            "VerifyPathWithIndexRootMismatch",
+            "fn semantic_commit_failure_to_mneme(",
+            "fn semantic_commit_error(",
+        ] {
+            assert!(
+                production.contains(required),
+                "semantic commit production code is missing typed classifier marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_commit_failure_classifier_preserves_public_error() {
+        for failure in [
+            SemanticCommitFailure::VerifyPathAtIndexRootMismatch,
+            SemanticCommitFailure::VerifyPathWithIndexRootMismatch,
+        ] {
+            assert_eq!(
+                semantic_commit_failure_to_mneme(failure),
+                MnemeError::IndexPathInvalid
+            );
+            assert_eq!(semantic_commit_error(failure), MnemeError::IndexPathInvalid);
+        }
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::recall::unsupported_object_version_error;
 use crate::recall::{RecallContext, verify_provenance, verify_writer_and_tier};
 use crate::root::verify_root;
 use mneme_core::{
@@ -44,6 +45,7 @@ pub fn verify_semantic_recall(
         .embedding
         .as_ref()
         .ok_or(MnemeError::ProcedureMismatch)?;
+    emb.validate_shape()?;
     if emb.commit() != input.receipt.verification_object.query_commit {
         return Err(MnemeError::ProcedureMismatch);
     }
@@ -59,21 +61,21 @@ pub fn verify_semantic_recall(
         }
         let record: ObjectRecord = from_bytes_strict(bytes)?;
         if record.version != OBJECT_VERSION {
-            return Err(MnemeError::UnsupportedVersion {
-                got: record.version,
-            });
+            return Err(unsupported_object_version_error(record.version));
         }
         let emb_commit = record
             .embedding_commit
             .ok_or(MnemeError::IndexPathInvalid)?;
-        let candidate = input
-            .receipt
-            .verification_object
-            .candidates
-            .iter()
-            .find(|(cid, _, _)| cid == id)
-            .ok_or(MnemeError::IndexPathInvalid)?;
-        if candidate.1 != emb_commit {
+        let mut candidate_commit = None;
+        for (candidate_id, candidate_embedding_commit, _) in
+            &input.receipt.verification_object.candidates
+        {
+            if candidate_id == id {
+                candidate_commit = Some(*candidate_embedding_commit);
+                break;
+            }
+        }
+        if candidate_commit.ok_or(MnemeError::IndexPathInvalid)? != emb_commit {
             return Err(MnemeError::ObjectTampered);
         }
         verify_provenance(&record, ctx)?;

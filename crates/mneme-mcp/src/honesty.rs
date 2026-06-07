@@ -2,7 +2,9 @@
 
 /// Shared footer for all memory tools (authenticated ≠ true; receipts ≠ exact-NN).
 pub const HONESTY_FOOTER: &str = "Honesty: authenticated≠true (integrity/provenance only, not truth). \
-Receipts prove procedure-faithfulness over committed data, not exact nearest-neighbor optimality.";
+Receipts prove procedure-faithfulness over committed data, not exact nearest-neighbor optimality. \
+Phase I ExactDominance is top-k over prover-asserted distances, not top-k by true query-to-embedding \
+distance until verifiers recompute candidate distances.";
 
 /// A-INJ structural mitigation (§2.4, §13.4) — quarantine tier, not anti-poisoning.
 pub const AINJ_MITIGATION: &str = "A-INJ mitigation: tool-channel writes land in quarantine tier; \

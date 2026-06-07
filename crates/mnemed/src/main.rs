@@ -82,32 +82,65 @@ fn server_config_from_args(args: &Args) -> Result<ServerConfig, String> {
 mod tests {
     use super::*;
 
+    fn expect_cli_args(args: &[&str], context: &str) -> Args {
+        Args::try_parse_from(args.iter().copied())
+            .unwrap_or_else(|err| panic!("{context}: CLI args parse failed: {err}"))
+    }
+
+    fn expect_server_config(args: &Args, context: &str) -> ServerConfig {
+        server_config_from_args(args)
+            .unwrap_or_else(|err| panic!("{context}: server config build failed: {err}"))
+    }
+
+    async fn expect_shutdown_signal_success(
+        signal: impl std::future::Future<Output = Result<(), String>>,
+        context: &str,
+    ) {
+        signal
+            .await
+            .unwrap_or_else(|err| panic!("{context}: shutdown signal unexpectedly failed: {err}"));
+    }
+
+    async fn expect_shutdown_signal_error(
+        signal: impl std::future::Future<Output = Result<(), String>>,
+        context: &str,
+    ) -> String {
+        match signal.await {
+            Ok(()) => panic!("{context}: expected shutdown signal error"),
+            Err(err) => err,
+        }
+    }
+
     #[test]
     fn cli_rate_limit_flag_feeds_server_config() {
-        let args = Args::try_parse_from([
-            "mnemed",
-            "--store",
-            "/tmp/mneme-store",
-            "--rate-limit-per-minute",
-            "7",
-        ])
-        .expect("parse args");
-        let config = server_config_from_args(&args).expect("server config");
+        let args = expect_cli_args(
+            &[
+                "mnemed",
+                "--store",
+                "/tmp/mneme-store",
+                "--rate-limit-per-minute",
+                "7",
+            ],
+            "rate-limit CLI config",
+        );
+        let config = expect_server_config(&args, "rate-limit CLI config");
 
         assert_eq!(config.rate_limit_per_minute, 7);
     }
 
     #[test]
     fn cli_unix_socket_flag_feeds_server_config() {
-        let args = Args::try_parse_from([
-            "mnemed",
-            "--store",
-            "/tmp/mneme-store",
-            "--unix-socket",
-            "/tmp/mnemed.sock",
-        ])
-        .expect("parse args");
-        let config = server_config_from_args(&args).expect("server config");
+        let args = expect_cli_args(
+            &[
+                "mnemed",
+                "--store",
+                "/tmp/mneme-store",
+                "--unix-socket",
+                "/tmp/mnemed.sock",
+            ],
+            "Unix socket CLI config",
+        );
+        let config = expect_server_config(&args, "Unix socket CLI config");
 
         assert_eq!(
             config.unix_socket.as_deref(),
@@ -117,18 +150,22 @@ mod tests {
 
     #[tokio::test]
     async fn shutdown_signal_success_is_ok() {
-        wait_for_shutdown_signal(async { Ok(()) })
-            .await
-            .expect("successful shutdown signal");
+        expect_shutdown_signal_success(
+            wait_for_shutdown_signal(async { Ok(()) }),
+            "successful shutdown signal",
+        )
+        .await;
     }
 
     #[tokio::test]
     async fn shutdown_signal_error_is_reported() {
-        let err = wait_for_shutdown_signal(async {
-            Err(std::io::Error::other("signal listener unavailable"))
-        })
-        .await
-        .expect_err("signal listener errors must be surfaced");
+        let err = expect_shutdown_signal_error(
+            wait_for_shutdown_signal(async {
+                Err(std::io::Error::other("signal listener unavailable"))
+            }),
+            "failed shutdown signal",
+        )
+        .await;
 
         assert!(
             err.contains("failed to listen for shutdown signal"),

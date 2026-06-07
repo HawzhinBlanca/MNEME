@@ -11,8 +11,11 @@ use mneme_cap::{Capability, agent_cap};
 use mneme_core::{Draft, LogicalKey, MemoryKind, MnemeError, SyncMessage, hash_obj};
 use mneme_crdt::{decode_sync_message, encode_sync_message};
 use mneme_crypto::KeyPair;
+use mneme_store::SyncSnapshot;
 use mnemed::state::RateLimiter;
 use mnemed::{AppState, RunningServer, ServerConfig, cap_to_b64, start_with_state};
+use std::future::Future;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -22,14 +25,197 @@ use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::Request;
 
 type ClientWebSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 type WebSocketMessageResult = Result<Message, WebSocketError>;
+type TimedV11BinaryRead = Result<Option<WebSocketMessageResult>, tokio::time::error::Elapsed>;
+type PullCanonicalIoFailureCheck = Result<String, String>;
+type V11WsRequest = Request<()>;
+
+enum V11BinaryFrameOutcome {
+    Binary(Vec<u8>),
+    KeepAlive,
+    Unexpected(Message),
+    ReadFailed(WebSocketError),
+    Closed,
+    TimedOut,
+}
 
 const V11_BINARY_FRAME_TIMEOUT: Duration = Duration::from_secs(1);
 const V11_PULL_CANONICAL_STALLED_PEER_TIMEOUT: Duration = Duration::from_millis(50);
 const V11_PULL_CANONICAL_TEST_TIMEOUT: Duration = Duration::from_secs(1);
+const WS_SYNC_TEST_RATE_LIMIT_PER_MINUTE: u32 = 1000;
+
+fn assert_membership_proof<T, E: std::fmt::Debug>(proof: Result<T, E>, context: &str) {
+    proof.unwrap_or_else(|err| panic!("{context}: membership proof failed: {err:?}"));
+}
+
+fn expect_store_lock<T, E: std::fmt::Debug>(lock: Result<T, E>, context: &str) -> T {
+    lock.unwrap_or_else(|err| panic!("{context}: store lock failed: {err:?}"))
+}
+
+fn expect_current_root<T, E: std::fmt::Debug>(root: Result<T, E>, context: &str) -> T {
+    root.unwrap_or_else(|err| panic!("{context}: current root failed: {err:?}"))
+}
+
+fn test_loopback_addr() -> std::net::SocketAddr {
+    std::net::SocketAddr::from(([127, 0, 0, 1], 0))
+}
+
+fn expect_v11_agent_cap(operator: &KeyPair, context: &str) -> Capability {
+    agent_cap(operator, operator.public_key_bytes())
+        .unwrap_or_else(|err| panic!("{context}: v11 capability creation failed: {err:?}"))
+}
+
+fn expect_v11_cap_b64(cap: &Capability, context: &str) -> String {
+    cap_to_b64(cap)
+        .unwrap_or_else(|err| panic!("{context}: v11 capability encoding failed: {err:?}"))
+}
+
+fn expect_v11_tempdir(context: &str) -> TempDir {
+    tempfile::tempdir().unwrap_or_else(|err| panic!("{context}: v11 tempdir failed: {err}"))
+}
+
+fn expect_v11_store(dir: &Path, operator: &KeyPair, context: &str) -> mneme_store::Store {
+    mneme_store::Store::create(dir, operator.clone())
+        .unwrap_or_else(|err| panic!("{context}: v11 store create failed: {err:?}"))
+}
+
+fn build_v11_store(
+    operator: &KeyPair,
+    cap: &Capability,
+    label: &str,
+) -> (mneme_store::Store, TempDir) {
+    let tempdir_context = format!("{label} tempdir");
+    let store_context = format!("{label} store");
+    let dir = expect_v11_tempdir(&tempdir_context);
+    let mut store = expect_v11_store(dir.path(), operator, &store_context);
+    store.trust_mut().authorized_writers.push(cap.subject);
+
+    (store, dir)
+}
+
+fn expect_v11_remember<T, E: std::fmt::Debug>(remembered: Result<T, E>, context: &str) -> T {
+    remembered.unwrap_or_else(|err| panic!("{context}: v11 remember failed: {err:?}"))
+}
+
+async fn start_v11_server(state: AppState, context: &str) -> RunningServer {
+    let config = ServerConfig {
+        http_addr: test_loopback_addr(),
+        grpc_addr: None,
+        unix_socket: None,
+        rate_limit_per_minute: WS_SYNC_TEST_RATE_LIMIT_PER_MINUTE,
+    };
+    start_with_state(config, state)
+        .await
+        .unwrap_or_else(|err| panic!("{context}: v11 server start failed: {err:?}"))
+}
+
+async fn expect_v11_fake_peer_listener(context: &str) -> TcpListener {
+    TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap_or_else(|err| panic!("{context}: v11 fake peer bind failed: {err}"))
+}
+
+fn expect_v11_fake_peer_url(listener: &TcpListener, context: &str) -> String {
+    let addr = listener
+        .local_addr()
+        .unwrap_or_else(|err| panic!("{context}: v11 fake peer local address failed: {err}"));
+
+    format!("ws://{addr}")
+}
+
+fn expect_v11_snapshot_leaf(
+    snapshot: &SyncSnapshot,
+    object_id: [u8; 32],
+    context: &str,
+) -> ([u8; 32], [u8; 32]) {
+    snapshot
+        .leaves
+        .iter()
+        .find(|(_, id)| *id == object_id)
+        .copied()
+        .unwrap_or_else(|| panic!("{context}: v11 snapshot leaf missing for {object_id:?}"))
+}
+
+fn expect_v11_snapshot_logical_key(
+    snapshot: &SyncSnapshot,
+    object_id: [u8; 32],
+    context: &str,
+) -> (String, String) {
+    snapshot
+        .object_keys
+        .iter()
+        .find(|(id, _, _)| *id == object_id)
+        .map(|(_, namespace, name)| (namespace.clone(), name.clone()))
+        .unwrap_or_else(|| panic!("{context}: v11 snapshot logical key missing for {object_id:?}"))
+}
+
+fn expect_v11_snapshot_object_bytes(
+    snapshot: &SyncSnapshot,
+    object_id: [u8; 32],
+    context: &str,
+) -> Vec<u8> {
+    snapshot
+        .objects
+        .iter()
+        .find(|bytes| hash_obj(bytes) == object_id)
+        .cloned()
+        .unwrap_or_else(|| panic!("{context}: v11 snapshot object bytes missing for {object_id:?}"))
+}
+
+fn expect_v11_have_objects_frame(
+    frame: Result<Vec<u8>, mnemed::sync::SyncFrameError>,
+    context: &str,
+) -> Vec<u8> {
+    frame.unwrap_or_else(|err| panic!("{context}: v11 HaveObjects frame encode failed: {err}"))
+}
+
+fn expect_v11_ws_request(ws_url: String, context: &str) -> V11WsRequest {
+    ws_url
+        .into_client_request()
+        .unwrap_or_else(|err| panic!("{context}: v11 WebSocket request build failed: {err}"))
+}
+
+fn expect_v11_ws_header_value(header: &str, context: &str) -> HeaderValue {
+    HeaderValue::from_str(header)
+        .unwrap_or_else(|err| panic!("{context}: v11 WebSocket header build failed: {err}"))
+}
+
+async fn connect_v11_ws(
+    peer: &RunningServer,
+    cap: &Capability,
+    context: &str,
+) -> Result<ClientWebSocket, String> {
+    connect_async(authed_ws_request(peer, cap, context))
+        .await
+        .map(|(ws, _)| ws)
+        .map_err(|err| format!("{context}: v11 WebSocket connect failed: {err}"))
+}
+
+async fn expect_v11_pull_success<T, E, F>(pull: F, context: &str) -> T
+where
+    E: std::fmt::Debug,
+    F: Future<Output = Result<T, E>>,
+{
+    pull.await
+        .unwrap_or_else(|err| panic!("{context}: v11 canonical pull failed: {err:?}"))
+}
+
+async fn expect_v11_pull_failure<T, E, F>(pull: F, context: &str) -> E
+where
+    T: std::fmt::Debug,
+    F: Future<Output = Result<T, E>>,
+{
+    match pull.await {
+        Ok(value) => {
+            panic!("{context}: expected v11 canonical pull failure, got success: {value:?}");
+        }
+        Err(err) => err,
+    }
+}
 
 async fn recv_client_binary_frame(
     ws: &mut ClientWebSocket,
@@ -43,23 +229,51 @@ where
     S: Stream<Item = WebSocketMessageResult> + Unpin,
 {
     loop {
-        match tokio::time::timeout(V11_BINARY_FRAME_TIMEOUT, ws.next()).await {
-            Ok(Some(Ok(Message::Binary(data)))) => return Ok(data.to_vec()),
-            Ok(Some(Ok(Message::Ping(_)))) | Ok(Some(Ok(Message::Pong(_)))) => continue,
-            Ok(Some(Ok(other))) => {
-                return Err(format!("{context} expected binary frame, got {other:?}"));
+        match recv_v11_binary_message_with_timeout(ws).await {
+            V11BinaryFrameOutcome::Binary(data) => return Ok(data),
+            V11BinaryFrameOutcome::KeepAlive => continue,
+            V11BinaryFrameOutcome::Unexpected(frame) => {
+                return Err(format!("{context} expected binary frame, got {frame:?}"));
             }
-            Ok(Some(Err(err))) => return Err(format!("{context} websocket read failed: {err}")),
-            Ok(None) => return Err(format!("{context} websocket closed before binary frame")),
-            Err(_) => return Err(format!("{context} timed out waiting for binary frame")),
+            V11BinaryFrameOutcome::ReadFailed(err) => {
+                return Err(format!("{context} websocket read failed: {err}"));
+            }
+            V11BinaryFrameOutcome::Closed => {
+                return Err(format!("{context} websocket closed before binary frame"));
+            }
+            V11BinaryFrameOutcome::TimedOut => {
+                return Err(format!("{context} timed out waiting for binary frame"));
+            }
         }
     }
 }
 
+fn classify_v11_binary_read(read_result: TimedV11BinaryRead) -> V11BinaryFrameOutcome {
+    match read_result {
+        Ok(Some(Ok(Message::Binary(data)))) => V11BinaryFrameOutcome::Binary(data.to_vec()),
+        Ok(Some(Ok(Message::Ping(_)))) | Ok(Some(Ok(Message::Pong(_)))) => {
+            V11BinaryFrameOutcome::KeepAlive
+        }
+        Ok(Some(Ok(frame))) => V11BinaryFrameOutcome::Unexpected(frame),
+        Ok(Some(Err(err))) => V11BinaryFrameOutcome::ReadFailed(err),
+        Ok(None) => V11BinaryFrameOutcome::Closed,
+        Err(_) => V11BinaryFrameOutcome::TimedOut,
+    }
+}
+
+async fn recv_v11_binary_message_with_timeout<S>(ws: &mut S) -> V11BinaryFrameOutcome
+where
+    S: Stream<Item = WebSocketMessageResult> + Unpin,
+{
+    classify_v11_binary_read(tokio::time::timeout(V11_BINARY_FRAME_TIMEOUT, ws.next()).await)
+}
+
 fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capability) {
-    let mut store = state.store.lock().expect("lock");
-    store
-        .remember(
+    let remember_context = format!("remembering {ns}/{name}");
+    let lock_context = format!("store lock while remembering {ns}/{name}");
+    let mut store = expect_store_lock(state.store.lock(), &lock_context);
+    expect_v11_remember(
+        store.remember(
             Draft {
                 namespace: ns.into(),
                 logical_name: name.into(),
@@ -72,8 +286,9 @@ fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capabilit
                 valid_time_ms: None,
             },
             cap,
-        )
-        .expect("remember");
+        ),
+        &remember_context,
+    );
 }
 
 fn remember_in_store(
@@ -83,8 +298,9 @@ fn remember_in_store(
     body: &[u8],
     cap: &Capability,
 ) -> [u8; 32] {
-    let (id, _) = store
-        .remember(
+    let remember_context = format!("remembering {ns}/{name} in store");
+    let (id, _) = expect_v11_remember(
+        store.remember(
             Draft {
                 namespace: ns.into(),
                 logical_name: name.into(),
@@ -97,36 +313,34 @@ fn remember_in_store(
                 valid_time_ms: None,
             },
             cap,
-        )
-        .expect("remember in store");
+        ),
+        &remember_context,
+    );
     *id.as_bytes()
 }
 
-fn build_peer(operator: &KeyPair, cap: &Capability) -> (AppState, TempDir) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut store = mneme_store::Store::create(dir.path(), operator.clone()).expect("create");
-    store.trust_mut().authorized_writers.push(cap.subject);
+fn build_peer(operator: &KeyPair, cap: &Capability, label: &str) -> (AppState, TempDir) {
+    let (store, dir) = build_v11_store(operator, cap, label);
     let state = AppState {
         store: Arc::new(Mutex::new(store)),
         operator: Arc::new(operator.clone()),
-        rate_limit: Arc::new(Mutex::new(RateLimiter::new(1000))),
+        rate_limit: Arc::new(Mutex::new(RateLimiter::new(
+            WS_SYNC_TEST_RATE_LIMIT_PER_MINUTE,
+        ))),
     };
     (state, dir)
-}
-
-async fn serve(state: AppState) -> RunningServer {
-    let config = ServerConfig {
-        http_addr: "127.0.0.1:0".parse().unwrap(),
-        grpc_addr: None,
-        unix_socket: None,
-        rate_limit_per_minute: 1000,
-    };
-    start_with_state(config, state).await.expect("start")
 }
 
 type FakePeerResult = Result<(), String>;
 type FakePeerWantedIds = Result<Vec<[u8; 32]>, String>;
 type FakePeerWebSocket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+type FakePeerJoin<T> = Result<Result<T, String>, tokio::task::JoinError>;
+type TimedFakePeerJoin<T> = Result<FakePeerJoin<T>, tokio::time::error::Elapsed>;
+type FakePeerTcpAccept = Result<(tokio::net::TcpStream, std::net::SocketAddr), std::io::Error>;
+type TimedFakePeerTcpAccept = Result<FakePeerTcpAccept, tokio::time::error::Elapsed>;
+type FakePeerWebSocketAccept = Result<FakePeerWebSocket, WebSocketError>;
+type TimedFakePeerWebSocketAccept = Result<FakePeerWebSocketAccept, tokio::time::error::Elapsed>;
+type TimedFakePeerCloseRead = Result<Option<WebSocketMessageResult>, tokio::time::error::Elapsed>;
 
 const FAKE_PEER_ACCEPT_TIMEOUT: Duration = Duration::from_secs(1);
 const FAKE_PEER_JOIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -138,15 +352,68 @@ enum OversizedPeerSendOutcome {
     Closed,
 }
 
+enum V11FakePeerCloseReadOutcome {
+    CloseFrame,
+    ReadFailed,
+    Eof,
+    ByeFrame(Message),
+    Unexpected(Message),
+    TimedOut,
+}
+
+enum V11FakePeerTcpAcceptOutcome {
+    Accepted(tokio::net::TcpStream),
+    Failed(std::io::Error),
+    TimedOut(tokio::time::error::Elapsed),
+}
+
+enum V11FakePeerWebSocketAcceptOutcome {
+    Accepted(FakePeerWebSocket),
+    Failed(WebSocketError),
+    TimedOut(tokio::time::error::Elapsed),
+}
+
 async fn join_fake_peer_result<T>(
     handle: tokio::task::JoinHandle<Result<T, String>>,
     context: &str,
 ) -> T {
-    tokio::time::timeout(FAKE_PEER_JOIN_TIMEOUT, handle)
-        .await
-        .unwrap_or_else(|_| panic!("{context} timed out waiting for fake peer task"))
-        .unwrap_or_else(|err| panic!("{context} task panicked: {err}"))
-        .unwrap_or_else(|err| panic!("{context} task failed: {err}"))
+    let joined = observe_fake_peer_join(handle, context).await;
+    let task_result = expect_joined_fake_peer_task(joined, context);
+
+    expect_successful_fake_peer_result(task_result, context)
+}
+
+async fn observe_fake_peer_join<T>(
+    handle: tokio::task::JoinHandle<Result<T, String>>,
+    context: &str,
+) -> FakePeerJoin<T> {
+    let observed = tokio::time::timeout(FAKE_PEER_JOIN_TIMEOUT, handle).await;
+
+    expect_observed_fake_peer_join(observed, context)
+}
+
+fn expect_observed_fake_peer_join<T>(
+    observed: TimedFakePeerJoin<T>,
+    context: &str,
+) -> FakePeerJoin<T> {
+    match observed {
+        Ok(joined) => joined,
+        Err(_) => panic!("{context} timed out waiting for fake peer task"),
+    }
+}
+
+fn expect_joined_fake_peer_task<T>(joined: FakePeerJoin<T>, context: &str) -> Result<T, String> {
+    match joined {
+        Ok(task_result) => task_result,
+        Err(err) => panic!("{context} task panicked: {err}"),
+    }
+}
+
+fn expect_successful_fake_peer_result<T>(task_result: Result<T, String>, context: &str) -> T {
+    match task_result {
+        Ok(value) => value,
+        Err(err) => panic!("{context} task failed: {err}"),
+    }
 }
 
 async fn expect_fake_peer(handle: tokio::task::JoinHandle<FakePeerResult>, context: &str) {
@@ -164,17 +431,64 @@ async fn accept_fake_websocket_peer(
     listener: TcpListener,
     context: &str,
 ) -> Result<FakePeerWebSocket, String> {
-    let (stream, _) = tokio::time::timeout(FAKE_PEER_ACCEPT_TIMEOUT, listener.accept())
-        .await
-        .map_err(|_| format!("{context} timed out waiting for client connection"))?
-        .map_err(|err| format!("{context} accept failed: {err}"))?;
-    tokio::time::timeout(
-        FAKE_PEER_ACCEPT_TIMEOUT,
-        tokio_tungstenite::accept_async(stream),
+    let stream = match accept_fake_peer_tcp_stream_with_timeout(listener).await {
+        V11FakePeerTcpAcceptOutcome::Accepted(stream) => stream,
+        V11FakePeerTcpAcceptOutcome::Failed(err) => {
+            return Err(format!("{context} accept failed: {err}"));
+        }
+        V11FakePeerTcpAcceptOutcome::TimedOut(_) => {
+            return Err(format!("{context} timed out waiting for client connection"));
+        }
+    };
+    match accept_fake_peer_websocket_with_timeout(stream).await {
+        V11FakePeerWebSocketAcceptOutcome::Accepted(ws) => Ok(ws),
+        V11FakePeerWebSocketAcceptOutcome::Failed(err) => {
+            Err(format!("{context} websocket accept failed: {err}"))
+        }
+        V11FakePeerWebSocketAcceptOutcome::TimedOut(_) => Err(format!(
+            "{context} timed out waiting for websocket handshake"
+        )),
+    }
+}
+
+async fn accept_fake_peer_tcp_stream_with_timeout(
+    listener: TcpListener,
+) -> V11FakePeerTcpAcceptOutcome {
+    classify_v11_fake_peer_tcp_accept(
+        tokio::time::timeout(FAKE_PEER_ACCEPT_TIMEOUT, listener.accept()).await,
     )
-    .await
-    .map_err(|_| format!("{context} timed out waiting for websocket handshake"))?
-    .map_err(|err| format!("{context} websocket accept failed: {err}"))
+}
+
+fn classify_v11_fake_peer_tcp_accept(
+    accept_result: TimedFakePeerTcpAccept,
+) -> V11FakePeerTcpAcceptOutcome {
+    match accept_result {
+        Ok(Ok((stream, _))) => V11FakePeerTcpAcceptOutcome::Accepted(stream),
+        Ok(Err(err)) => V11FakePeerTcpAcceptOutcome::Failed(err),
+        Err(err) => V11FakePeerTcpAcceptOutcome::TimedOut(err),
+    }
+}
+
+async fn accept_fake_peer_websocket_with_timeout(
+    stream: tokio::net::TcpStream,
+) -> V11FakePeerWebSocketAcceptOutcome {
+    classify_v11_fake_peer_websocket_accept(
+        tokio::time::timeout(
+            FAKE_PEER_ACCEPT_TIMEOUT,
+            tokio_tungstenite::accept_async(stream),
+        )
+        .await,
+    )
+}
+
+fn classify_v11_fake_peer_websocket_accept(
+    accept_result: TimedFakePeerWebSocketAccept,
+) -> V11FakePeerWebSocketAcceptOutcome {
+    match accept_result {
+        Ok(Ok(ws)) => V11FakePeerWebSocketAcceptOutcome::Accepted(ws),
+        Ok(Err(err)) => V11FakePeerWebSocketAcceptOutcome::Failed(err),
+        Err(err) => V11FakePeerWebSocketAcceptOutcome::TimedOut(err),
+    }
 }
 
 async fn send_oversized_fake_peer_frame(
@@ -192,11 +506,17 @@ async fn send_oversized_fake_peer_frame(
     }
 }
 
+async fn recv_fake_peer_close_message_with_timeout(
+    ws: &mut FakePeerWebSocket,
+) -> V11FakePeerCloseReadOutcome {
+    classify_v11_fake_peer_close_read(
+        tokio::time::timeout(FAKE_PEER_CLOSE_TIMEOUT, ws.next()).await,
+    )
+}
+
 async fn stalled_websocket_peer() -> (String, tokio::task::JoinHandle<FakePeerResult>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind stalled peer");
-    let url = format!("ws://{}", listener.local_addr().expect("local addr"));
+    let listener = expect_v11_fake_peer_listener("stalled diff peer listener").await;
+    let url = expect_v11_fake_peer_url(&listener, "stalled diff peer listener");
     let handle = tokio::spawn(async move {
         let mut ws = accept_fake_websocket_peer(listener, "stalled diff peer").await?;
         let _diff_req = recv_recorded_binary_result(&mut ws, "stalled diff peer").await?;
@@ -206,10 +526,8 @@ async fn stalled_websocket_peer() -> (String, tokio::task::JoinHandle<FakePeerRe
 }
 
 async fn oversized_diff_response_peer() -> (String, tokio::task::JoinHandle<FakePeerResult>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind oversized peer");
-    let url = format!("ws://{}", listener.local_addr().expect("local addr"));
+    let listener = expect_v11_fake_peer_listener("oversized diff peer listener").await;
+    let url = expect_v11_fake_peer_url(&listener, "oversized diff peer listener");
     let handle = tokio::spawn(async move {
         let mut ws = accept_fake_websocket_peer(listener, "oversized diff peer").await?;
         let _diff_req = recv_recorded_binary_result(&mut ws, "oversized diff peer").await?;
@@ -227,10 +545,8 @@ async fn oversized_diff_response_peer() -> (String, tokio::task::JoinHandle<Fake
 async fn oversized_have_objects_response_peer(
     object_id: [u8; 32],
 ) -> (String, tokio::task::JoinHandle<FakePeerWantedIds>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind oversized have-objects peer");
-    let url = format!("ws://{}", listener.local_addr().expect("local addr"));
+    let listener = expect_v11_fake_peer_listener("oversized have-objects peer listener").await;
+    let url = expect_v11_fake_peer_url(&listener, "oversized have-objects peer listener");
     let handle = tokio::spawn(async move {
         let mut ws = accept_fake_websocket_peer(listener, "oversized have-objects peer").await?;
 
@@ -286,10 +602,8 @@ async fn recording_delta_peer(
     summaries: Vec<[u8; 32]>,
     have_frame: Vec<u8>,
 ) -> (String, tokio::task::JoinHandle<FakePeerWantedIds>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind recording peer");
-    let url = format!("ws://{}", listener.local_addr().expect("local addr"));
+    let listener = expect_v11_fake_peer_listener("recording peer listener").await;
+    let url = expect_v11_fake_peer_url(&listener, "recording peer listener");
     let handle = tokio::spawn(async move {
         let mut ws = accept_fake_websocket_peer(listener, "recording peer").await?;
 
@@ -336,21 +650,41 @@ async fn recording_delta_peer(
 async fn expect_fake_peer_close(ws: &mut FakePeerWebSocket, context: &str) -> FakePeerResult {
     let mut saw_bye = false;
     loop {
-        match tokio::time::timeout(FAKE_PEER_CLOSE_TIMEOUT, ws.next()).await {
-            Ok(Some(Ok(Message::Close(_)))) | Ok(Some(Err(_))) | Ok(None) => return Ok(()),
-            Ok(Some(Ok(Message::Binary(data)))) if !saw_bye && data.as_ref() == [0x07] => {
+        match recv_fake_peer_close_message_with_timeout(ws).await {
+            V11FakePeerCloseReadOutcome::CloseFrame
+            | V11FakePeerCloseReadOutcome::ReadFailed
+            | V11FakePeerCloseReadOutcome::Eof => return Ok(()),
+            V11FakePeerCloseReadOutcome::ByeFrame(_) if !saw_bye => {
                 saw_bye = true;
             }
-            Ok(Some(Ok(other))) => {
+            V11FakePeerCloseReadOutcome::ByeFrame(frame)
+            | V11FakePeerCloseReadOutcome::Unexpected(frame) => {
                 return Err(format!(
-                    "{context} received unexpected message before close: {other:?}"
+                    "{context} received unexpected message before close: {frame:?}"
                 ));
             }
-            Err(_) if saw_bye => {
+            V11FakePeerCloseReadOutcome::TimedOut if saw_bye => {
                 return Err(format!("{context} sent Bye but did not close or EOF"));
             }
-            Err(_) => return Err(format!("{context} did not observe client close or EOF")),
+            V11FakePeerCloseReadOutcome::TimedOut => {
+                return Err(format!("{context} did not observe client close or EOF"));
+            }
         }
+    }
+}
+
+fn classify_v11_fake_peer_close_read(
+    read_result: TimedFakePeerCloseRead,
+) -> V11FakePeerCloseReadOutcome {
+    match read_result {
+        Ok(Some(Ok(Message::Close(_)))) => V11FakePeerCloseReadOutcome::CloseFrame,
+        Ok(Some(Err(_))) => V11FakePeerCloseReadOutcome::ReadFailed,
+        Ok(None) => V11FakePeerCloseReadOutcome::Eof,
+        Ok(Some(Ok(Message::Binary(data)))) if data.as_ref() == [0x07] => {
+            V11FakePeerCloseReadOutcome::ByeFrame(Message::Binary(data))
+        }
+        Ok(Some(Ok(frame))) => V11FakePeerCloseReadOutcome::Unexpected(frame),
+        Err(_) => V11FakePeerCloseReadOutcome::TimedOut,
     }
 }
 
@@ -363,74 +697,100 @@ async fn recv_recorded_binary_result(
 
 fn have_objects_frame_for(store: &mneme_store::Store, object_id: [u8; 32]) -> Vec<u8> {
     let snapshot = store.export_sync_snapshot();
-    let (key_hash, _) = snapshot
-        .leaves
-        .iter()
-        .find(|(_, id)| *id == object_id)
-        .copied()
-        .expect("snapshot leaf for object");
-    let (_, namespace, name) = snapshot
-        .object_keys
-        .iter()
-        .find(|(id, _, _)| *id == object_id)
-        .cloned()
-        .expect("snapshot logical key for object");
-    let object = snapshot
-        .objects
-        .iter()
-        .find(|bytes| hash_obj(bytes) == object_id)
-        .expect("snapshot object bytes for object");
+    let fixture_context = "canonical HaveObjects fixture";
+    let (key_hash, _) = expect_v11_snapshot_leaf(&snapshot, object_id, fixture_context);
+    let (namespace, name) = expect_v11_snapshot_logical_key(&snapshot, object_id, fixture_context);
+    let object = expect_v11_snapshot_object_bytes(&snapshot, object_id, fixture_context);
 
-    mnemed::sync::encode_have_objects_canonical_for_test(
-        key_hash, object_id, &namespace, &name, object,
+    expect_v11_have_objects_frame(
+        mnemed::sync::encode_have_objects_canonical_for_test(
+            key_hash, object_id, &namespace, &name, &object,
+        ),
+        fixture_context,
     )
-    .expect("encode have objects frame")
 }
 
-fn authed_ws_request(
-    peer: &RunningServer,
-    cap: &Capability,
-) -> tokio_tungstenite::tungstenite::http::Request<()> {
+fn authed_ws_request(peer: &RunningServer, cap: &Capability, context: &str) -> V11WsRequest {
     let url = format!("ws://{}/v1/sync", peer.http_addr);
-    let mut req = url.into_client_request().expect("ws request");
-    let auth = format!("Bearer {}", cap_to_b64(cap).expect("cap b64"));
-    req.headers_mut().insert(
-        "Authorization",
-        HeaderValue::from_str(&auth).expect("auth header"),
-    );
+    let mut req = expect_v11_ws_request(url, context);
+    let auth = format!("Bearer {}", expect_v11_cap_b64(cap, context));
+    req.headers_mut()
+        .insert("Authorization", expect_v11_ws_header_value(&auth, context));
     req
+}
+
+fn assert_pull_canonical_frame_limit_io_failure(
+    err: MnemeError,
+    expected_path: &str,
+    context: &str,
+) {
+    let kind = assert_pull_canonical_io_failure_check_passed(expect_pull_canonical_io_failure(
+        err,
+        expected_path,
+        context,
+    ));
+    assert!(
+        !kind.contains("timed out"),
+        "{context} should be rejected by frame limit, not timeout: {kind}"
+    );
+}
+
+fn assert_pull_canonical_timeout_io_failure(err: MnemeError, expected_path: &str, context: &str) {
+    let kind = assert_pull_canonical_io_failure_check_passed(expect_pull_canonical_io_failure(
+        err,
+        expected_path,
+        context,
+    ));
+    assert!(
+        kind.contains("timed out"),
+        "{context} should fail with sync client timeout I/O error, got {kind}"
+    );
+}
+
+fn expect_pull_canonical_io_failure(
+    err: MnemeError,
+    expected_path: &str,
+    context: &str,
+) -> PullCanonicalIoFailureCheck {
+    match err {
+        MnemeError::IoFailed { path, kind } if path == expected_path => Ok(kind),
+        MnemeError::IoFailed { path, kind } => Err(format!(
+            "{context}: expected sync client I/O failure path {expected_path}, got {path}: {kind}"
+        )),
+        other => Err(format!(
+            "{context}: expected sync client I/O failure, got {other:?}"
+        )),
+    }
+}
+
+fn assert_pull_canonical_io_failure_check_passed(failure: PullCanonicalIoFailureCheck) -> String {
+    match failure {
+        Ok(kind) => kind,
+        Err(message) => panic!("{message}"),
+    }
 }
 
 #[tokio::test]
 async fn pull_canonical_rejects_oversized_peer_have_objects_response() {
     let operator = KeyPair::from_seed([0x34; 32]);
-    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut store = mneme_store::Store::create(dir.path(), operator).expect("create");
-    store.trust_mut().authorized_writers.push(cap.subject);
-    let cap_b64 = cap_to_b64(&cap).expect("cap b64");
+    let cap = expect_v11_agent_cap(&operator, "oversized HaveObjects capability");
+    let (mut store, _dir) = build_v11_store(&operator, &cap, "oversized HaveObjects local");
+    let cap_b64 = expect_v11_cap_b64(&cap, "oversized HaveObjects capability");
     let missing_id = [0x34; 32];
     let (url, peer) = oversized_have_objects_response_peer(missing_id).await;
 
-    let err = mnemed::sync_client::pull_canonical_with_cap_and_timeout(
-        &mut store,
-        &url,
-        &cap_b64,
-        V11_PULL_CANONICAL_TEST_TIMEOUT,
+    let err = expect_v11_pull_failure(
+        mnemed::sync_client::pull_canonical_with_cap_and_timeout(
+            &mut store,
+            &url,
+            &cap_b64,
+            V11_PULL_CANONICAL_TEST_TIMEOUT,
+        ),
+        "oversized peer HaveObjects response",
     )
-    .await
-    .expect_err("oversized peer HaveObjects response must fail closed before decode");
+    .await;
 
-    match err {
-        MnemeError::IoFailed { path, kind } => {
-            assert_eq!(path, url);
-            assert!(
-                !kind.contains("timed out"),
-                "oversized peer HaveObjects response should be rejected by frame limit, not timeout: {kind}"
-            );
-        }
-        other => panic!("expected sync client I/O failure, got {other:?}"),
-    }
+    assert_pull_canonical_frame_limit_io_failure(err, &url, "oversized peer HaveObjects response");
 
     let wanted = expect_fake_peer_wanted_ids(peer, "oversized have-objects peer").await;
     assert_eq!(
@@ -443,32 +803,23 @@ async fn pull_canonical_rejects_oversized_peer_have_objects_response() {
 #[tokio::test]
 async fn pull_canonical_rejects_oversized_peer_diff_response() {
     let operator = KeyPair::from_seed([0x33; 32]);
-    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut store = mneme_store::Store::create(dir.path(), operator).expect("create");
-    store.trust_mut().authorized_writers.push(cap.subject);
-    let cap_b64 = cap_to_b64(&cap).expect("cap b64");
+    let cap = expect_v11_agent_cap(&operator, "oversized DiffResp capability");
+    let (mut store, _dir) = build_v11_store(&operator, &cap, "oversized DiffResp local");
+    let cap_b64 = expect_v11_cap_b64(&cap, "oversized DiffResp capability");
     let (url, peer) = oversized_diff_response_peer().await;
 
-    let err = mnemed::sync_client::pull_canonical_with_cap_and_timeout(
-        &mut store,
-        &url,
-        &cap_b64,
-        V11_PULL_CANONICAL_TEST_TIMEOUT,
+    let err = expect_v11_pull_failure(
+        mnemed::sync_client::pull_canonical_with_cap_and_timeout(
+            &mut store,
+            &url,
+            &cap_b64,
+            V11_PULL_CANONICAL_TEST_TIMEOUT,
+        ),
+        "oversized peer diff response",
     )
-    .await
-    .expect_err("oversized peer diff response must fail closed before decode");
+    .await;
 
-    match err {
-        MnemeError::IoFailed { path, kind } => {
-            assert_eq!(path, url);
-            assert!(
-                !kind.contains("timed out"),
-                "oversized peer response should be rejected by frame limit, not timeout: {kind}"
-            );
-        }
-        other => panic!("expected sync client I/O failure, got {other:?}"),
-    }
+    assert_pull_canonical_frame_limit_io_failure(err, &url, "oversized peer response");
 
     expect_fake_peer(peer, "oversized diff peer").await;
 }
@@ -476,32 +827,23 @@ async fn pull_canonical_rejects_oversized_peer_diff_response() {
 #[tokio::test]
 async fn pull_canonical_times_out_when_peer_stalls_diff_response() {
     let operator = KeyPair::from_seed([0x31; 32]);
-    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
-    let dir = tempfile::tempdir().expect("tempdir");
-    let mut store = mneme_store::Store::create(dir.path(), operator).expect("create");
-    store.trust_mut().authorized_writers.push(cap.subject);
-    let cap_b64 = cap_to_b64(&cap).expect("cap b64");
+    let cap = expect_v11_agent_cap(&operator, "stalled peer capability");
+    let (mut store, _dir) = build_v11_store(&operator, &cap, "stalled peer local");
+    let cap_b64 = expect_v11_cap_b64(&cap, "stalled peer capability");
     let (url, peer) = stalled_websocket_peer().await;
 
-    let err = mnemed::sync_client::pull_canonical_with_cap_and_timeout(
-        &mut store,
-        &url,
-        &cap_b64,
-        V11_PULL_CANONICAL_STALLED_PEER_TIMEOUT,
+    let err = expect_v11_pull_failure(
+        mnemed::sync_client::pull_canonical_with_cap_and_timeout(
+            &mut store,
+            &url,
+            &cap_b64,
+            V11_PULL_CANONICAL_STALLED_PEER_TIMEOUT,
+        ),
+        "stalled peer",
     )
-    .await
-    .expect_err("stalled peer must trip the sync client deadline");
+    .await;
 
-    match err {
-        MnemeError::IoFailed { path, kind } => {
-            assert_eq!(path, url);
-            assert!(
-                kind.contains("timed out"),
-                "unexpected sync client I/O error: {kind}"
-            );
-        }
-        other => panic!("expected sync client timeout I/O error, got {other:?}"),
-    }
+    assert_pull_canonical_timeout_io_failure(err, &url, "stalled peer");
 
     expect_fake_peer(peer, "stalled peer").await;
 }
@@ -509,13 +851,10 @@ async fn pull_canonical_times_out_when_peer_stalls_diff_response() {
 #[tokio::test]
 async fn pull_canonical_requests_only_missing_object_ids() {
     let operator = KeyPair::from_seed([0x32; 32]);
-    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
-    let cap_b64 = cap_to_b64(&cap).expect("cap b64");
+    let cap = expect_v11_agent_cap(&operator, "recording peer capability");
+    let cap_b64 = expect_v11_cap_b64(&cap, "recording peer capability");
 
-    let local_dir = tempfile::tempdir().expect("local tempdir");
-    let mut local_store =
-        mneme_store::Store::create(local_dir.path(), operator.clone()).expect("create local");
-    local_store.trust_mut().authorized_writers.push(cap.subject);
+    let (mut local_store, _local_dir) = build_v11_store(&operator, &cap, "recording peer local");
     let local_id = remember_in_store(
         &mut local_store,
         "peer",
@@ -524,23 +863,22 @@ async fn pull_canonical_requests_only_missing_object_ids() {
         &cap,
     );
 
-    let peer_dir = tempfile::tempdir().expect("peer tempdir");
-    let mut peer_store =
-        mneme_store::Store::create(peer_dir.path(), operator.clone()).expect("create peer");
-    peer_store.trust_mut().authorized_writers.push(cap.subject);
+    let (mut peer_store, _peer_dir) = build_v11_store(&operator, &cap, "recording peer remote");
     let missing_id =
         remember_in_store(&mut peer_store, "peer", "missing", b"missing-payload", &cap);
     let have_frame = have_objects_frame_for(&peer_store, missing_id);
     let (url, peer) = recording_delta_peer(vec![local_id, missing_id], have_frame).await;
 
-    let fetched = mnemed::sync_client::pull_canonical_with_cap_and_timeout(
-        &mut local_store,
-        &url,
-        &cap_b64,
-        V11_PULL_CANONICAL_TEST_TIMEOUT,
+    let fetched = expect_v11_pull_success(
+        mnemed::sync_client::pull_canonical_with_cap_and_timeout(
+            &mut local_store,
+            &url,
+            &cap_b64,
+            V11_PULL_CANONICAL_TEST_TIMEOUT,
+        ),
+        "recording peer canonical pull",
     )
-    .await
-    .expect("pull from recording peer");
+    .await;
 
     assert_eq!(fetched, 1, "client fetched only the missing object bytes");
     let wanted = expect_fake_peer_wanted_ids(peer, "recording peer").await;
@@ -560,25 +898,27 @@ async fn pull_canonical_requests_only_missing_object_ids() {
 #[allow(clippy::await_holding_lock)]
 async fn pull_canonical(local: &AppState, peer: &RunningServer, cap: &Capability) -> usize {
     let url = format!("ws://{}/v1/sync", peer.http_addr);
-    let mut store = local.store.lock().expect("lock");
-    let cap_b64 = cap_to_b64(cap).expect("cap b64");
-    mnemed::sync_client::pull_canonical_with_cap(&mut store, &url, &cap_b64)
-        .await
-        .expect("pull")
+    let mut store = expect_store_lock(local.store.lock(), "local store during canonical v11 pull");
+    let cap_b64 = expect_v11_cap_b64(cap, "canonical v11 pull capability");
+    expect_v11_pull_success(
+        mnemed::sync_client::pull_canonical_with_cap(&mut store, &url, &cap_b64),
+        "canonical v11 pull",
+    )
+    .await
 }
 
 #[tokio::test]
 async fn two_peers_converge_via_canonical_v11_protocol() {
     let operator = KeyPair::from_seed([0x42; 32]);
-    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+    let cap = expect_v11_agent_cap(&operator, "canonical v11 convergence capability");
 
-    let (state_a, _da) = build_peer(&operator, &cap);
-    let (state_b, _db) = build_peer(&operator, &cap);
+    let (state_a, _da) = build_peer(&operator, &cap, "state A");
+    let (state_b, _db) = build_peer(&operator, &cap, "state B");
     remember(&state_a, "peer", "only-a", b"alpha-payload", &cap);
     remember(&state_b, "peer", "only-b", b"beta-payload", &cap);
 
-    let server_a = serve(state_a.clone()).await;
-    let server_b = serve(state_b.clone()).await;
+    let server_a = start_v11_server(state_a.clone(), "state A canonical v11 server").await;
+    let server_b = start_v11_server(state_b.clone(), "state B canonical v11 server").await;
 
     // A pulls B's delta, then B pulls A's (now-larger) delta.
     assert_eq!(
@@ -608,19 +948,34 @@ async fn two_peers_converge_via_canonical_v11_protocol() {
     };
 
     let (root_a, root_b) = {
-        let sa = state_a.store.lock().unwrap();
-        let sb = state_b.store.lock().unwrap();
-        assert!(sa.prove_membership(&key_a).is_ok(), "A has only-a");
-        assert!(
-            sa.prove_membership(&key_b).is_ok(),
-            "A received only-b via canonical §11 wire"
+        let sa = expect_store_lock(
+            state_a.store.lock(),
+            "state A store after canonical v11 wire convergence",
         );
-        assert!(
-            sb.prove_membership(&key_a).is_ok(),
-            "B received only-a via canonical §11 wire"
+        let sb = expect_store_lock(
+            state_b.store.lock(),
+            "state B store after canonical v11 wire convergence",
         );
-        assert!(sb.prove_membership(&key_b).is_ok(), "B has only-b");
-        (sa.current_root().unwrap(), sb.current_root().unwrap())
+        assert_membership_proof(sa.prove_membership(&key_a), "A has only-a");
+        assert_membership_proof(
+            sa.prove_membership(&key_b),
+            "A received only-b via canonical §11 wire",
+        );
+        assert_membership_proof(
+            sb.prove_membership(&key_a),
+            "B received only-a via canonical §11 wire",
+        );
+        assert_membership_proof(sb.prove_membership(&key_b), "B has only-b");
+        (
+            expect_current_root(
+                sa.current_root(),
+                "state A current root after canonical v11 wire convergence",
+            ),
+            expect_current_root(
+                sb.current_root(),
+                "state B current root after canonical v11 wire convergence",
+            ),
+        )
     };
 
     assert_eq!(
@@ -637,13 +992,13 @@ async fn two_peers_converge_via_canonical_v11_protocol() {
 }
 
 /// A-NET fail-closed: a `HaveObjects` frame whose object bytes were mutated in transit is
-/// rejected with a typed [`MnemeError::ObjectTampered`] before it can reach the merge —
+/// rejected with typed sync tamper before it can reach the merge —
 /// the recomputed content hash no longer matches the bundle's claimed object id.
 #[tokio::test]
 async fn canonical_tampered_have_objects_rejected_with_typed_error() -> Result<(), String> {
     let operator = KeyPair::from_seed([0x99; 32]);
-    let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
-    let (state_b, _db) = build_peer(&operator, &cap);
+    let cap = expect_v11_agent_cap(&operator, "canonical tamper capability");
+    let (state_b, _db) = build_peer(&operator, &cap, "state B tamper");
     remember(
         &state_b,
         "peer",
@@ -651,26 +1006,24 @@ async fn canonical_tampered_have_objects_rejected_with_typed_error() -> Result<(
         b"beta-payload-bytes-long-enough",
         &cap,
     );
-    let server_b = serve(state_b.clone()).await;
+    let server_b = start_v11_server(state_b.clone(), "state B canonical tamper server").await;
 
-    let (mut ws, _) = connect_async(authed_ws_request(&server_b, &cap))
-        .await
-        .map_err(|err| format!("canonical tamper websocket connect failed: {err}"))?;
+    let mut ws = connect_v11_ws(&server_b, &cap, "canonical tamper websocket").await?;
     ws.send(Message::Binary(
         mnemed::sync::encode_diff_request([0u8; 32])
-            .ok_or_else(|| "canonical tamper diff request encode failed".to_string())?
+            .map_err(|err| format!("canonical tamper diff request encode failed: {err}"))?
             .into(),
     ))
     .await
     .map_err(|err| format!("canonical tamper diff request send failed: {err}"))?;
     let diff_frame = recv_client_binary_frame(&mut ws, "canonical tamper diff response").await?;
     let summaries = mnemed::sync::decode_diff_response(&diff_frame)
-        .ok_or_else(|| "canonical tamper diff response decode failed".to_string())?;
+        .map_err(|err| format!("canonical tamper diff response decode failed: {err}"))?;
     assert_eq!(summaries.len(), 1, "B advertises its single live leaf");
 
     ws.send(Message::Binary(
         mnemed::sync::encode_want_objects_canonical(&summaries)
-            .ok_or_else(|| "canonical tamper want-objects encode failed".to_string())?
+            .map_err(|err| format!("canonical tamper want-objects encode failed: {err}"))?
             .into(),
     ))
     .await
@@ -689,10 +1042,12 @@ async fn canonical_tampered_have_objects_rejected_with_typed_error() -> Result<(
 
     // Positive control: faithfully re-encoding the exact parts still decodes — proves the
     // test-support encoder is structurally indistinguishable from the server's wire output.
-    let faithful = mnemed::sync::encode_have_objects_canonical_for_test(
-        key_hash, object_id, &namespace, &name, &object,
-    )
-    .ok_or_else(|| "faithful HaveObjects encode failed".to_string())?;
+    let faithful = expect_v11_have_objects_frame(
+        mnemed::sync::encode_have_objects_canonical_for_test(
+            key_hash, object_id, &namespace, &name, &object,
+        ),
+        "faithful HaveObjects positive control",
+    );
     mnemed::sync::decode_have_objects_canonical(&faithful)
         .map_err(|err| format!("faithfully re-encoded bundle decode failed: {err:?}"))?;
 
@@ -703,18 +1058,20 @@ async fn canonical_tampered_have_objects_rejected_with_typed_error() -> Result<(
     let last = tampered.len() - 1;
     tampered[last] ^= 0xff;
     assert_ne!(tampered, object, "tamper actually changed the object bytes");
-    let forged = mnemed::sync::encode_have_objects_canonical_for_test(
-        key_hash, object_id, &namespace, &name, &tampered,
-    )
-    .ok_or_else(|| "forged HaveObjects encode failed".to_string())?;
+    let forged = expect_v11_have_objects_frame(
+        mnemed::sync::encode_have_objects_canonical_for_test(
+            key_hash, object_id, &namespace, &name, &tampered,
+        ),
+        "forged HaveObjects tamper fixture",
+    );
 
     let err = match mnemed::sync::decode_have_objects_canonical(&forged) {
         Ok(_) => return Err("tampered HaveObjects unexpectedly decoded".to_string()),
         Err(err) => err,
     };
     assert!(
-        matches!(err, MnemeError::ObjectTampered),
-        "expected typed ObjectTampered, got {err:?}"
+        matches!(err, mnemed::sync::SyncFrameError::ObjectTampered),
+        "expected typed sync ObjectTampered, got {err:?}"
     );
 
     server_b.shutdown().await;

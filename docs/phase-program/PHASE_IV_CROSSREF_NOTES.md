@@ -41,7 +41,7 @@ When P4-2 wire stabilizes:
 
 External SDKs should not paraphrase retrieval limits:
 
-- `verify::HONESTY_NOT_EXACT_NN` (from `mneme-verify` exports; crossref embeds equivalent text).
+- `mneme_verify::HONESTY_PROCEDURE` and `mneme_crossref::HONESTY_PROCEDURE`.
 - `PIOP_RESEARCH_HONESTY` / `PIOP_RESEARCH_STATUS` (`piop_research.rs`) if exposing research APIs.
 - `FEDERATION_CERT_DRAFT_STATUS` — wire must carry draft label until gate opens.
 

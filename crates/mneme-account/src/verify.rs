@@ -8,6 +8,31 @@ use mneme_smt::TREE_DEPTH;
 #[cfg(any(feature = "phase_iii_verify", feature = "phase_iii_prove_forget"))]
 use crate::forget;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AccountVerifyFailure {
+    UnsupportedForgetProofVersion { got: u16 },
+    UnsupportedForgetProofMode,
+}
+
+fn account_verify_failure_to_mneme(failure: AccountVerifyFailure) -> MnemeError {
+    match failure {
+        AccountVerifyFailure::UnsupportedForgetProofVersion { got } => {
+            MnemeError::UnsupportedVersion { got }
+        }
+        AccountVerifyFailure::UnsupportedForgetProofMode => MnemeError::UnsupportedVersion {
+            got: FORGET_PROOF_VERSION,
+        },
+    }
+}
+
+fn unsupported_forget_proof_version_error(got: u16) -> MnemeError {
+    account_verify_failure_to_mneme(AccountVerifyFailure::UnsupportedForgetProofVersion { got })
+}
+
+fn unsupported_forget_proof_mode_error() -> MnemeError {
+    account_verify_failure_to_mneme(AccountVerifyFailure::UnsupportedForgetProofMode)
+}
+
 pub fn verify_action_receipt(receipt: &ActionReceipt) -> Result<(), MnemeError> {
     let pk = mneme_crypto::verifying_key_from_bytes(&receipt.sanctioner)?;
     mneme_crypto::verify_signature_bytes(&pk, &receipt.signable_preimage(), &receipt.signature)
@@ -34,12 +59,10 @@ pub fn verify_action_receipt_bound(
 
 pub fn verify_forget_proof(proof: &ForgetProof, root: &Root) -> Result<(), MnemeError> {
     if proof.version != FORGET_PROOF_VERSION {
-        return Err(MnemeError::UnsupportedVersion { got: proof.version });
+        return Err(unsupported_forget_proof_version_error(proof.version));
     }
     if proof.mode != ForgetMode::Shred {
-        return Err(MnemeError::UnsupportedVersion {
-            got: FORGET_PROOF_VERSION,
-        });
+        return Err(unsupported_forget_proof_mode_error());
     }
     if proof.root_bound != root.preimage_hash {
         return Err(MnemeError::ReceiptRootMismatch);
@@ -118,6 +141,100 @@ mod redteam {
             signature: vec![0x00; 64],
             sequence: 7,
         }
+    }
+
+    fn account_verify_production_source() -> &'static str {
+        include_str!("verify.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("verify.rs should keep tests after production code")
+    }
+
+    fn minimal_forget_proof(version: u16, mode: ForgetMode, root: &Root) -> ForgetProof {
+        ForgetProof {
+            version,
+            target_commit: [0x31; 32],
+            mode,
+            shred_commit: [0x32; 32],
+            absence_path: Vec::new(),
+            root_bound: root.preimage_hash,
+            cognition_cert_commit: None,
+        }
+    }
+
+    #[test]
+    fn account_verify_failures_are_classified_not_unsupported_version_collapsed() {
+        let production = account_verify_production_source();
+
+        for forbidden in [
+            "return Err(MnemeError::UnsupportedVersion",
+            "Err(MnemeError::UnsupportedVersion",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "account verifier production code still collapses directly through {forbidden}"
+            );
+        }
+
+        for required in [
+            "enum AccountVerifyFailure",
+            "fn account_verify_failure_to_mneme(",
+            "fn unsupported_forget_proof_version_error(",
+            "fn unsupported_forget_proof_mode_error(",
+            "AccountVerifyFailure::UnsupportedForgetProofVersion",
+            "AccountVerifyFailure::UnsupportedForgetProofMode",
+        ] {
+            assert!(
+                production.contains(required),
+                "account verifier production code is missing typed classifier marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_verify_failure_classifier_preserves_public_errors() {
+        assert_eq!(
+            account_verify_failure_to_mneme(AccountVerifyFailure::UnsupportedForgetProofVersion {
+                got: 99
+            }),
+            MnemeError::UnsupportedVersion { got: 99 }
+        );
+        assert_eq!(
+            unsupported_forget_proof_version_error(100),
+            MnemeError::UnsupportedVersion { got: 100 }
+        );
+        assert_eq!(
+            unsupported_forget_proof_mode_error(),
+            MnemeError::UnsupportedVersion {
+                got: FORGET_PROOF_VERSION
+            }
+        );
+    }
+
+    #[test]
+    fn unsupported_forget_proof_version_rejects_before_body_checks() {
+        let root = sample_root();
+        let proof = minimal_forget_proof(FORGET_PROOF_VERSION + 7, ForgetMode::Shred, &root);
+
+        assert_eq!(
+            verify_forget_proof(&proof, &root),
+            Err(MnemeError::UnsupportedVersion {
+                got: FORGET_PROOF_VERSION + 7
+            })
+        );
+    }
+
+    #[test]
+    fn unsupported_forget_proof_mode_rejects_before_body_checks() {
+        let root = sample_root();
+        let proof = minimal_forget_proof(FORGET_PROOF_VERSION, ForgetMode::Redact, &root);
+
+        assert_eq!(
+            verify_forget_proof(&proof, &root),
+            Err(MnemeError::UnsupportedVersion {
+                got: FORGET_PROOF_VERSION
+            })
+        );
     }
 
     /// Forgery: signature from a different key than sanctioner claims.

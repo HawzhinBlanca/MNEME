@@ -22,7 +22,7 @@ Normative surface (blueprint §7, §20.3); extend only via interface-change requ
 - **INV-7** Strict parsing / unknown-field rejection
 - **INV-9** Typed errors (definition only; enforcement in verify)
 - **INV-10** No floats in identity-bearing fields (schema + dCBOR profile)
-- **§3 honesty** — `MnemeError` messages for `ProcedureMismatch`, `BelowTierPolicy`, and `ZkProofInvalid` must never imply semantic truth, exact-NN optimality, or SNARK verification (`authenticated ≠ true`; procedure-faithfulness `≠` exact-NN)
+- **§3 honesty** — `MnemeError` messages for `ProcedureMismatch`, `BelowTierPolicy`, and `ZkProofInvalid` must never imply semantic truth, exact-NN optimality, true nearest neighbors, or SNARK verification (`authenticated ≠ true`; procedure-faithfulness `≠` exact-NN / not exact nearest-neighbor / not true nearest neighbors; Phase I `ExactDominance` is top-k over prover-asserted distances, not top-k by true query-to-embedding distance)
 
 ## Proof obligations
 

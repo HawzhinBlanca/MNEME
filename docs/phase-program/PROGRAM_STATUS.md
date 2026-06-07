@@ -54,7 +54,7 @@ Approx. program progress (software ceiling): **~62% done (13/21)**, **~19% parti
 
 - **Hardware / TEE**: Enclave, remote attestation, and hardware cost envelopes remain unimplemented (Phase II P2-1, P2-2).
 - **Formal proof & trust ops**: Phase III machine-checked verifier proof (Lean) + trust-ops pilot deferred (P3-3, P3-4).
-- **Phase IV PIOP**: Global exact-NN remains a research target only (`piop_research` panics if enabled).
+- **Phase IV PIOP**: Global exact-NN remains a research target only (`piop_research` returns `UnsupportedVersion` fail-closed if enabled).
 - **Federation verify**: Cross-org certificate verification and interop SDK packages not started (wire sketch only).
 
 ---

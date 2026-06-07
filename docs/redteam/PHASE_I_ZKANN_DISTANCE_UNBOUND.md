@@ -49,12 +49,14 @@ Cost: larger VO/receipt (embeddings, not just 32-byte commits); `mneme-crossref`
 Certificate must mirror the recompute to stay in agreement. Schedule alongside the Phase IV
 PIOP/global-NN work (which addresses the HNSW-approximate axis).
 
-## Interim honesty (do now, cheap)
+## Interim honesty (shipped + guarded)
 
-Downgrade the wording everywhere it says exact-dominance proves "true top-k": state it proves
+Current wording states exact-dominance proves
 **"top-k of the prover-asserted distances over the complete authenticated member set."** Membership
-and completeness are sound; *distance correctness* is not yet verified. (`PHASE_I_TASK_SPEC.md` §5
-and `RetrievalProofLevel::ExactDominance` docs.)
+and completeness are sound; *distance correctness* is not yet verified. `PHASE_I_TASK_SPEC.md` §5,
+`docs/ROADMAP.md`, the Phase IV PIOP baseline, and `RetrievalProofLevel::ExactDominance` docs now
+use this boundary, with a core source guard preventing the old "True top-k" wording from returning
+to the interface seam.
 
 ## Regression
 

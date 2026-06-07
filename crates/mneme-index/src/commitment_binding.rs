@@ -15,7 +15,13 @@ pub const BINDING_ENVELOPE_TAG: &[u8] = b"MNEME-BINDING-ENVELOPE-v1";
 pub const BINDING_PROOF_LEN: usize = 32;
 
 /// Honesty boundary for commitment-binding receipts (§3, §9.2).
-pub const BINDING_HONESTY: &str = "Commitment binding proves leaf commitment only; not zero-knowledge, not truth, not exact-NN, not semantic correctness.";
+pub const BINDING_HONESTY: &str = concat!(
+    "Commitment binding proves leaf commitment only; not zero-knowledge, not truth, ",
+    "not exact-NN / not exact nearest-neighbor, not semantic correctness. ",
+    "It does not upgrade Phase I ExactDominance: current v1 remains top-k over ",
+    "prover-asserted distances, not top-k by true query-to-embedding distance until ",
+    "verifiers recompute candidate distances."
+);
 
 /// v0 binding path status for audit B3 (Plonky2 is out of scope until 12-month).
 pub const B3_V0_BINDING_STATUS: &str =
@@ -26,6 +32,25 @@ pub const B3_V0_BINDING_STATUS: &str =
 pub struct CommitmentBindingReceipt {
     pub public_commit: [u8; 32],
     pub proof_bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommitmentBindingFailure {
+    PublicCommitMismatch,
+    ProofLengthInvalid,
+    ProofDigestMismatch,
+}
+
+fn commitment_binding_failure_to_mneme(failure: CommitmentBindingFailure) -> MnemeError {
+    match failure {
+        CommitmentBindingFailure::PublicCommitMismatch
+        | CommitmentBindingFailure::ProofLengthInvalid
+        | CommitmentBindingFailure::ProofDigestMismatch => MnemeError::ZkProofInvalid,
+    }
+}
+
+fn commitment_binding_error(failure: CommitmentBindingFailure) -> MnemeError {
+    commitment_binding_failure_to_mneme(failure)
 }
 
 /// Prove binding of `(object_id, embedding_commit)` to `public_commit`.
@@ -50,13 +75,19 @@ pub fn verify_binding_receipt(
 ) -> Result<(), MnemeError> {
     let derived = hash_sem_leaf(object_id, embedding_commit);
     if derived != receipt.public_commit {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(commitment_binding_error(
+            CommitmentBindingFailure::PublicCommitMismatch,
+        ));
     }
     if receipt.proof_bytes.len() != BINDING_PROOF_LEN {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(commitment_binding_error(
+            CommitmentBindingFailure::ProofLengthInvalid,
+        ));
     }
     if binding_proof_digest(&derived, &receipt.public_commit) != receipt.proof_bytes {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(commitment_binding_error(
+            CommitmentBindingFailure::ProofDigestMismatch,
+        ));
     }
     Ok(())
 }
@@ -87,6 +118,25 @@ mod tests {
     }
 
     #[test]
+    fn binding_honesty_preserves_exact_dominance_distance_caveat() {
+        assert_distance_caveat("BINDING_HONESTY", BINDING_HONESTY);
+        assert_distance_caveat("mneme-index contract", include_str!("../docs/CONTRACT.md"));
+    }
+
+    fn assert_distance_caveat(surface: &str, text: &str) {
+        for phrase in [
+            "not exact",
+            "top-k over prover-asserted distances",
+            "not top-k by true query-to-embedding distance",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "{surface} missing required honesty phrase `{phrase}`: {text}"
+            );
+        }
+    }
+
+    #[test]
     fn envelope_tag_is_not_plonky2() {
         let tag = std::str::from_utf8(BINDING_ENVELOPE_TAG).expect("utf8 tag");
         assert_eq!(tag, "MNEME-BINDING-ENVELOPE-v1");
@@ -96,6 +146,51 @@ mod tests {
         assert!(BINDING_HONESTY.contains("not zero-knowledge"));
         assert!(!BINDING_HONESTY.to_uppercase().contains("PLONKY2"));
         assert!(!BINDING_HONESTY.to_uppercase().contains("SNARK"));
+    }
+
+    #[test]
+    fn binding_verifier_failures_are_classified_not_zkproof_collapsed() {
+        let source = include_str!("commitment_binding.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("commitment_binding tests should follow production code");
+
+        assert!(
+            !source.contains("return Err(MnemeError::ZkProofInvalid"),
+            "commitment binding verifier should route ZkProofInvalid through named classifiers"
+        );
+
+        for required in [
+            "enum CommitmentBindingFailure",
+            "PublicCommitMismatch",
+            "ProofLengthInvalid",
+            "ProofDigestMismatch",
+            "fn commitment_binding_failure_to_mneme(",
+            "fn commitment_binding_error(",
+        ] {
+            assert!(
+                source.contains(required),
+                "commitment binding verifier should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn binding_failure_classifier_preserves_public_zkproof_invalid() {
+        for failure in [
+            CommitmentBindingFailure::PublicCommitMismatch,
+            CommitmentBindingFailure::ProofLengthInvalid,
+            CommitmentBindingFailure::ProofDigestMismatch,
+        ] {
+            assert_eq!(
+                commitment_binding_failure_to_mneme(failure),
+                MnemeError::ZkProofInvalid
+            );
+            assert_eq!(
+                commitment_binding_error(failure),
+                MnemeError::ZkProofInvalid
+            );
+        }
     }
 
     #[test]

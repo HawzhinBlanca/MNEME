@@ -87,6 +87,7 @@ impl HnswBackend {
                 return Err(IndexError::DuplicateObject);
             }
         }
+        embedding.validate_shape()?;
         let vec = embedding_to_f32(embedding);
         self.index
             .insert(vec, ObjectIdPayload(*object_id.as_bytes()));
@@ -101,6 +102,9 @@ impl HnswBackend {
         ef: usize,
     ) -> Vec<ObjectId> {
         if self.is_empty() {
+            return Vec::new();
+        }
+        if query.validate_shape().is_err() {
             return Vec::new();
         }
         let vec = embedding_to_f32(query);
@@ -132,5 +136,35 @@ mod tests {
         let emb = FixedPointEmbedding::new(2, 0, vec![1, 2]).unwrap();
         backend.insert(ObjectId([1; 32]), &emb).unwrap();
         assert_eq!(backend.len(), 1);
+    }
+
+    #[test]
+    fn wrapped_hnsw_rejects_public_zero_dim_embedding() {
+        let mut backend = HnswBackend::new(8);
+        let malformed = FixedPointEmbedding {
+            dim: 0,
+            scale: 0,
+            components: Vec::new(),
+        };
+
+        assert_eq!(
+            backend.insert(ObjectId([1; 32]), &malformed),
+            Err(IndexError::EmbeddingShape)
+        );
+        assert_eq!(backend.len(), 0);
+    }
+
+    #[test]
+    fn wrapped_hnsw_returns_no_results_for_public_zero_dim_query() {
+        let mut backend = HnswBackend::new(8);
+        let emb = FixedPointEmbedding::new(2, 0, vec![1, 2]).unwrap();
+        backend.insert(ObjectId([1; 32]), &emb).unwrap();
+        let malformed = FixedPointEmbedding {
+            dim: 0,
+            scale: 0,
+            components: Vec::new(),
+        };
+
+        assert!(backend.approximate_search(&malformed, 1, 1).is_empty());
     }
 }

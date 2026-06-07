@@ -24,13 +24,13 @@ The honest level reached by Phase I `zkANN-1` (`docs/PHASE_I_TASK_SPEC.md` §5,
 | Path | What is *proven* | What is *not* proven |
 |---|---|---|
 | **ADS verification object** (`verify_ads_vo`, default `ads` feature) | The returned `result_ids` are the faithful output of deterministic procedure **P** (`execute_procedure_p`, INV-10) replayed over candidates whose embedding commitments are Merkle-included under the signed `semantic_commit`. | Exact global nearest neighbors. The candidate set in the VO is what the procedure examined; nothing proves no *better* unexamined vector exists in the committed set. |
-| **Exact / flat path** (`PHASE_I_TASK_SPEC.md` P1-1) | *Dominance over the committed set* when the procedure enumerates every committed candidate — i.e. true top-k for a brute-force index. | Succinctness: the VO carries every examined candidate + Merkle paths; size and verify cost grow with the examined set. |
-| **HNSW audit-on-demand** (`PHASE_I_TASK_SPEC.md` P1-1b) | Procedure-faithful + reproducible + dominance over the *visited neighborhood* of the declared graph walk. | Dominance over the *whole* committed set. The walk can miss a true nearest neighbor; that is the defining caveat of approximate ANN. |
+| **Exact / flat path** (`PHASE_I_TASK_SPEC.md` P1-1) | Membership/completeness over the committed set, plus top-k dominance over prover-asserted distances. | True query-to-embedding distance ordering. The VO carries embedding commitments, not embedding vectors, so current verifiers cannot recompute candidate distances. It is also not succinct: the VO carries every examined candidate + Merkle paths. |
+| **HNSW audit-on-demand** (`PHASE_I_TASK_SPEC.md` P1-1b) | Procedure-faithful replay over a prover-asserted authenticated `visited_order`, with dominance over that visited set. | Replay of the actual HNSW graph walk or dominance over the whole committed set. The walk can miss a true nearest neighbor; that is the defining caveat of approximate ANN. |
 | **`pedersen_schnorr_zk`** (12-month B3; `pedersen_schnorr_zk.rs`) | *Witness privacy* for a single committed retrieval-match: "I know an opening of `public_commit` equal to the (hidden) query," via a Pedersen+Schnorr equality-of-openings NIZK over Ristretto (transparent, no trusted setup). Currently attached for the top-1 result only (`try_attach_zk_retrieval`). | Anything about ranking, dominance, or exact-NN. It hides *which* entry matched; it does not prove the match was the *best* match. It is **not** Plonky2/FRI and **not** a SNARK. |
 
 The standing §3 honesty boundary
-(`verify::HONESTY_NOT_EXACT_NN`, `MNEME_BLUEPRINT.md` §3) is the thing Phase
-IV-A would narrow:
+(`mneme_verify::HONESTY_PROCEDURE`, `MNEME_BLUEPRINT.md` §3) is the thing
+Phase IV-A would narrow:
 
 > "receipt proves faithful execution of procedure P over committed data, not
 > true nearest neighbors"

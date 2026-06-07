@@ -4,6 +4,12 @@ Last updated: 2026-06-01 (B6 seam refactor committed). This tracks items beyond 
 certified single-host v0 core. Each entry states what is in-repo, what is gated, and
 *why* it cannot be marked done without an external input.
 
+> **New (2026-06-08):** prioritized work order from a deep multi-agent inspection —
+> see [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
+> P0 = honesty defects in shipped source + the confirmed A-REPLAY HLC byte-order bug
+> (`mneme-root/src/lib.rs:127`); P1 = TCB semantic-gate scope, store/daemon hardening;
+> P2 = MCP exact-key-only recall + ForgetProof delivery; P3 = KMS/TEE/formal/OSS (gated).
+
 ## Delivered (code, tested, CI-verified)
 
 - **B3** — durable group-commit: batched vault-key journal + snapshot key-index persist.

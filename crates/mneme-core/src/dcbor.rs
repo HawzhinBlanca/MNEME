@@ -77,7 +77,7 @@ impl Encoder {
 
     pub fn encode_text(&mut self, text: &str) -> Result<(), MnemeError> {
         if !text.is_empty() && !is_nfc(text) {
-            return Err(MnemeError::SerializationNonCanonical);
+            return Err(dcbor_encode_text_not_nfc_error());
         }
         write_uint(&mut self.buf, 3, text.len() as u64)?;
         self.buf.extend_from_slice(text.as_bytes());
@@ -136,6 +136,60 @@ impl Default for Encoder {
 /// fail-closed [`MnemeError::SchemaDrift`].
 pub const MAX_NESTING_DEPTH: usize = 128;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DcborCursorFailure {
+    TrailingBytes,
+    NestingDepth,
+    UnexpectedEofByte,
+    UnexpectedEofBytes,
+    UnexpectedEofPeek,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DcborDecodeAnyFailure {
+    UnsupportedSimpleValue,
+    Tag,
+    ByteStringLength,
+    TextLength,
+    TextUtf8,
+    ArrayLength,
+    MapLength,
+    UnsupportedMajor,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DcborReadLengthFailure {
+    UnsupportedAdditionalInfo,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DcborTypedDecodeFailure {
+    ExpectedUnsigned,
+    SignedUnsignedOverflow,
+    SignedNegativeOverflow,
+    ExpectedSigned,
+    ExpectedBytes,
+    ExpectedText,
+    ExpectedArray,
+    ExpectedMap,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DcborCanonicalFailure {
+    EncodeTextNotNfc,
+    SimpleFloat,
+    IndefiniteBreak,
+    DecodeTextNotNfc,
+    MapKeyOrder,
+    NonMinimalU8Length,
+    NonMinimalU16Length,
+    NonMinimalU32Length,
+    NonMinimalU64Length,
+    IndefiniteLength,
+    DuplicateMapKey,
+    ReencodeMismatch,
+}
+
 pub struct Decoder<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -155,7 +209,7 @@ impl<'a> Decoder<'a> {
         if self.pos == self.bytes.len() {
             Ok(())
         } else {
-            Err(MnemeError::SchemaDrift)
+            Err(dcbor_trailing_bytes_error())
         }
     }
 
@@ -168,7 +222,7 @@ impl<'a> Decoder<'a> {
     fn enter(&mut self) -> Result<(), MnemeError> {
         self.depth += 1;
         if self.depth > MAX_NESTING_DEPTH {
-            return Err(MnemeError::SchemaDrift);
+            return Err(dcbor_nesting_depth_error());
         }
         Ok(())
     }
@@ -179,7 +233,7 @@ impl<'a> Decoder<'a> {
 
     fn read_byte(&mut self) -> Result<u8, MnemeError> {
         if self.pos >= self.bytes.len() {
-            return Err(MnemeError::SchemaDrift);
+            return Err(dcbor_unexpected_eof_byte_error());
         }
         let b = self.bytes[self.pos];
         self.pos += 1;
@@ -190,7 +244,7 @@ impl<'a> Decoder<'a> {
         // pos <= bytes.len() is a maintained invariant, so this cannot underflow.
         let remaining = self.bytes.len() - self.pos;
         if len > remaining {
-            return Err(MnemeError::SchemaDrift);
+            return Err(dcbor_unexpected_eof_bytes_error());
         }
         let slice = &self.bytes[self.pos..self.pos + len];
         self.pos += len;
@@ -199,7 +253,7 @@ impl<'a> Decoder<'a> {
 
     pub fn peek_major(&self) -> Result<u8, MnemeError> {
         if self.pos >= self.bytes.len() {
-            return Err(MnemeError::SchemaDrift);
+            return Err(dcbor_unexpected_eof_peek_error());
         }
         Ok(self.bytes[self.pos] >> 5)
     }
@@ -214,14 +268,14 @@ impl<'a> Decoder<'a> {
                 20 => Ok(CborValue::Bool(false)),
                 21 => Ok(CborValue::Bool(true)),
                 22 => Ok(CborValue::Null),
-                24..=27 => Err(MnemeError::SerializationNonCanonical), // floats
-                31 => Err(MnemeError::SerializationNonCanonical),      // indefinite break
-                _ => Err(MnemeError::SchemaDrift),
+                24..=27 => Err(dcbor_simple_float_error()), // floats
+                31 => Err(dcbor_indefinite_break_error()),  // indefinite break
+                _ => Err(dcbor_unsupported_simple_value_error()),
             };
         }
 
         if major == 6 {
-            return Err(MnemeError::SchemaDrift); // tags disallowed in Wave 0
+            return Err(dcbor_tag_error()); // tags disallowed in Wave 0
         }
 
         let len = self.read_length(info)?;
@@ -231,7 +285,7 @@ impl<'a> Decoder<'a> {
             2 => {
                 let len_usize = len as usize;
                 if len_usize > self.remaining() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(dcbor_byte_string_length_error());
                 }
                 let bytes = self.read_bytes(len_usize)?.to_vec();
                 Ok(CborValue::Bytes(bytes))
@@ -239,12 +293,12 @@ impl<'a> Decoder<'a> {
             3 => {
                 let len_usize = len as usize;
                 if len_usize > self.remaining() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(dcbor_text_length_error());
                 }
                 let bytes = self.read_bytes(len_usize)?;
-                let text = std::str::from_utf8(bytes).map_err(|_| MnemeError::SchemaDrift)?;
+                let text = std::str::from_utf8(bytes).map_err(|_| dcbor_text_utf8_error())?;
                 if !text.is_empty() && !is_nfc(text) {
-                    return Err(MnemeError::SerializationNonCanonical);
+                    return Err(dcbor_decode_text_not_nfc_error());
                 }
                 Ok(CborValue::Text(text.to_string()))
             }
@@ -254,7 +308,7 @@ impl<'a> Decoder<'a> {
                 let remaining = self.remaining();
                 let len_usize = len as usize;
                 if len_usize > remaining {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(dcbor_array_length_error());
                 }
                 let mut items = Vec::with_capacity(len_usize);
                 self.enter()?;
@@ -268,7 +322,7 @@ impl<'a> Decoder<'a> {
                 let remaining = self.remaining();
                 let len_usize = len as usize;
                 if len_usize > remaining {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(dcbor_map_length_error());
                 }
                 let mut entries = Vec::with_capacity(len_usize);
                 let mut prev_key: Option<Vec<u8>> = None;
@@ -282,7 +336,7 @@ impl<'a> Decoder<'a> {
                     let key_bytes = self.bytes[key_start..key_end].to_vec();
                     if let Some(prev) = &prev_key {
                         if key_bytes <= *prev {
-                            return Err(MnemeError::SerializationNonCanonical);
+                            return Err(dcbor_map_key_order_error());
                         }
                     }
                     prev_key = Some(key_bytes);
@@ -292,7 +346,7 @@ impl<'a> Decoder<'a> {
                 self.leave();
                 Ok(CborValue::Map(entries))
             }
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_unsupported_major_error()),
         }
     }
 
@@ -304,7 +358,7 @@ impl<'a> Decoder<'a> {
             24 => {
                 let v = u64::from(self.read_byte()?);
                 if v < 24 {
-                    return Err(MnemeError::SerializationNonCanonical);
+                    return Err(dcbor_nonminimal_u8_length_error());
                 }
                 Ok(v)
             }
@@ -312,7 +366,7 @@ impl<'a> Decoder<'a> {
                 let b = self.read_bytes(2)?;
                 let v = u64::from(u16::from_be_bytes([b[0], b[1]]));
                 if v <= u64::from(u8::MAX) {
-                    return Err(MnemeError::SerializationNonCanonical);
+                    return Err(dcbor_nonminimal_u16_length_error());
                 }
                 Ok(v)
             }
@@ -320,7 +374,7 @@ impl<'a> Decoder<'a> {
                 let b = self.read_bytes(4)?;
                 let v = u64::from(u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
                 if v <= u64::from(u16::MAX) {
-                    return Err(MnemeError::SerializationNonCanonical);
+                    return Err(dcbor_nonminimal_u32_length_error());
                 }
                 Ok(v)
             }
@@ -328,44 +382,46 @@ impl<'a> Decoder<'a> {
                 let b = self.read_bytes(8)?;
                 let v = u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
                 if v <= u64::from(u32::MAX) {
-                    return Err(MnemeError::SerializationNonCanonical);
+                    return Err(dcbor_nonminimal_u64_length_error());
                 }
                 Ok(v)
             }
-            31 => Err(MnemeError::SerializationNonCanonical),
-            _ => Err(MnemeError::SchemaDrift),
+            31 => Err(dcbor_indefinite_length_error()),
+            _ => Err(dcbor_unsupported_length_info_error()),
         }
     }
 
     pub fn decode_unsigned(&mut self) -> Result<u64, MnemeError> {
         match self.decode_any()? {
             CborValue::Unsigned(v) => Ok(v),
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_expected_unsigned_error()),
         }
     }
 
     pub fn decode_signed(&mut self) -> Result<i64, MnemeError> {
         match self.decode_any()? {
-            CborValue::Unsigned(v) => i64::try_from(v).map_err(|_| MnemeError::SchemaDrift),
+            CborValue::Unsigned(v) => {
+                i64::try_from(v).map_err(|_| dcbor_signed_unsigned_overflow_error())
+            }
             CborValue::Negative(v) => {
-                let abs = i64::try_from(v).map_err(|_| MnemeError::SchemaDrift)?;
+                let abs = i64::try_from(v).map_err(|_| dcbor_signed_negative_overflow_error())?;
                 Ok(-abs - 1)
             }
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_expected_signed_error()),
         }
     }
 
     pub fn decode_bytes(&mut self) -> Result<Vec<u8>, MnemeError> {
         match self.decode_any()? {
             CborValue::Bytes(v) => Ok(v),
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_expected_bytes_error()),
         }
     }
 
     pub fn decode_text(&mut self) -> Result<String, MnemeError> {
         match self.decode_any()? {
             CborValue::Text(v) => Ok(v),
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_expected_text_error()),
         }
     }
 
@@ -384,7 +440,7 @@ impl<'a> Decoder<'a> {
                 }
                 Ok(out)
             }
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_expected_array_error()),
         }
     }
 
@@ -394,12 +450,12 @@ impl<'a> Decoder<'a> {
                 let mut map = BTreeMap::new();
                 for (k, v) in entries {
                     if map.insert(k.clone(), v).is_some() {
-                        return Err(MnemeError::SerializationNonCanonical);
+                        return Err(dcbor_duplicate_map_key_error());
                     }
                 }
                 Ok(map)
             }
-            _ => Err(MnemeError::SchemaDrift),
+            _ => Err(dcbor_expected_map_error()),
         }
     }
 
@@ -476,6 +532,201 @@ impl CborValue {
     }
 }
 
+fn dcbor_cursor_failure_to_mneme(failure: DcborCursorFailure) -> MnemeError {
+    match failure {
+        DcborCursorFailure::TrailingBytes
+        | DcborCursorFailure::NestingDepth
+        | DcborCursorFailure::UnexpectedEofByte
+        | DcborCursorFailure::UnexpectedEofBytes
+        | DcborCursorFailure::UnexpectedEofPeek => MnemeError::SchemaDrift,
+    }
+}
+
+fn dcbor_trailing_bytes_error() -> MnemeError {
+    dcbor_cursor_failure_to_mneme(DcborCursorFailure::TrailingBytes)
+}
+
+fn dcbor_nesting_depth_error() -> MnemeError {
+    dcbor_cursor_failure_to_mneme(DcborCursorFailure::NestingDepth)
+}
+
+fn dcbor_unexpected_eof_byte_error() -> MnemeError {
+    dcbor_cursor_failure_to_mneme(DcborCursorFailure::UnexpectedEofByte)
+}
+
+fn dcbor_unexpected_eof_bytes_error() -> MnemeError {
+    dcbor_cursor_failure_to_mneme(DcborCursorFailure::UnexpectedEofBytes)
+}
+
+fn dcbor_unexpected_eof_peek_error() -> MnemeError {
+    dcbor_cursor_failure_to_mneme(DcborCursorFailure::UnexpectedEofPeek)
+}
+
+fn dcbor_decode_any_failure_to_mneme(failure: DcborDecodeAnyFailure) -> MnemeError {
+    match failure {
+        DcborDecodeAnyFailure::UnsupportedSimpleValue
+        | DcborDecodeAnyFailure::Tag
+        | DcborDecodeAnyFailure::ByteStringLength
+        | DcborDecodeAnyFailure::TextLength
+        | DcborDecodeAnyFailure::TextUtf8
+        | DcborDecodeAnyFailure::ArrayLength
+        | DcborDecodeAnyFailure::MapLength
+        | DcborDecodeAnyFailure::UnsupportedMajor => MnemeError::SchemaDrift,
+    }
+}
+
+fn dcbor_unsupported_simple_value_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::UnsupportedSimpleValue)
+}
+
+fn dcbor_tag_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::Tag)
+}
+
+fn dcbor_byte_string_length_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::ByteStringLength)
+}
+
+fn dcbor_text_length_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::TextLength)
+}
+
+fn dcbor_text_utf8_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::TextUtf8)
+}
+
+fn dcbor_array_length_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::ArrayLength)
+}
+
+fn dcbor_map_length_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::MapLength)
+}
+
+fn dcbor_unsupported_major_error() -> MnemeError {
+    dcbor_decode_any_failure_to_mneme(DcborDecodeAnyFailure::UnsupportedMajor)
+}
+
+fn dcbor_read_length_failure_to_mneme(failure: DcborReadLengthFailure) -> MnemeError {
+    match failure {
+        DcborReadLengthFailure::UnsupportedAdditionalInfo => MnemeError::SchemaDrift,
+    }
+}
+
+fn dcbor_unsupported_length_info_error() -> MnemeError {
+    dcbor_read_length_failure_to_mneme(DcborReadLengthFailure::UnsupportedAdditionalInfo)
+}
+
+fn dcbor_typed_decode_failure_to_mneme(failure: DcborTypedDecodeFailure) -> MnemeError {
+    match failure {
+        DcborTypedDecodeFailure::ExpectedUnsigned
+        | DcborTypedDecodeFailure::SignedUnsignedOverflow
+        | DcborTypedDecodeFailure::SignedNegativeOverflow
+        | DcborTypedDecodeFailure::ExpectedSigned
+        | DcborTypedDecodeFailure::ExpectedBytes
+        | DcborTypedDecodeFailure::ExpectedText
+        | DcborTypedDecodeFailure::ExpectedArray
+        | DcborTypedDecodeFailure::ExpectedMap => MnemeError::SchemaDrift,
+    }
+}
+
+fn dcbor_expected_unsigned_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::ExpectedUnsigned)
+}
+
+fn dcbor_signed_unsigned_overflow_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::SignedUnsignedOverflow)
+}
+
+fn dcbor_signed_negative_overflow_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::SignedNegativeOverflow)
+}
+
+fn dcbor_expected_signed_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::ExpectedSigned)
+}
+
+fn dcbor_expected_bytes_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::ExpectedBytes)
+}
+
+fn dcbor_expected_text_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::ExpectedText)
+}
+
+fn dcbor_expected_array_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::ExpectedArray)
+}
+
+fn dcbor_expected_map_error() -> MnemeError {
+    dcbor_typed_decode_failure_to_mneme(DcborTypedDecodeFailure::ExpectedMap)
+}
+
+fn dcbor_canonical_failure_to_mneme(failure: DcborCanonicalFailure) -> MnemeError {
+    match failure {
+        DcborCanonicalFailure::EncodeTextNotNfc
+        | DcborCanonicalFailure::SimpleFloat
+        | DcborCanonicalFailure::IndefiniteBreak
+        | DcborCanonicalFailure::DecodeTextNotNfc
+        | DcborCanonicalFailure::MapKeyOrder
+        | DcborCanonicalFailure::NonMinimalU8Length
+        | DcborCanonicalFailure::NonMinimalU16Length
+        | DcborCanonicalFailure::NonMinimalU32Length
+        | DcborCanonicalFailure::NonMinimalU64Length
+        | DcborCanonicalFailure::IndefiniteLength
+        | DcborCanonicalFailure::DuplicateMapKey
+        | DcborCanonicalFailure::ReencodeMismatch => MnemeError::SerializationNonCanonical,
+    }
+}
+
+fn dcbor_encode_text_not_nfc_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::EncodeTextNotNfc)
+}
+
+fn dcbor_simple_float_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::SimpleFloat)
+}
+
+fn dcbor_indefinite_break_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::IndefiniteBreak)
+}
+
+fn dcbor_decode_text_not_nfc_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::DecodeTextNotNfc)
+}
+
+fn dcbor_map_key_order_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::MapKeyOrder)
+}
+
+fn dcbor_nonminimal_u8_length_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::NonMinimalU8Length)
+}
+
+fn dcbor_nonminimal_u16_length_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::NonMinimalU16Length)
+}
+
+fn dcbor_nonminimal_u32_length_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::NonMinimalU32Length)
+}
+
+fn dcbor_nonminimal_u64_length_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::NonMinimalU64Length)
+}
+
+fn dcbor_indefinite_length_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::IndefiniteLength)
+}
+
+fn dcbor_duplicate_map_key_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::DuplicateMapKey)
+}
+
+fn dcbor_reencode_mismatch_error() -> MnemeError {
+    dcbor_canonical_failure_to_mneme(DcborCanonicalFailure::ReencodeMismatch)
+}
+
 impl DcborEncode for CborValue {
     fn dcbor_encode(&self, enc: &mut Encoder) -> Result<(), MnemeError> {
         encode_value(self, enc)
@@ -546,7 +797,7 @@ pub fn assert_canonical(bytes: &[u8]) -> Result<Vec<u8>, MnemeError> {
     };
     let canonical = encode_canonical(&value)?;
     if canonical != bytes {
-        return Err(MnemeError::SerializationNonCanonical);
+        return Err(dcbor_reencode_mismatch_error());
     }
     Ok(canonical)
 }
@@ -599,6 +850,373 @@ pub fn fuzz_dcbor_decode(bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn source_between_markers<'a>(
+        source: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+        context: &str,
+    ) -> &'a str {
+        let (_, after_start) = source
+            .split_once(start_marker)
+            .unwrap_or_else(|| panic!("{context} should contain start marker `{start_marker}`"));
+        let (section, _) = after_start
+            .split_once(end_marker)
+            .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
+        section
+    }
+
+    #[test]
+    fn dcbor_cursor_failures_are_classified_not_schema_drift_collapsed() {
+        let dcbor = include_str!("dcbor.rs");
+
+        for (marker, end_marker, context) in [
+            (
+                "pub fn ensure_consumed(",
+                "pub fn remaining(",
+                "ensure_consumed",
+            ),
+            ("fn enter(", "fn leave(", "enter"),
+            ("fn read_byte(", "fn read_bytes(", "read_byte"),
+            ("fn read_bytes(", "pub fn peek_major(", "read_bytes"),
+            ("pub fn peek_major(", "pub fn decode_any(", "peek_major"),
+        ] {
+            let section = source_between_markers(dcbor, marker, end_marker, context);
+            assert!(
+                !section.contains("Err(MnemeError::SchemaDrift)"),
+                "dCBOR cursor `{context}` should route SchemaDrift through a named classifier"
+            );
+            assert!(
+                !section.contains("return Err(MnemeError::SchemaDrift)"),
+                "dCBOR cursor `{context}` should not return bare SchemaDrift"
+            );
+        }
+
+        for required in [
+            "enum DcborCursorFailure",
+            "fn dcbor_cursor_failure_to_mneme(",
+            "fn dcbor_trailing_bytes_error(",
+            "fn dcbor_nesting_depth_error(",
+            "fn dcbor_unexpected_eof_byte_error(",
+            "fn dcbor_unexpected_eof_bytes_error(",
+            "fn dcbor_unexpected_eof_peek_error(",
+            "DcborCursorFailure::TrailingBytes",
+            "DcborCursorFailure::NestingDepth",
+            "DcborCursorFailure::UnexpectedEofByte",
+            "DcborCursorFailure::UnexpectedEofBytes",
+            "DcborCursorFailure::UnexpectedEofPeek",
+        ] {
+            assert!(
+                dcbor.contains(required),
+                "dCBOR cursor failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_cursor_failure_classifier_preserves_schema_failures() {
+        for failure in [
+            DcborCursorFailure::TrailingBytes,
+            DcborCursorFailure::NestingDepth,
+            DcborCursorFailure::UnexpectedEofByte,
+            DcborCursorFailure::UnexpectedEofBytes,
+            DcborCursorFailure::UnexpectedEofPeek,
+        ] {
+            assert_eq!(
+                dcbor_cursor_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_decode_any_failures_are_classified_not_schema_drift_collapsed() {
+        let dcbor = include_str!("dcbor.rs");
+        let section =
+            source_between_markers(dcbor, "pub fn decode_any(", "fn read_length(", "decode_any");
+
+        for forbidden in [
+            "Err(MnemeError::SchemaDrift)",
+            "return Err(MnemeError::SchemaDrift)",
+            "map_err(|_| MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "dCBOR decode_any should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum DcborDecodeAnyFailure",
+            "fn dcbor_decode_any_failure_to_mneme(",
+            "fn dcbor_unsupported_simple_value_error(",
+            "fn dcbor_tag_error(",
+            "fn dcbor_byte_string_length_error(",
+            "fn dcbor_text_length_error(",
+            "fn dcbor_text_utf8_error(",
+            "fn dcbor_array_length_error(",
+            "fn dcbor_map_length_error(",
+            "fn dcbor_unsupported_major_error(",
+            "DcborDecodeAnyFailure::UnsupportedSimpleValue",
+            "DcborDecodeAnyFailure::Tag",
+            "DcborDecodeAnyFailure::ByteStringLength",
+            "DcborDecodeAnyFailure::TextLength",
+            "DcborDecodeAnyFailure::TextUtf8",
+            "DcborDecodeAnyFailure::ArrayLength",
+            "DcborDecodeAnyFailure::MapLength",
+            "DcborDecodeAnyFailure::UnsupportedMajor",
+        ] {
+            assert!(
+                dcbor.contains(required),
+                "dCBOR decode_any failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_decode_any_failure_classifier_preserves_schema_failures() {
+        for failure in [
+            DcborDecodeAnyFailure::UnsupportedSimpleValue,
+            DcborDecodeAnyFailure::Tag,
+            DcborDecodeAnyFailure::ByteStringLength,
+            DcborDecodeAnyFailure::TextLength,
+            DcborDecodeAnyFailure::TextUtf8,
+            DcborDecodeAnyFailure::ArrayLength,
+            DcborDecodeAnyFailure::MapLength,
+            DcborDecodeAnyFailure::UnsupportedMajor,
+        ] {
+            assert_eq!(
+                dcbor_decode_any_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_read_length_failures_are_classified_not_schema_drift_collapsed() {
+        let dcbor = include_str!("dcbor.rs");
+        let section = source_between_markers(
+            dcbor,
+            "fn read_length(",
+            "pub fn decode_unsigned(",
+            "read_length",
+        );
+
+        for forbidden in [
+            "Err(MnemeError::SchemaDrift)",
+            "return Err(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "dCBOR read_length should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum DcborReadLengthFailure",
+            "fn dcbor_read_length_failure_to_mneme(",
+            "fn dcbor_unsupported_length_info_error(",
+            "DcborReadLengthFailure::UnsupportedAdditionalInfo",
+        ] {
+            assert!(
+                dcbor.contains(required),
+                "dCBOR read_length failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_read_length_failure_classifier_preserves_schema_failures() {
+        assert_eq!(
+            dcbor_read_length_failure_to_mneme(DcborReadLengthFailure::UnsupportedAdditionalInfo),
+            MnemeError::SchemaDrift
+        );
+    }
+
+    #[test]
+    fn dcbor_typed_decode_failures_are_classified_not_schema_drift_collapsed() {
+        let dcbor = include_str!("dcbor.rs");
+        let section = source_between_markers(
+            dcbor,
+            "pub fn decode_unsigned(",
+            "pub fn decode_nullable",
+            "typed decode accessors",
+        );
+
+        for forbidden in [
+            "Err(MnemeError::SchemaDrift)",
+            "return Err(MnemeError::SchemaDrift)",
+            "map_err(|_| MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "dCBOR typed decode accessors should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum DcborTypedDecodeFailure",
+            "fn dcbor_typed_decode_failure_to_mneme(",
+            "fn dcbor_expected_unsigned_error(",
+            "fn dcbor_signed_unsigned_overflow_error(",
+            "fn dcbor_signed_negative_overflow_error(",
+            "fn dcbor_expected_signed_error(",
+            "fn dcbor_expected_bytes_error(",
+            "fn dcbor_expected_text_error(",
+            "fn dcbor_expected_array_error(",
+            "fn dcbor_expected_map_error(",
+            "DcborTypedDecodeFailure::ExpectedUnsigned",
+            "DcborTypedDecodeFailure::SignedUnsignedOverflow",
+            "DcborTypedDecodeFailure::SignedNegativeOverflow",
+            "DcborTypedDecodeFailure::ExpectedSigned",
+            "DcborTypedDecodeFailure::ExpectedBytes",
+            "DcborTypedDecodeFailure::ExpectedText",
+            "DcborTypedDecodeFailure::ExpectedArray",
+            "DcborTypedDecodeFailure::ExpectedMap",
+        ] {
+            assert!(
+                dcbor.contains(required),
+                "dCBOR typed decode failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_typed_decode_failure_classifier_preserves_schema_failures() {
+        for failure in [
+            DcborTypedDecodeFailure::ExpectedUnsigned,
+            DcborTypedDecodeFailure::SignedUnsignedOverflow,
+            DcborTypedDecodeFailure::SignedNegativeOverflow,
+            DcborTypedDecodeFailure::ExpectedSigned,
+            DcborTypedDecodeFailure::ExpectedBytes,
+            DcborTypedDecodeFailure::ExpectedText,
+            DcborTypedDecodeFailure::ExpectedArray,
+            DcborTypedDecodeFailure::ExpectedMap,
+        ] {
+            assert_eq!(
+                dcbor_typed_decode_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_canonical_failures_are_classified_not_serialization_collapsed() {
+        let dcbor = include_str!("dcbor.rs");
+        let sections = [
+            source_between_markers(
+                dcbor,
+                "pub fn encode_text(",
+                "pub fn begin_array(",
+                "encode_text",
+            ),
+            source_between_markers(dcbor, "pub fn decode_any(", "fn read_length(", "decode_any"),
+            source_between_markers(
+                dcbor,
+                "fn read_length(",
+                "pub fn decode_unsigned(",
+                "read_length",
+            ),
+            source_between_markers(
+                dcbor,
+                "pub fn decode_map(",
+                "pub fn decode_nullable",
+                "decode_map",
+            ),
+            source_between_markers(
+                dcbor,
+                "pub fn assert_canonical(",
+                "/// Encode a CBOR map key for sorting comparisons.",
+                "assert_canonical",
+            ),
+        ];
+
+        for section in sections {
+            for forbidden in [
+                "Err(MnemeError::SerializationNonCanonical)",
+                "return Err(MnemeError::SerializationNonCanonical)",
+            ] {
+                assert!(
+                    !section.contains(forbidden),
+                    "dCBOR canonicality paths should route `{forbidden}` through named classifiers"
+                );
+            }
+        }
+
+        for required in [
+            "enum DcborCanonicalFailure",
+            "fn dcbor_canonical_failure_to_mneme(",
+            "fn dcbor_encode_text_not_nfc_error(",
+            "fn dcbor_simple_float_error(",
+            "fn dcbor_indefinite_break_error(",
+            "fn dcbor_decode_text_not_nfc_error(",
+            "fn dcbor_map_key_order_error(",
+            "fn dcbor_nonminimal_u8_length_error(",
+            "fn dcbor_nonminimal_u16_length_error(",
+            "fn dcbor_nonminimal_u32_length_error(",
+            "fn dcbor_nonminimal_u64_length_error(",
+            "fn dcbor_indefinite_length_error(",
+            "fn dcbor_duplicate_map_key_error(",
+            "fn dcbor_reencode_mismatch_error(",
+            "DcborCanonicalFailure::EncodeTextNotNfc",
+            "DcborCanonicalFailure::SimpleFloat",
+            "DcborCanonicalFailure::IndefiniteBreak",
+            "DcborCanonicalFailure::DecodeTextNotNfc",
+            "DcborCanonicalFailure::MapKeyOrder",
+            "DcborCanonicalFailure::NonMinimalU8Length",
+            "DcborCanonicalFailure::NonMinimalU16Length",
+            "DcborCanonicalFailure::NonMinimalU32Length",
+            "DcborCanonicalFailure::NonMinimalU64Length",
+            "DcborCanonicalFailure::IndefiniteLength",
+            "DcborCanonicalFailure::DuplicateMapKey",
+            "DcborCanonicalFailure::ReencodeMismatch",
+        ] {
+            assert!(
+                dcbor.contains(required),
+                "dCBOR canonical failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn dcbor_canonical_failure_classifier_preserves_public_error() {
+        for failure in [
+            DcborCanonicalFailure::EncodeTextNotNfc,
+            DcborCanonicalFailure::SimpleFloat,
+            DcborCanonicalFailure::IndefiniteBreak,
+            DcborCanonicalFailure::DecodeTextNotNfc,
+            DcborCanonicalFailure::MapKeyOrder,
+            DcborCanonicalFailure::NonMinimalU8Length,
+            DcborCanonicalFailure::NonMinimalU16Length,
+            DcborCanonicalFailure::NonMinimalU32Length,
+            DcborCanonicalFailure::NonMinimalU64Length,
+            DcborCanonicalFailure::IndefiniteLength,
+            DcborCanonicalFailure::DuplicateMapKey,
+            DcborCanonicalFailure::ReencodeMismatch,
+        ] {
+            assert_eq!(
+                dcbor_canonical_failure_to_mneme(failure),
+                MnemeError::SerializationNonCanonical
+            );
+        }
+
+        for error in [
+            dcbor_encode_text_not_nfc_error(),
+            dcbor_simple_float_error(),
+            dcbor_indefinite_break_error(),
+            dcbor_decode_text_not_nfc_error(),
+            dcbor_map_key_order_error(),
+            dcbor_nonminimal_u8_length_error(),
+            dcbor_nonminimal_u16_length_error(),
+            dcbor_nonminimal_u32_length_error(),
+            dcbor_nonminimal_u64_length_error(),
+            dcbor_indefinite_length_error(),
+            dcbor_duplicate_map_key_error(),
+            dcbor_reencode_mismatch_error(),
+        ] {
+            assert_eq!(error, MnemeError::SerializationNonCanonical);
+        }
+    }
 
     #[test]
     fn canonical_sorted_map_parses() {

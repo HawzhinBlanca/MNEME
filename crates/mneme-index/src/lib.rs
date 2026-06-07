@@ -2,7 +2,9 @@
 //!
 //! Semantic retrieval uses wrapped `hnsw_rs` with Merkle-committed nodes and
 //! deterministic procedure P (integer distance, ObjectId tie-break). Receipts
-//! prove procedure-faithfulness, **not** exact nearest neighbors (blueprint §3).
+//! prove procedure-faithfulness, **not exact** nearest neighbors (blueprint §3).
+//! Phase I `ExactDominance` is top-k over prover-asserted distances,
+//! not top-k by true query-to-embedding distance until verifiers recompute candidate distances.
 
 #![forbid(unsafe_code)]
 #![deny(warnings)]
@@ -21,6 +23,10 @@ mod procedure;
 mod provenance;
 mod receipt;
 mod semantic;
+mod semantic_load;
+#[cfg(test)]
+#[path = "../../../tests/support/source_inventory.rs"]
+mod source_inventory;
 mod verify;
 mod wire;
 mod zkann;
@@ -53,6 +59,7 @@ pub use receipt::SemanticRecallReceipt;
 pub use receipt::ZkRetrievalAttachment;
 pub use receipt::{ProvenanceAttestation, ZkannAttachment};
 pub use semantic::SemanticIndex;
+pub use semantic_load::load_semantic_commit;
 pub use verify::{
     HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_ads_vo_membership, verify_semantic_receipt_full,
     verify_semantic_receipt_tcb_gate, verify_semantic_receipt_vo, verify_semantic_receipt_vo_zkann,
@@ -222,6 +229,7 @@ mod tests {
         use super::piop_research::{
             PIOP_RESEARCH_HONESTY, PIOP_RESEARCH_STATUS, prove_exact_nn_piop,
         };
+        use mneme_core::MnemeError;
         // Research seam must never claim to prove anything.
         assert!(PIOP_RESEARCH_HONESTY.contains("UNIMPLEMENTED"));
         assert!(PIOP_RESEARCH_HONESTY.contains("proves NOTHING"));
@@ -234,12 +242,50 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "piop_research"))]
     #[test]
     fn piop_research_feature_is_not_default() {
         assert!(
             !cfg!(feature = "piop_research"),
             "piop_research must remain off-by-default and research-only; remove it from default features."
         );
+    }
+
+    #[test]
+    fn index_source_docs_preserve_exact_dominance_distance_caveat() {
+        for (surface, text) in [
+            (
+                "mneme-index crate docs",
+                production_source_before_tests(include_str!("lib.rs")),
+            ),
+            (
+                "mneme-index Cargo feature docs",
+                include_str!("../Cargo.toml"),
+            ),
+            ("mneme-index contract", include_str!("../docs/CONTRACT.md")),
+        ] {
+            assert_distance_caveat(surface, text);
+        }
+    }
+
+    fn production_source_before_tests(source: &str) -> &str {
+        source
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("mneme-index tests should stay after production code")
+    }
+
+    fn assert_distance_caveat(surface: &str, text: &str) {
+        for phrase in [
+            "not exact",
+            "top-k over prover-asserted distances",
+            "not top-k by true query-to-embedding distance",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "{surface} missing required honesty phrase `{phrase}`: {text}"
+            );
+        }
     }
 
     #[cfg(feature = "commitment_binding")]

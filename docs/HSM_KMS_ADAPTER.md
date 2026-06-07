@@ -160,4 +160,7 @@ batch semantics). A new adapter should be held to the same parity scenario
 - Not an actual AWS/GCP/PKCS#11 implementation — none ships here (no credentials in
   the repo). This is the seam + contract only.
 - Not a change to the honesty boundary: a vault proves key *availability*, never
-  semantic truth, and never exact nearest neighbours.
+  semantic truth. Verifiable retrieval still proves procedure-faithfulness,
+  not exact nearest-neighbor optimality: Phase I `ExactDominance` is
+  top-k over prover-asserted distances, not top-k by true query-to-embedding distance until
+  verifiers recompute candidate distances.

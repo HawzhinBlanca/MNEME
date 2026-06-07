@@ -38,7 +38,7 @@ Implementation details may evolve only inside non-contract modules (`dcbor`,
 | INV-7 | Strict parse; `UnknownField`; float/indefinite rejection |
 | INV-9 | Closed `MnemeError` enum (no `Other(String)`) |
 | INV-10 | `FixedPointEmbedding` integer distance + commit |
-| §3 | `ProcedureMismatch` / `BelowTierPolicy` / `ZkProofInvalid` error text: authenticated `≠` true; procedure-faithfulness `≠` exact-NN; binding `≠` SNARK |
+| §3 | `ProcedureMismatch` / `BelowTierPolicy` / `ZkProofInvalid` error text: authenticated `≠` true; procedure-faithfulness `≠` exact-NN / not exact nearest-neighbor / not true nearest neighbors; Phase I `ExactDominance` is top-k over prover-asserted distances, not top-k by true query-to-embedding distance; binding `≠` SNARK |
 
 ## Test vectors (Appendix B items 1–2)
 

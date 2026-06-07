@@ -6,9 +6,14 @@
 mod checkpoint;
 
 use checkpoint::{consistency_proof, root_at_size, verify_consistency};
-use mneme_core::{ConsistencyProof, MnemeError, ObjectId};
+use mneme_core::{
+    ConsistencyProof, MnemeError, ObjectId, ObjectRecord, decode_content_addressed_object_path,
+    from_bytes_strict,
+};
 use mneme_smt::SparseMerkleTree;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::fs;
+use std::path::Path;
 
 /// Live provenance index: head-set SMT root + known-object set + checkpoint log.
 #[derive(Clone, Debug)]
@@ -18,9 +23,66 @@ pub struct DagIndex {
     checkpoints: Vec<[u8; 32]>,
 }
 
+pub struct PersistedDagState {
+    pub dag: DagIndex,
+    pub objects: BTreeMap<[u8; 32], Vec<u8>>,
+}
+
 impl Default for DagIndex {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Load persisted object blobs keyed by their claimed content address and rebuild
+/// the provenance DAG from their parent metadata.
+pub fn load_content_addressed_objects(store: &Path) -> Result<PersistedDagState, MnemeError> {
+    let mut objects = BTreeMap::new();
+    let objects_dir = store.join("objects");
+    if objects_dir.exists() {
+        walk_objects(&objects_dir, &objects_dir, &mut objects)?;
+    }
+    let entries = objects
+        .iter()
+        .map(|(id, bytes)| {
+            Ok((
+                ObjectId(*id),
+                from_bytes_strict::<ObjectRecord>(bytes)?.parent_ids,
+            ))
+        })
+        .collect::<Result<Vec<_>, MnemeError>>()?;
+    let mut dag = DagIndex::new();
+    dag.rebuild_from(&entries)?;
+    Ok(PersistedDagState { dag, objects })
+}
+
+fn walk_objects(
+    objects_dir: &Path,
+    dir: &Path,
+    out: &mut BTreeMap<[u8; 32], Vec<u8>>,
+) -> Result<(), MnemeError> {
+    for entry in fs::read_dir(dir).map_err(|e| io_err(dir, e))? {
+        let entry = entry.map_err(|e| io_err(dir, e))?;
+        let path = entry.path();
+        if path.is_dir() {
+            walk_objects(objects_dir, &path, out)?;
+        } else if path.extension().is_some_and(|e| e == "cbor") {
+            // Preserve the on-disk claim. Verifiers must compare this id with
+            // the blob hash separately so byte flips remain non-tautological.
+            let claimed_id = decode_content_addressed_object_path(objects_dir, &path)?;
+            let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+            if out.insert(claimed_id, bytes).is_some() {
+                return Err(MnemeError::SchemaDrift);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn io_err(path: &Path, err: std::io::Error) -> MnemeError {
+    MnemeError::IoFailed {
+        path: path.display().to_string(),
+        kind: err.kind().to_string(),
     }
 }
 
@@ -267,7 +329,10 @@ fn usize_from_u64(v: u64) -> Result<usize, MnemeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mneme_core::{MemoryKind, hash_obj, to_bytes_canonical};
     use mneme_smt::empty_root;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn oid(byte: u8) -> ObjectId {
         ObjectId::from_bytes([byte; 32])
@@ -279,6 +344,47 @@ mod tests {
             dag.update_heads(*id, &prev).expect("valid chain");
             prev = vec![*id.as_bytes()];
         }
+    }
+
+    struct TempStore {
+        path: PathBuf,
+    }
+
+    impl TempStore {
+        fn new(test_name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time after epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "mneme-dag-{test_name}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("temp store");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempStore {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn hex32(bytes: &[u8; 32]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn fixture_object() -> ([u8; 32], Vec<u8>) {
+        let record = ObjectRecord::fixture(MemoryKind::Episodic);
+        let bytes = to_bytes_canonical(&record).expect("canonical object");
+        (hash_obj(&bytes), bytes)
+    }
+
+    fn write_object(store: &TempStore, shard: &str, name: &str, bytes: &[u8]) {
+        let shard_dir = store.path.join("objects").join(shard);
+        fs::create_dir_all(&shard_dir).expect("object shard");
+        fs::write(shard_dir.join(format!("{name}.cbor")), bytes).expect("object write");
     }
 
     #[test]
@@ -416,5 +522,48 @@ mod tests {
         let mut dag = DagIndex::new();
         let err = dag.rebuild_from(&entries).unwrap_err();
         assert_eq!(err, MnemeError::ProvenanceBroken);
+    }
+
+    #[test]
+    fn load_content_addressed_objects_rejects_wrong_shard_prefix() {
+        let store = TempStore::new("wrong-shard");
+        let (id, bytes) = fixture_object();
+        let id_hex = hex32(&id);
+        let wrong_shard = if &id_hex[..2] == "00" { "ff" } else { "00" };
+        write_object(&store, wrong_shard, &id_hex, &bytes);
+
+        match load_content_addressed_objects(&store.path) {
+            Err(err) => assert_eq!(err, MnemeError::SchemaDrift),
+            Ok(_) => panic!("wrong object shard must fail closed"),
+        }
+    }
+
+    #[test]
+    fn load_content_addressed_objects_rejects_nested_cbor_below_shard() {
+        let store = TempStore::new("nested-object");
+        let (id, bytes) = fixture_object();
+        let id_hex = hex32(&id);
+        let nested = store.path.join("objects").join(&id_hex[..2]).join("nested");
+        fs::create_dir_all(&nested).expect("nested dir");
+        fs::write(nested.join(format!("{id_hex}.cbor")), bytes).expect("nested object");
+
+        match load_content_addressed_objects(&store.path) {
+            Err(err) => assert_eq!(err, MnemeError::SchemaDrift),
+            Ok(_) => panic!("nested object path must fail closed"),
+        }
+    }
+
+    #[test]
+    fn load_content_addressed_objects_preserves_claimed_filename_id() {
+        let store = TempStore::new("claimed-id");
+        let (actual_id, bytes) = fixture_object();
+        let claimed_id = [0xAB; 32];
+        assert_ne!(claimed_id, actual_id);
+        let claimed_hex = hex32(&claimed_id);
+        write_object(&store, &claimed_hex[..2], &claimed_hex, &bytes);
+
+        let loaded = load_content_addressed_objects(&store.path).expect("load object");
+        assert!(loaded.objects.contains_key(&claimed_id));
+        assert!(!loaded.objects.contains_key(&actual_id));
     }
 }

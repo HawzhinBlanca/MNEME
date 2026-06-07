@@ -4,16 +4,19 @@ use crate::state::{ApiError, AppState, capability_from_header, check_rate_limit,
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use mneme_cap::Capability;
-use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
+use mneme_core::{
+    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier,
+};
 use mneme_core::{MnemeError, ObjectId};
 use serde::{Deserialize, Serialize};
 
 const AUTH_VERIFY_BODY_LIMIT_BYTES: usize = 8 * 1024;
+const DEFAULT_RECALL_MIN_TIER: TrustTier = TrustTier::Working;
 
 #[derive(Serialize)]
 struct ErrorBody {
@@ -23,9 +26,8 @@ struct ErrorBody {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         (
-            status,
+            self.status,
             Json(ErrorBody {
                 code: self.code,
                 message: self.message,
@@ -183,7 +185,7 @@ async fn recall(
     let cap = auth_cap(&headers)?;
     check_rate_limit(&state, &cap)?;
     verify_cap(&state, &cap)?;
-    let min_tier = parse_tier(params.min_tier.as_deref().unwrap_or("working"))?;
+    let min_tier = parse_optional_tier(params.min_tier.as_deref())?;
     let store = state
         .store
         .lock()
@@ -196,16 +198,11 @@ async fn recall(
     let entries = store
         .recall_verified_default(&query, &cap)
         .map_err(ApiError::from_mneme)?;
-    Ok(Json(RecallResponse {
-        entries: entries
-            .into_iter()
-            .map(|e| RecallEntryJson {
-                object_id_hex: hex::encode(e.id.as_bytes()),
-                body: String::from_utf8_lossy(&e.plaintext).into_owned(),
-                trust_tier: e.record.trust_tier,
-            })
-            .collect(),
-    }))
+    let entries = entries
+        .into_iter()
+        .map(recall_entry_json)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(RecallResponse { entries }))
 }
 
 #[derive(Deserialize)]
@@ -340,14 +337,110 @@ fn parse_kind(s: &str) -> Result<MemoryKind, ApiError> {
 }
 
 fn parse_tier(s: &str) -> Result<TrustTier, ApiError> {
-    TrustTier::from_u8(match s.to_lowercase().as_str() {
-        "quarantine" => 0,
-        "working" => 1,
-        "trusted" => 2,
-        "identity" => 3,
-        _ => return Err(ApiError::bad_request("invalid trust tier")),
+    match s.to_lowercase().as_str() {
+        "quarantine" => Ok(TrustTier::Quarantine),
+        "working" => Ok(TrustTier::Working),
+        "trusted" => Ok(TrustTier::Trusted),
+        "identity" => Ok(TrustTier::Identity),
+        _ => Err(ApiError::bad_request("invalid trust tier")),
+    }
+}
+
+fn parse_optional_tier(s: Option<&str>) -> Result<TrustTier, ApiError> {
+    match s {
+        Some(tier) => parse_tier(tier),
+        None => Ok(DEFAULT_RECALL_MIN_TIER),
+    }
+}
+
+fn recall_entry_json(entry: Entry) -> Result<RecallEntryJson, ApiError> {
+    let trust_tier = TrustTier::from_u8(entry.record.trust_tier).map_err(ApiError::from_mneme)?;
+    let body = String::from_utf8(entry.plaintext)
+        .map_err(|_| ApiError::from_mneme(MnemeError::SchemaDrift))?;
+    Ok(RecallEntryJson {
+        object_id_hex: hex::encode(entry.id.as_bytes()),
+        body,
+        trust_tier: trust_tier.as_u8(),
     })
-    .map_err(ApiError::from_mneme)
 }
 
 use crate::state::parse_capability_b64;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use mneme_core::{HlcWire, OBJECT_VERSION, ObjectId, ObjectRecord, PayloadEnc};
+
+    fn test_recall_entry_with_trust_tier(trust_tier: u8) -> Entry {
+        Entry {
+            id: ObjectId::from_bytes([0x11; 32]),
+            record: ObjectRecord {
+                version: OBJECT_VERSION,
+                kind: MemoryKind::Semantic as u8,
+                parent_ids: vec![],
+                writer: [0x22; 32],
+                session: [0x33; 16],
+                hlc: HlcWire {
+                    wall_ms: 1,
+                    counter: 0,
+                    node_id: [0x44; 16],
+                },
+                trust_tier,
+                payload_enc: PayloadEnc {
+                    alg: 0,
+                    key_id: None,
+                    nonce: None,
+                    body: b"hello".to_vec(),
+                },
+                embedding_commit: None,
+                redaction_slot: None,
+                ext: None,
+            },
+            plaintext: b"hello".to_vec(),
+        }
+    }
+
+    fn test_recall_entry_with_plaintext(plaintext: Vec<u8>) -> Entry {
+        Entry {
+            plaintext,
+            ..test_recall_entry_with_trust_tier(TrustTier::Working.as_u8())
+        }
+    }
+
+    #[test]
+    fn recall_entry_json_preserves_valid_trust_tier() {
+        let entry = test_recall_entry_with_trust_tier(TrustTier::Working.as_u8());
+        let json =
+            recall_entry_json(entry).unwrap_or_else(|err| panic!("valid tier rejected: {err:?}"));
+
+        assert_eq!(json.body, "hello");
+        assert_eq!(json.trust_tier, TrustTier::Working.as_u8());
+    }
+
+    #[test]
+    fn recall_entry_json_rejects_invalid_trust_tier() {
+        let entry = test_recall_entry_with_trust_tier(7);
+        let err = match recall_entry_json(entry) {
+            Ok(_) => panic!("invalid trust tier unexpectedly serialized"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.code, "kernel_error");
+        assert_eq!(err.message, "schema drift");
+    }
+
+    #[test]
+    fn recall_entry_json_rejects_non_utf8_plaintext() {
+        let entry = test_recall_entry_with_plaintext(vec![0xff, 0xfe]);
+        let err = match recall_entry_json(entry) {
+            Ok(_) => panic!("invalid UTF-8 plaintext unexpectedly serialized"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.code, "kernel_error");
+        assert_eq!(err.message, "schema drift");
+    }
+}

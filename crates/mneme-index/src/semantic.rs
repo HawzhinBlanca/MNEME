@@ -49,10 +49,11 @@ impl SemanticIndex {
         object_id: ObjectId,
         embedding: FixedPointEmbedding,
     ) -> Result<(), IndexError> {
-        let commit = embedding.commit();
         if self.entries.contains_key(object_id.as_bytes()) {
             return Err(IndexError::DuplicateObject);
         }
+        embedding.validate_shape()?;
+        let commit = embedding.commit();
         self.hnsw.insert(object_id, &embedding)?;
         self.entries.insert(
             *object_id.as_bytes(),
@@ -136,8 +137,9 @@ impl SemanticIndex {
         proc: &Procedure,
         query: &FixedPointEmbedding,
     ) -> Result<(Vec<ObjectId>, VerificationObject), IndexError> {
+        query.validate_shape()?;
         let entries = self.sorted_entries();
-        let (result_ids, candidates) = execute_procedure_p(proc, query, &entries);
+        let (result_ids, candidates) = execute_procedure_p(proc, query, &entries)?;
 
         let mut leaf_indices = Vec::with_capacity(self.merkle.leaf_count());
         let nodes: Vec<([u8; 32], Vec<[u8; 32]>)> = (0..self.merkle.leaf_count())
@@ -172,6 +174,7 @@ impl SemanticIndex {
         proc: &Procedure,
         query: &FixedPointEmbedding,
     ) -> Result<(Vec<ObjectId>, VerificationObject), IndexError> {
+        query.validate_shape()?;
         use std::collections::HashSet;
         let visited = self
             .hnsw
@@ -185,7 +188,7 @@ impl SemanticIndex {
             .into_iter()
             .filter(|e| visited_set.contains(&e.object_id))
             .collect();
-        let (result_ids, candidates) = execute_procedure_p(proc, query, &entries);
+        let (result_ids, candidates) = execute_procedure_p(proc, query, &entries)?;
         let mut nodes = Vec::new();
         let mut leaf_indices = Vec::new();
         for (i, entry) in self.sorted_entries().iter().enumerate() {
@@ -405,5 +408,46 @@ mod tests {
         let _approx = index.approximate_search(&p, &query);
         // Honesty: deterministic procedure is authoritative for receipts.
         assert!(!det.is_empty());
+    }
+
+    #[test]
+    fn semantic_insert_rejects_public_zero_dim_embedding() {
+        let mut index = SemanticIndex::new();
+        let malformed = FixedPointEmbedding {
+            dim: 0,
+            scale: 0,
+            components: Vec::new(),
+        };
+
+        assert_eq!(
+            index.insert(oid(0x01), malformed),
+            Err(IndexError::EmbeddingShape)
+        );
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn semantic_search_rejects_public_zero_dim_query() {
+        let mut index = SemanticIndex::new();
+        index
+            .insert(
+                oid(0x01),
+                FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap(),
+            )
+            .unwrap();
+        let malformed = FixedPointEmbedding {
+            dim: 0,
+            scale: 0,
+            components: Vec::new(),
+        };
+
+        assert_eq!(
+            index.search_deterministic(&proc(), &malformed),
+            Err(IndexError::EmbeddingShape)
+        );
+        assert_eq!(
+            index.search_deterministic_on_visited(&proc(), &malformed),
+            Err(IndexError::EmbeddingShape)
+        );
     }
 }

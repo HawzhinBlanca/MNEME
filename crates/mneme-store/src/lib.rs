@@ -48,6 +48,12 @@ use std::path::{Path, PathBuf};
 /// full the slot set is reset rather than evicted one-by-one (deterministic).
 const RECALL_CACHE_CAP: usize = 256;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StoreLocalSchemaFailure {
+    MissingObjectKey,
+    BenchEmbeddingZeroDimension,
+}
+
 /// §22 session verified-recall cache (K3 "cache last verified root + receipt for
 /// repeated queries in a session"). Holds results that already passed
 /// [`verify_recall`], keyed by `(logical_key_hash, min_tier)` and bound to the
@@ -220,6 +226,11 @@ impl Store {
             trust.last_seen_hlc = Some(max_hlc);
         }
         mneme_root::check_replay(&root, trust.last_seen_hlc)?;
+        mneme_root::verify_checkpoint_chain(path, &trust.operator_keys, &stored)?;
+        if state.key_index.root() != root.key_index_root {
+            return Err(MnemeError::RootInconsistent);
+        }
+        validate_live_key_index_object_keys(&state)?;
         let mut store = Self {
             path: path.to_path_buf(),
             operator,
@@ -238,6 +249,9 @@ impl Store {
             recall_cache: RefCell::new(RecallSessionCache::default()),
         };
         store.rebuild_semantic_index()?;
+        if store.semantic.semantic_commit() != root.semantic_commit {
+            return Err(MnemeError::RootInconsistent);
+        }
         Ok(store)
     }
 
@@ -862,7 +876,7 @@ impl Store {
             let logical_key = self
                 .object_keys
                 .get(entry.id.as_bytes())
-                .ok_or(MnemeError::SchemaDrift)?;
+                .ok_or_else(missing_object_key_error)?;
             entry.plaintext = open_payload(
                 &*self.vault,
                 &entry.record.payload_enc,
@@ -951,7 +965,7 @@ impl Store {
 #[doc(hidden)]
 pub fn bench_embedding(i: usize, dim: u32) -> Result<FixedPointEmbedding, MnemeError> {
     if dim == 0 {
-        return Err(MnemeError::SchemaDrift);
+        return Err(bench_embedding_dimension_error());
     }
     let mut components = vec![0i16; dim as usize];
     for (d, slot) in components.iter_mut().enumerate() {
@@ -962,6 +976,42 @@ pub fn bench_embedding(i: usize, dim: u32) -> Result<FixedPointEmbedding, MnemeE
         *slot = ((mixed >> 17) % 2048) as i16 - 1024;
     }
     FixedPointEmbedding::new(dim, 0, components)
+}
+
+fn validate_live_key_index_object_keys(state: &layout::LoadedState) -> Result<(), MnemeError> {
+    for (key_hash, object_id) in &state.key_to_object {
+        if !state.objects.contains_key(object_id) {
+            return Err(MnemeError::RootInconsistent);
+        }
+        match state.object_keys.get(object_id) {
+            Some(logical_key) if logical_key.hash() == *key_hash => {}
+            _ => return Err(MnemeError::RootInconsistent),
+        }
+    }
+    for (object_id, logical_key) in &state.object_keys {
+        if !state.objects.contains_key(object_id) {
+            return Err(MnemeError::RootInconsistent);
+        }
+        if state.key_index.tree().get(&logical_key.hash()).is_none() {
+            return Err(MnemeError::RootInconsistent);
+        }
+    }
+    Ok(())
+}
+
+fn store_local_schema_failure_to_mneme(failure: StoreLocalSchemaFailure) -> MnemeError {
+    match failure {
+        StoreLocalSchemaFailure::MissingObjectKey
+        | StoreLocalSchemaFailure::BenchEmbeddingZeroDimension => MnemeError::SchemaDrift,
+    }
+}
+
+fn missing_object_key_error() -> MnemeError {
+    store_local_schema_failure_to_mneme(StoreLocalSchemaFailure::MissingObjectKey)
+}
+
+fn bench_embedding_dimension_error() -> MnemeError {
+    store_local_schema_failure_to_mneme(StoreLocalSchemaFailure::BenchEmbeddingZeroDimension)
 }
 
 fn provenance_objects_for_bytes(
@@ -1000,6 +1050,7 @@ fn provenance_objects_for_ids(
 fn index_err(e: mneme_index::IndexError) -> MnemeError {
     match e {
         mneme_index::IndexError::SemanticNotImplemented => MnemeError::ProcedureMismatch,
+        mneme_index::IndexError::EmbeddingShape => MnemeError::SchemaDrift,
         mneme_index::IndexError::DuplicateObject | mneme_index::IndexError::ObjectNotIndexed => {
             MnemeError::IndexPathInvalid
         }

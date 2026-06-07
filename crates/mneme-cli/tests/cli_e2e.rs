@@ -622,5 +622,14 @@ fn attest_emits_sigstore_statement() {
         .arg(&root)
         .assert()
         .success()
-        .stdout(predicate::str::contains("in-toto.io/Statement"));
+        .stdout(predicate::str::contains("in-toto.io/Statement"))
+        .stdout(predicate::str::contains("authenticated"))
+        .stdout(predicate::str::contains("not truth"))
+        .stdout(predicate::str::contains("not exact"))
+        .stdout(predicate::str::contains(
+            "top-k over prover-asserted distances",
+        ))
+        .stdout(predicate::str::contains(
+            "not top-k by true query-to-embedding distance",
+        ));
 }

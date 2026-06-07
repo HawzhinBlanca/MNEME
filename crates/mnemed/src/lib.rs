@@ -24,11 +24,20 @@ use tokio::net::TcpListener;
 
 type ServerTaskResult = Result<(), MnemeError>;
 type ServerTaskHandle = tokio::task::JoinHandle<ServerTaskResult>;
+type ServerTaskJoin = Result<ServerTaskResult, tokio::task::JoinError>;
+
+pub const DEFAULT_RATE_LIMIT_PER_MINUTE: u32 = 120;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum ShutdownSignalDelivery {
     Delivered,
     NoReceivers,
+}
+
+enum ServerTaskShutdownOutcome {
+    Completed,
+    Failed(MnemeError),
+    Panicked(tokio::task::JoinError),
 }
 
 pub struct ServerConfig {
@@ -44,7 +53,7 @@ impl Default for ServerConfig {
             http_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
             grpc_addr: None,
             unix_socket: None,
-            rate_limit_per_minute: 120,
+            rate_limit_per_minute: DEFAULT_RATE_LIMIT_PER_MINUTE,
         }
     }
 }
@@ -64,10 +73,8 @@ impl RunningServer {
             ShutdownSignalDelivery::Delivered | ShutdownSignalDelivery::NoReceivers => {}
         }
         for handle in self.handles {
-            handle
-                .await
-                .expect("server task panicked during shutdown")
-                .expect("server task failed during shutdown");
+            let task_shutdown = observe_server_task_shutdown(handle).await;
+            assert_server_task_shutdown_completed(task_shutdown);
         }
     }
 }
@@ -78,6 +85,30 @@ fn notify_running_server_shutdown(
     match shutdown.send(()) {
         Ok(()) => ShutdownSignalDelivery::Delivered,
         Err(_) => ShutdownSignalDelivery::NoReceivers,
+    }
+}
+
+async fn observe_server_task_shutdown(handle: ServerTaskHandle) -> ServerTaskShutdownOutcome {
+    classify_server_task_shutdown(handle.await)
+}
+
+fn classify_server_task_shutdown(join: ServerTaskJoin) -> ServerTaskShutdownOutcome {
+    match join {
+        Ok(Ok(())) => ServerTaskShutdownOutcome::Completed,
+        Ok(Err(err)) => ServerTaskShutdownOutcome::Failed(err),
+        Err(err) => ServerTaskShutdownOutcome::Panicked(err),
+    }
+}
+
+fn assert_server_task_shutdown_completed(task_shutdown: ServerTaskShutdownOutcome) {
+    match task_shutdown {
+        ServerTaskShutdownOutcome::Completed => {}
+        ServerTaskShutdownOutcome::Failed(err) => {
+            panic!("server task failed during shutdown: {err:?}")
+        }
+        ServerTaskShutdownOutcome::Panicked(err) => {
+            panic!("server task panicked during shutdown: {err}")
+        }
     }
 }
 
@@ -95,7 +126,7 @@ pub fn test_state(store_path: &Path) -> Result<(AppState, KeyPair, KeyPair), Mne
     let state = AppState {
         store: shared,
         operator: Arc::new(operator.clone()),
-        rate_limit: Arc::new(Mutex::new(RateLimiter::new(120))),
+        rate_limit: Arc::new(Mutex::new(RateLimiter::new(DEFAULT_RATE_LIMIT_PER_MINUTE))),
     };
     Ok((state, operator, agent))
 }
@@ -233,6 +264,42 @@ pub fn cap_to_b64(cap: &mneme_cap::Capability) -> Result<String, MnemeError> {
 mod tests {
     use super::*;
 
+    const RUNNING_SERVER_SHUTDOWN_HELPER_TIMEOUT: std::time::Duration =
+        std::time::Duration::from_secs(1);
+
+    fn panic_server_task_boom() {
+        panic!("server task boom");
+    }
+
+    fn expect_shutdown_signal_sent(shutdown: &tokio::sync::watch::Sender<()>, context: &str) {
+        if shutdown.send(()).is_err() {
+            panic!("{context}: shutdown signal send failed");
+        }
+    }
+
+    async fn expect_running_server_shutdown_helper_exit(
+        shutdown_rx: tokio::sync::watch::Receiver<()>,
+        context: &str,
+    ) {
+        tokio::time::timeout(
+            RUNNING_SERVER_SHUTDOWN_HELPER_TIMEOUT,
+            wait_for_running_server_shutdown(shutdown_rx),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{context}: shutdown helper did not exit"));
+    }
+
+    fn expect_running_server_tempdir(context: &str) -> tempfile::TempDir {
+        tempfile::tempdir()
+            .unwrap_or_else(|err| panic!("{context}: RunningServer tempdir failed: {err}"))
+    }
+
+    fn expect_running_server_test_state(store_path: &Path, context: &str) -> AppState {
+        let (state, _, _) = test_state(store_path)
+            .unwrap_or_else(|err| panic!("{context}: RunningServer test state failed: {err:?}"));
+        state
+    }
+
     #[test]
     fn running_server_shutdown_notification_reports_delivered_with_receiver() {
         let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(());
@@ -259,14 +326,10 @@ mod tests {
     async fn running_server_shutdown_signal_helper_observes_send() {
         let (shutdown, shutdown_rx) = tokio::sync::watch::channel(());
 
-        shutdown.send(()).expect("send shutdown");
+        expect_shutdown_signal_sent(&shutdown, "shutdown helper signal test");
 
-        tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            wait_for_running_server_shutdown(shutdown_rx),
-        )
-        .await
-        .expect("shutdown helper exits after signal");
+        expect_running_server_shutdown_helper_exit(shutdown_rx, "shutdown helper signal test")
+            .await;
     }
 
     #[tokio::test]
@@ -275,23 +338,18 @@ mod tests {
 
         drop(shutdown);
 
-        tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            wait_for_running_server_shutdown(shutdown_rx),
-        )
-        .await
-        .expect("shutdown helper exits after owner drop");
+        expect_running_server_shutdown_helper_exit(shutdown_rx, "shutdown helper owner-drop test")
+            .await;
     }
 
     #[tokio::test]
     #[should_panic(expected = "server task panicked during shutdown")]
     async fn running_server_shutdown_surfaces_task_panic() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let (state, _, _) = test_state(dir.path()).expect("test_state");
+        let dir = expect_running_server_tempdir("shutdown panic fixture");
+        let state = expect_running_server_test_state(dir.path(), "shutdown panic fixture");
         let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(());
         let handle = tokio::spawn(async {
-            panic!("server task boom");
-            #[allow(unreachable_code)]
+            panic_server_task_boom();
             Ok::<(), MnemeError>(())
         });
 
@@ -310,8 +368,8 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "server task failed during shutdown")]
     async fn running_server_shutdown_surfaces_task_error() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let (state, _, _) = test_state(dir.path()).expect("test_state");
+        let dir = expect_running_server_tempdir("shutdown task-error fixture");
+        let state = expect_running_server_test_state(dir.path(), "shutdown task-error fixture");
         let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(());
         let handle = tokio::spawn(async {
             Err::<(), MnemeError>(MnemeError::IoFailed {

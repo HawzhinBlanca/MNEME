@@ -18,7 +18,7 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
 
 | In scope (Phase I) | Out of scope (later phases) |
 |---|---|
-| **zkANN-1**: proven-correct retrieval (exact dominance now; HNSW audit-on-demand) | TEE Context Gate / attested inference (Phase II) |
+| **zkANN-1**: authenticated dominance evidence (complete flat set now; HNSW audit-on-demand) | TEE Context Gate / attested inference (Phase II) |
 | **Bi-temporal ledger**: `recall_verified_at` against historical signed roots | ZK-proving the model (never — seal the boundary instead) |
 | **Poison-evidence**: provenance-scoped recall whose receipt proves the filter held | Capability→action non-repudiation (Phase III) |
 | **Certificate v1** + offline verifier SDK (memory + retrieval + time) | Machine-checked TCB proof (Phase III) |
@@ -28,11 +28,12 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
 
 ## 1. Exit criteria (Phase I = done when all green)
 
-### P1-1 — zkANN-1: proven-correct retrieval (P0)
+### P1-1 — zkANN-1: authenticated dominance evidence (P0)
 - [x] **Exact path (flat/brute-force index):** a recall returns `(entries, proof)` where the proof
-  establishes **dominance** — every returned top-k distance is ≤ every non-returned candidate's
-  distance over the *committed* vector set, bound to the signed `semantic_commit`. Verifier
-  rejects any reordered/truncated/padded result with a typed `MnemeError`.
+  establishes **membership/completeness** for the full committed vector set and **dominance over
+  prover-asserted distances** — not top-k by true query-to-embedding distance until the verifier
+  can recompute candidate distances from committed embeddings. Verifier rejects any
+  reordered/truncated/padded result with a typed `MnemeError`.
 - [x] **HNSW path (approximate):** **prover-asserted authenticated set** — `visited_order` is
   checked for membership + top-k dominance over that set only; the verifier does **not** replay an
   HNSW graph walk (adjacency is not committed). Honest level: *dominance over prover-chosen
@@ -77,7 +78,7 @@ It deliberately stops *before* the TEE Context Gate (Phase II).
 ## 2. Prioritized task DAG
 
 ```
-Wave I-A (parallel):  zkANN-1 exact-dominance (Crypto/ZK)  ┐
+Wave I-A (parallel):  zkANN-1 authenticated dominance       ┐
                       bi-temporal ledger (Core Kernel)     ├─▶ Certificate v1 assembler (Verifier TCB)
                       provenance-filter recall (Core Kernel)┘            │
 Wave I-B:             zkANN-1 HNSW audit-on-demand ────────────────────▶ offline verifier SDK + crossref
@@ -93,7 +94,7 @@ schema; the HNSW audit-on-demand path (P1-1b) can land after the exact path prov
 
 | Module | Phase I responsibility |
 |---|---|
-| `mneme-index` | zkANN-1 prover (dominance + audit-on-demand) on the existing HNSW/flat path; `pedersen_schnorr_zk`-gated (renamed from `plonky2_prover` for honesty) |
+| `mneme-index` | zkANN-1 prover (authenticated dominance + audit-on-demand) on the existing HNSW/flat path; `pedersen_schnorr_zk`-gated (renamed from `plonky2_prover` for honesty) |
 | `mneme-verify` | zkANN-1 + certificate verification gates (budgeted; justify every line) |
 | `mneme-core` | `Draft` valid-time field; `CognitionCertificate` + `AsOf` interface types (freeze-reviewed) |
 | `mneme-store` | `recall_verified_at`; provenance-filter recall; auditable promotion event |
@@ -122,10 +123,12 @@ scripts/ci/cross-implementation-vectors.sh                    # crossref verifie
 ## 5. Honesty boundary (Phase I refinement — non-negotiable)
 
 1. **Authenticated ≠ true.** Unchanged.
-2. **zkANN-1 narrows, does not eliminate, the NN caveat.** The exact path proves **dominance over
-   the committed set** (true top-k for a flat index). The HNSW path proves **dominance over a
-   prover-asserted set of authenticated members** (`visited_order`) — *not* graph-walk replay and
-   *not* global exact nearest neighbors.
+2. **zkANN-1 narrows, does not eliminate, the NN caveat.** The exact path proves
+   **membership/completeness over the committed set** and **top-k over prover-asserted distances**
+   — *not* top-k by true query-to-embedding distance until the verifier can recompute distances
+   from committed embeddings. The HNSW path proves **dominance over a prover-asserted set of
+   authenticated members** (`visited_order`) — *not* graph-walk replay and *not* global exact
+   nearest neighbors.
    Global succinct exact-NN over HNSW awaits the [zkRAG-style PIOP](https://eprint.iacr.org/2026/709)
    (later phase). Label the level achieved in the certificate (`retrieval_proof_level`).
 3. **Bi-temporal recall proves what was *authenticated* when — not what was *true* when.**

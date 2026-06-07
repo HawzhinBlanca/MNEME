@@ -15,7 +15,7 @@ pub fn sigstore_statement(root_bytes: &[u8]) -> serde_json::Value {
         "predicateType": "https://mneme.dev/attestation/root/v1",
         "predicate": {
             "kind": "mneme-root-checkpoint",
-            "honesty": "authenticated integrity only; not truth or exact-NN"
+            "honesty": "authenticated integrity only; not truth; not exact nearest-neighbor. Phase I ExactDominance is top-k over prover-asserted distances, not top-k by true query-to-embedding distance until verifiers recompute candidate distances."
         }
     })
 }
