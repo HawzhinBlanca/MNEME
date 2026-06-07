@@ -47,7 +47,7 @@ enum Commands {
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
     },
-    /// Print provenance, writers, tiers, tombstones for a root checkpoint
+    /// [Not yet implemented] Print provenance, writers, tiers, tombstones for a root checkpoint
     Audit { root: PathBuf },
     /// Key recall under min trust tier (verified)
     Recall {
@@ -409,7 +409,12 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Audit { root } => require_path_exists(&root, "root checkpoint"),
+        Commands::Audit { root: _root } => {
+            eprintln!(
+                "mneme: audit is not yet implemented (provenance/writer/tier/tombstone dump deferred)"
+            );
+            Err(CliErrorKind::StoreUnavailable)
+        }
         Commands::Certify {
             store,
             out,
@@ -573,11 +578,6 @@ fn parse_i16_list(s: &str) -> Result<Vec<i16>, CliErrorKind> {
     s.split(',')
         .map(|part| part.trim().parse::<i16>().map_err(|_| CliErrorKind::Usage))
         .collect()
-}
-
-fn require_path_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {
-    require_file_exists(path, label)?;
-    Err(CliErrorKind::StoreUnavailable)
 }
 
 fn require_file_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {
