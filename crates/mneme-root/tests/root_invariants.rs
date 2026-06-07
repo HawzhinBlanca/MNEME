@@ -1,6 +1,6 @@
 //! Root invariant tests (§17.1 red→green, INV-4, INV-6).
 
-use mneme_core::{MnemeError, RootPreimage};
+use mneme_core::{Hlc, MnemeError, NodeId, RootPreimage};
 use mneme_crypto::KeyPair;
 use mneme_root::{CheckpointLog, ROOT_VERSION, StoredRoot, check_replay, verify_root_chain};
 use std::path::Path;
@@ -9,6 +9,15 @@ fn sample_hlc(n: u8) -> [u8; 14] {
     let mut out = [0u8; 14];
     out[0] = n;
     out
+}
+
+fn hlc_wire(wall_ms: u64, counter: u32) -> [u8; 14] {
+    Hlc {
+        wall_ms,
+        counter,
+        node_id: NodeId([0; 16]),
+    }
+    .to_bytes()
 }
 
 fn sample_roots() -> ([u8; 32], [u8; 32], [u8; 32]) {
@@ -118,6 +127,19 @@ fn check_replay_rejects_older_hlc() {
     check_replay(&root.to_root(), Some(sample_hlc(2))).unwrap_err();
     check_replay(&root.to_root(), Some(sample_hlc(1))).expect("equal ok");
     check_replay(&root.to_root(), Some(sample_hlc(0))).expect("older ok");
+}
+
+#[test]
+fn check_replay_rejects_numeric_hlc_regression_across_byte_boundary() {
+    let (dag, key, sem) = sample_roots();
+    let op = operator();
+    let advanced =
+        StoredRoot::assemble(dag, key, sem, hlc_wire(256, 0), [0u8; 32], 1, &op).expect("root");
+    let regressed =
+        StoredRoot::assemble(dag, key, sem, hlc_wire(255, 0), [0u8; 32], 2, &op).expect("root");
+    let err = check_replay(&regressed.to_root(), Some(hlc_wire(256, 0))).unwrap_err();
+    assert_eq!(err, MnemeError::RootReplayed);
+    check_replay(&advanced.to_root(), Some(hlc_wire(255, 0))).expect("advance ok");
 }
 
 #[test]

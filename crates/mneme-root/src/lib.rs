@@ -8,7 +8,7 @@ mod wire;
 
 pub use checkpoint::{CheckpointLog, max_signed_checkpoint, verify_checkpoint_chain};
 
-use mneme_core::{MnemeError, Root, RootPreimage, from_bytes_strict, to_bytes_canonical};
+use mneme_core::{MnemeError, Root, RootPreimage, cmp_wire, from_bytes_strict, to_bytes_canonical};
 use mneme_crypto::{KeyPair, verify_signature_bytes};
 
 pub const ROOT_VERSION: u16 = 1;
@@ -126,7 +126,7 @@ pub fn verify_root_chain(current: &Root, previous: Option<&Root>) -> Result<(), 
 /// Reject roots whose HLC high-water mark regresses (INV-6 / A-REPLAY).
 pub fn check_replay(current: &Root, last_seen_hlc: Option<[u8; 14]>) -> Result<(), MnemeError> {
     if let Some(last) = last_seen_hlc {
-        if current.hlc_max < last {
+        if cmp_wire(&current.hlc_max, &last) == std::cmp::Ordering::Less {
             return Err(MnemeError::RootReplayed);
         }
     }

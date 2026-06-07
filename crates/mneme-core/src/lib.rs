@@ -11,6 +11,7 @@ pub mod hex;
 pub mod hlc;
 pub mod interface;
 pub mod object;
+pub mod object_path;
 pub mod output;
 pub mod types;
 
@@ -38,7 +39,7 @@ pub use enclave::{
 };
 pub use error::MnemeError;
 pub use hex::decode_hex32;
-pub use hlc::{Hlc, NodeId};
+pub use hlc::{Hlc, NodeId, cmp_wire};
 pub use interface::{
     AsOf, AssemblyProfile, COGNITION_CERT_VERSION, COGNITION_CERT_VERSION_V2_DRAFT,
     CONTRACT_VERSION, CandidateProvenance, Capability, Caveat, ConsistencyProof,
@@ -51,4 +52,5 @@ pub use object::{
     EXT_VALID_TIME_MS, HlcWire, MemoryKind, OBJECT_VERSION, ObjectRecord, PayloadEnc,
     ext_map_with_valid_time, valid_time_from_ext,
 };
+pub use object_path::decode_content_addressed_object_path;
 pub use output::{OUTPUT_BINDING_VERSION, decode_output_binding, encode_output_binding};
