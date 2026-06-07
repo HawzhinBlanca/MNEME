@@ -36,7 +36,7 @@ is fail-closed (returns a typed `MnemeError`, never panics on attacker input).
 | `mneme-dag`: `DagIndex::new`, `rebuild_from`, `root` | `verify_store` rebuilds the DAG from on-disk objects and compares its root to `root.dag_head_root` (store.rs) |
 | `mneme-smt`: `verify_membership`, `verify_non_membership`, `hash_up`, `membership_leaf_hash` | Merkle path recomputation |
 | `mneme-index`: `key_index_load::{load_object_keys, load_key_index_tree}` | parses untrusted on-disk sidecars for `verify_store`; **linted by `verify-tcb-guard.sh`** |
-| `mneme-index`: `verify_ads_vo` | semantic ADS verification-object check |
+| `mneme-index`: `verify_semantic_receipt_tcb_gate` (→ `verify.rs`, `procedure.rs`, `provenance.rs`, `commit.rs`, `semantic_zk.rs`, `zkann.rs`; calls `verify_ads_vo_membership` / `verify_ads_vo` internally) | semantic receipt TCB gate: ADS VO membership + provenance + procedure replay |
 | `mneme-core`: dCBOR `decode_strict`/`from_bytes_strict`, `decode_hex32`, `hash_obj`, domain hashes | canonical decode (bounded alloc) + content addressing |
 
 ## Honesty boundary
