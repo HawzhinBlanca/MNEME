@@ -16,7 +16,7 @@ pub enum MnemeError {
     #[error("index merkle path invalid")]
     IndexPathInvalid,
     #[error(
-        "procedure replay mismatch: receipt proves procedure-faithfulness over committed data, not exact nearest-neighbor optimality and not true nearest neighbors. Phase I ExactDominance is top-k over prover-asserted distances, not top-k by true query-to-embedding distance until verifiers recompute candidate distances (§3 honesty boundary)"
+        "procedure replay mismatch: receipt proves procedure-faithfulness over committed data, not exact nearest-neighbor optimality and not true nearest neighbors. Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding distance until verifiers recompute candidate distances (§3 honesty boundary)"
     )]
     ProcedureMismatch,
     #[error("commitment binding proof invalid (not a SNARK verifier)")]
@@ -69,7 +69,9 @@ pub enum MnemeError {
     KeyVaultCorrupt,
     #[error("cognition certificate invalid")]
     CertificateInvalid,
-    #[error("retrieval dominance proof failed")]
+    #[error(
+        "retrieval dominance proof failed: receipt proves procedure-faithfulness over committed data, not exact nearest-neighbor optimality and not true nearest neighbors. Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding distance until verifiers recompute candidate distances (§3 honesty boundary)"
+    )]
     RetrievalDominanceFailed,
     #[error("historical recall anchor invalid or not in verified checkpoint chain")]
     HistoricalRecallInvalid,
@@ -88,6 +90,10 @@ mod tests {
             &MnemeError::ProcedureMismatch.to_string(),
         );
         assert_distance_caveat(
+            "RetrievalDominanceFailed",
+            &MnemeError::RetrievalDominanceFailed.to_string(),
+        );
+        assert_distance_caveat(
             "mneme-core docs contract",
             include_str!("../docs/CONTRACT.md"),
         );
@@ -102,7 +108,9 @@ mod tests {
             "procedure-faithfulness",
             "not exact",
             "not true nearest neighbors",
+            "membership/completeness",
             "top-k over prover-asserted distances",
+            "top-k ranking is not proven",
             "not top-k by true query-to-embedding distance",
         ] {
             assert!(

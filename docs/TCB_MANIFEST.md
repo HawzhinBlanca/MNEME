@@ -44,3 +44,7 @@ is fail-closed (returns a typed `MnemeError`, never panics on attacker input).
   the canonical codec, which are audited libraries / Tier-2 trusted functions.
 - A change that adds a new Tier-2 dependency from `mneme-verify` must update this
   manifest and, if it parses untrusted bytes, be added to the guard's lint set.
+- A change that raises the Tier-1 budget or expands the semantic receipt Tier-2
+  surface is incomplete until this manifest names the added files/functions and
+  `scripts/ci/verify-tcb-guard.sh` either lints them or records a narrow,
+  code-local allow marker for each unavoidable exception.

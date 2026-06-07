@@ -5,7 +5,7 @@ use crate::procedure::replay_from_candidates;
 use crate::receipt::SemanticRecallReceipt;
 use crate::verify::verify_ads_vo;
 use mneme_core::{MnemeError, ObjectId, Procedure, RetrievalProofLevel, VerificationObject};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ZkannFailure {
@@ -131,7 +131,7 @@ pub fn verify_hnsw_audit_on_demand(
     if visited_order.is_empty() {
         return Err(zkann_error(ZkannFailure::VisitedOrderEmpty));
     }
-    let mut visited = HashSet::with_capacity(visited_order.len());
+    let mut visited = BTreeSet::new();
     for id in visited_order {
         if !visited.insert(*id) {
             return Err(zkann_error(ZkannFailure::VisitedOrderDuplicateObject));
@@ -142,7 +142,7 @@ pub fn verify_hnsw_audit_on_demand(
             return Err(zkann_error(ZkannFailure::ResultOutsideVisitedSet));
         }
     }
-    let mut candidate_ids = HashSet::with_capacity(vo.candidates.len());
+    let mut candidate_ids = BTreeSet::new();
     for (id, _, _) in &vo.candidates {
         if !candidate_ids.insert(*id) {
             return Err(zkann_error(ZkannFailure::CandidateSetDuplicateObject));
@@ -158,7 +158,7 @@ pub fn verify_hnsw_audit_on_demand(
 }
 
 fn dominance_over_candidates(vo: &VerificationObject, proc: &Procedure) -> Result<(), MnemeError> {
-    let replayed = replay_from_candidates(proc, &vo.candidates);
+    let replayed = replay_from_candidates(proc, &vo.candidates)?;
     if replayed != vo.result_ids {
         return Err(zkann_error(ZkannFailure::ReplayResultMismatch));
     }
@@ -181,7 +181,7 @@ fn dominance_over_candidates(vo: &VerificationObject, proc: &Procedure) -> Resul
     let cutoff = *result_dists
         .last()
         .ok_or_else(|| zkann_error(ZkannFailure::CutoffDistanceMissing))?;
-    let returned: HashSet<ObjectId> = replayed.into_iter().collect();
+    let returned: BTreeSet<ObjectId> = replayed.into_iter().collect();
     for (id, _, dist) in &vo.candidates {
         if !returned.contains(id) && *dist < cutoff {
             return Err(zkann_error(ZkannFailure::DominatingUnreturnedCandidate));

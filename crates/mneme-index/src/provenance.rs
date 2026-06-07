@@ -113,7 +113,7 @@ pub fn verify_provenance_attestation(
         &att.filter,
         &att.candidates,
     )?;
-    let replayed = replay_from_candidates(proc, &filtered);
+    let replayed = replay_from_candidates(proc, &filtered)?;
     if replayed != receipt.verification_object.result_ids {
         return Err(provenance_error(ProvenanceFailure::ReplayMismatch));
     }
@@ -145,7 +145,7 @@ pub fn align_scoped_receipt_results(
         &att.filter,
         &att.candidates,
     )?;
-    receipt.verification_object.result_ids = replay_from_candidates(proc, &filtered);
+    receipt.verification_object.result_ids = replay_from_candidates(proc, &filtered)?;
     Ok(())
 }
 

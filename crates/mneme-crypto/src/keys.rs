@@ -1,5 +1,6 @@
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use mneme_core::MnemeError;
+use zeroize::Zeroize;
 
 pub type PublicKeyBytes = [u8; 32];
 
@@ -59,6 +60,13 @@ impl KeyPair {
         let mut out = [0u8; crate::types::OBJECT_KEY_LEN];
         out.copy_from_slice(&hasher.finalize().as_bytes()[..crate::types::OBJECT_KEY_LEN]);
         out
+    }
+}
+
+impl Drop for KeyPair {
+    fn drop(&mut self) {
+        let mut seed = self.signing.to_bytes();
+        seed.zeroize();
     }
 }
 

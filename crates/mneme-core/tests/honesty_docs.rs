@@ -2,7 +2,9 @@ fn assert_distance_caveat(surface: &str, text: &str) {
     for phrase in [
         "procedure-faithfulness",
         "not exact",
+        "membership/completeness",
         "top-k over prover-asserted distances",
+        "top-k ranking is not proven",
         "not top-k by true query-to-embedding distance",
     ] {
         assert!(

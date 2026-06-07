@@ -63,6 +63,7 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 ciborium.workspace = true
 hex.workspace = true
+libc = "0.2"
 tokio-stream = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 tokio-tungstenite = "0.26"

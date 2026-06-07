@@ -63,6 +63,12 @@ fn server_config_from_args(args: &Args) -> Result<ServerConfig, String> {
         .http
         .parse()
         .map_err(|e| format!("invalid --http address: {e}"))?;
+    if !http_addr.ip().is_loopback() {
+        return Err(
+            "refusing non-loopback --http bind without TLS (use 127.0.0.1 or enable a TLS front)"
+                .into(),
+        );
+    }
     let grpc_addr = match args.grpc.as_deref() {
         Some(s) => Some(
             s.parse()

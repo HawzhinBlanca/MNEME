@@ -35,7 +35,8 @@ PEDERSEN_SCHNORR_HONESTY, B3_DEFERRAL_STATUS
 - **INV-10** Deterministic procedure P (ObjectId asc traversal, integer distance, tie-break by ObjectId)
 - Semantic Merkle commitment under `semantic_commit` (§5.6, §5.7)
 - **§3 honesty**: receipts prove procedure-faithfulness, not exact-NN optimality
-  or semantic truth; Phase I `ExactDominance` is top-k over prover-asserted distances,
+  or semantic truth; Phase I `ExactDominance` proves membership/completeness plus
+  top-k over prover-asserted distances; true top-k ranking is not proven and it is
   not top-k by true query-to-embedding distance until verifiers recompute candidate
   distances from carried embeddings
 - **§9.2 honesty**: `commitment_binding` proves leaf commitment only; `BINDING_ENVELOPE_TAG` must never claim Plonky2 or SNARK; `ZkProofInvalid` on this path means binding verification failed — not SNARK verification

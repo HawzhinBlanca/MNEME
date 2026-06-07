@@ -10,8 +10,9 @@ use mneme_core::{
     DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
     ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
 };
+use mneme_core::{ForgetProof, encode_forget_proof};
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
-use mneme_store::Store;
+use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -87,7 +88,12 @@ enum Commands {
         key: String,
         #[arg(long, default_value = "shred")]
         mode: ForgetModeArg,
+        /// Write a self-contained ForgetProof CBOR to PATH (shred mode only)
+        #[arg(long = "emit-proof")]
+        emit_proof: Option<PathBuf>,
     },
+    /// Clear `.incomplete` when HEAD-consistent; sweep unreferenced object blobs
+    Repair { store: PathBuf },
     /// Deterministic MST merge of two stores
     Merge { store_a: PathBuf, store_b: PathBuf },
     /// Network anti-entropy over canonical §11 WebSocket sync (blueprint §11)
@@ -341,7 +347,22 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Forget { store, key, mode } => {
+        Commands::Repair { store } => {
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let report = repair_store(&store, &operator).map_err(CliErrorKind::Kernel)?;
+            println!(
+                "repair ok: cleared_incomplete={} orphans_removed={}",
+                report.cleared_incomplete, report.orphans_removed
+            );
+            Ok(())
+        }
+        Commands::Forget {
+            store,
+            key,
+            mode,
+            emit_proof,
+        } => {
             if key.trim().is_empty() {
                 eprintln!("mneme: forget --key must not be empty");
                 return Err(CliErrorKind::Usage);
@@ -356,10 +377,27 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 ForgetModeArg::Shred => ForgetMode::Shred,
                 ForgetModeArg::Redact => ForgetMode::Redact,
             };
-            mneme_store
-                .forget(ForgetTarget::LogicalKey(logical_key), &cap, forget_mode)
-                .map_err(CliErrorKind::Kernel)?;
-            println!("forgot key {key}");
+            if let Some(path) = emit_proof {
+                if !matches!(forget_mode, ForgetMode::Shred) {
+                    eprintln!("mneme: --emit-proof requires shred mode");
+                    return Err(CliErrorKind::Usage);
+                }
+                let proven = mneme_store
+                    .forget_with_proof(
+                        ForgetTarget::LogicalKey(logical_key),
+                        &cap,
+                        forget_mode,
+                        None,
+                    )
+                    .map_err(CliErrorKind::Kernel)?;
+                write_forget_proof(&path, &proven.proof)?;
+                println!("forgot key {key}; proof written to {}", path.display());
+            } else {
+                mneme_store
+                    .forget(ForgetTarget::LogicalKey(logical_key), &cap, forget_mode)
+                    .map_err(CliErrorKind::Kernel)?;
+                println!("forgot key {key}");
+            }
             Ok(())
         }
         Commands::Sync { command } => match command {
@@ -409,7 +447,14 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Audit { root: _root } => {
+        Commands::Audit { root } => {
+            // Validate the argument before reporting non-implementation: a missing root path is a
+            // usage error (exit 2), matching `audit_missing_root_is_usage_error`. Only a present,
+            // well-formed argument reaches the not-yet-implemented surface (exit 3).
+            if !root.exists() {
+                eprintln!("mneme: root checkpoint not found: {}", root.display());
+                return Err(CliErrorKind::Usage);
+            }
             eprintln!(
                 "mneme: audit is not yet implemented (provenance/writer/tier/tombstone dump deferred)"
             );
@@ -559,6 +604,11 @@ fn load_or_generate_operator(
     std::fs::create_dir_all(store).ok();
     std::fs::write(&seed_path, hex::encode(seed)).map_err(|_| CliErrorKind::Usage)?;
     Ok(operator)
+}
+
+fn write_forget_proof(path: &Path, proof: &ForgetProof) -> Result<(), CliErrorKind> {
+    let bytes = encode_forget_proof(proof).map_err(CliErrorKind::Kernel)?;
+    std::fs::write(path, bytes).map_err(|_| CliErrorKind::Usage)
 }
 
 fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], CliErrorKind> {

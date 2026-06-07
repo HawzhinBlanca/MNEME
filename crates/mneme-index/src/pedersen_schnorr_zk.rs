@@ -34,8 +34,9 @@
 //! This proves a *committed retrieval match* with zero-knowledge of the witness. It does
 //! **not** prove semantic truth, that the entry is the true nearest neighbor, or that an
 //! authenticated entry is factually correct. It also does not upgrade Phase I
-//! `ExactDominance`: current v1 remains top-k over prover-asserted distances, not top-k
-//! by true query-to-embedding distance until verifiers recompute candidate distances.
+//! `ExactDominance`: current v1 proves membership/completeness plus top-k over
+//! prover-asserted distances; true top-k ranking is not proven and this is not
+//! top-k by true query-to-embedding distance until verifiers recompute candidate distances.
 //! **Authenticated ≠ true.**
 //!
 //! v0/90-day still ships [`super::commitment_binding`] (feature `commitment_binding`): a
@@ -69,8 +70,9 @@ pub const B3_DEFERRAL_STATUS: &str = concat!(
     "because Plonky2 1.x is nightly-only (feature(specialization)) and the repo pins stable 1.86.0. ",
     "Proves zero-knowledge of a committed entry matching a hidden query; reveals only the public commitment. ",
     "Faithful-execution privacy — NOT semantic truth, NOT exact-NN / not exact nearest-neighbor. ",
-    "It does not prove ranking; Phase I ExactDominance remains top-k over prover-asserted distances, ",
-    "not top-k by true query-to-embedding distance until verifiers recompute candidate distances. ",
+    "It does not prove ranking; Phase I ExactDominance proves membership/completeness plus top-k ",
+    "over prover-asserted distances; true top-k ranking is not proven and it is not top-k by true ",
+    "query-to-embedding distance until verifiers recompute candidate distances. ",
     "v0/90-day still uses commitment_binding (BLAKE3 envelope, not ZK)."
 );
 
@@ -85,8 +87,9 @@ pub const PEDERSEN_SCHNORR_HONESTY: &str = concat!(
     "no trusted setup; NOT Plonky2, NOT FRI). It proves faithful execution of a retrieval-match predicate with ",
     "witness privacy; it is not semantic truth, not exact-NN / not exact nearest-neighbor, ",
     "and not a claim that an authenticated entry is factually correct. It proves no ranking; ",
-    "Phase I ExactDominance remains top-k over prover-asserted distances, not top-k by true ",
-    "query-to-embedding distance until verifiers recompute candidate distances."
+    "Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted ",
+    "distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding ",
+    "distance until verifiers recompute candidate distances."
 );
 
 /// Opaque ZK retrieval proof for a private retrieval-match statement.
@@ -328,7 +331,9 @@ mod tests {
     fn assert_distance_caveat(surface: &str, text: &str) {
         for phrase in [
             "not exact",
+            "membership/completeness",
             "top-k over prover-asserted distances",
+            "top-k ranking is not proven",
             "not top-k by true query-to-embedding distance",
         ] {
             assert!(

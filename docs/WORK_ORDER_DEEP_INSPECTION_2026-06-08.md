@@ -80,7 +80,7 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 ## P1 — Correctness scope + deployment hardening
 *(~1–2 weeks; unblocks L2/L3 trust)*
 
-### WO-9 — Bring the semantic TCB gate into the guarded/budgeted surface  **[EVIDENCE]**
+### WO-9 — Bring the semantic TCB gate into the guarded/budgeted surface  **[EVIDENCE]** ✅ DONE
 - `verify_semantic_recall` trusts ~1066 prod lines in `mneme-index`
   (`verify_semantic_receipt_tcb_gate` → `verify.rs`/`procedure.rs`/`provenance.rs`/`commit.rs`/
   `semantic_zk.rs`/`zkann.rs`) that are **outside** `verify-tcb-guard.sh` scope and the 500-line
@@ -92,34 +92,34 @@ tests/tamper/determinism/cross-impl) stays green after each change.
   procedure so logic never leaks out of the audited surface again.
 - **Acceptance:** guard lints the semantic surface; manifest (WO-6) names it; tests green.
 
-### WO-10 — State zkANN ranking honesty (membership ≠ ranking)  **[EVIDENCE]**
+### WO-10 — State zkANN ranking honesty (membership ≠ ranking)  **[EVIDENCE]** ✅ DONE
 - zkANN/ADS rank by prover-supplied distances; a compromised store can demote the true nearest and
   surface a different authentic member. "exact dominance ⇒ true top-k" is overclaimed.
 - **Fix:** make the public claim explicit — membership + completeness are proven, top-k *ranking* is
   not — in `MnemeError`/contract/honesty strings; or implement a verified distance bound.
 
-### WO-11 — `MNEME_NO_FSYNC` is a silent production durability kill-switch  **[EVIDENCE]**
+### WO-11 — `MNEME_NO_FSYNC` is a silent production durability kill-switch  **[EVIDENCE]** ✅ DONE ✅ DONE
 - Checked in prod write paths (`atomic.rs:26,31,41`; `layout.rs:629,643`; vault/envelope). Any process
   with the env set silently disables all durability fsyncs, no warning, no audit trail.
 - **Fix:** gate behind `cfg(debug_assertions)`/a test-only feature so release builds can't honor it; if
   kept, read once at `Store::open`, emit a loud one-time warning, and persist a store-meta "durability
   disabled" flag a later cold-open/audit can detect.
 
-### WO-12 — No inter-process store lock  **[EVIDENCE]**
+### WO-12 — No inter-process store lock  **[EVIDENCE]** ✅ DONE
 - `open_store_lock` (`atomic.rs:152`) is `#[allow(dead_code)]` and does no `flock`. Two processes on one
   store dir can interleave transactions and strand an UNMARKED partial state cold-open would accept.
   Threatens L2.
 - **Fix:** take a real advisory `flock LOCK_EX` on a lockfile in `Store::open`, hold for the Store
   lifetime, fail with a typed `StoreLocked`; document the single-writer-process invariant in CLAUDE.md.
 
-### WO-13 — No `.incomplete` repair/recovery tooling + orphan-object GC  **[EVIDENCE]**
+### WO-13 — No `.incomplete` repair/recovery tooling + orphan-object GC  **[EVIDENCE]** ✅ DONE
 - `abort_transaction` keeps `.incomplete` (fail-closed by design) but the only recovery is manual
   `rm .incomplete` (used in tests). A transient IO error → permanently un-openable store. Partial-write
   object blobs also leak with no GC.
 - **Fix:** add `mneme repair` / `Store::recover` that re-validates on-disk state vs HEAD and clears the
   marker only if self-consistent, else reports what's partial; sweep orphan blobs; document the runbook.
 
-### WO-14 — Daemon production hardening  **[EVIDENCE]**
+### WO-14 — Daemon production hardening  **[EVIDENCE]** ✅ PARTIAL
 - mnemed mints an **ephemeral operator key + `Store::create` on every boot** (caps from a prior boot
   fail verify); no Unix `SO_PEERCRED` (0o600 only); `--http` accepts `0.0.0.0` with no TLS (caps as
   cleartext Bearer); orphaned daemon test files (`http_api.rs`/`grpc_api.rs`/`sync_ws.rs`/`unix_ready.rs`)
@@ -127,13 +127,13 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **Fix:** persist the operator key + open (not recreate) the store on boot; add `SO_PEERCRED`/`getpeereid`
   uid check; require TLS or refuse non-loopback binds; declare the test targets.
 
-### WO-15 — Zeroize secrets  **[EVIDENCE]**
+### WO-15 — Zeroize secrets  **[EVIDENCE]** ✅ DONE
 - No `zeroize` anywhere; master key, `ObjectKey`, ed25519 `SigningKey` never wiped on drop. Table stakes
   for L3 and the HSM story.
 - **Fix:** add `zeroize`; wrap master + per-object keys in `Zeroizing`/`ZeroizeOnDrop`; zeroize bytes
   popped on `shred()`; enable ed25519-dalek `zeroize` feature.
 
-### WO-16 — Forget: chameleon redaction is placeholder; shred witness under-binds  **[EVIDENCE]**
+### WO-16 — Forget: chameleon redaction is placeholder; shred witness under-binds  **[EVIDENCE]** ✅ DONE
 - `forget_redact` builds a `TrapdoorKey` then passes it unused (`_trapdoor`); the redaction slot is a
   publicly-recomputable BLAKE3. `shred_witness_commit` binds only key_hash/object_id/Option<KeyId> — not
   proof the vault key bytes are gone.
@@ -145,7 +145,7 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 ## P2 — Close the L1 MCP gap + L3 delivery
 *(~1 week of code; the headline use case + audit artifacts)*
 
-### WO-17 — MCP `recall` is exact-key-only despite a `query` param  **[EVIDENCE]**  ← biggest L1 risk
+### WO-17 — MCP `recall` is exact-key-only despite a `query` param  **[EVIDENCE]** ✅ DONE
 - Maps `query` → `LogicalKey.name`, `embedding:None`, `default_key_procedure` → exact key lookup. An
   agent passing natural language silently gets empty results. No HNSW wired into MCP.
 - **Fix:** wire the semantic recall path behind an explicit `mode` arg, OR rename the param to
@@ -153,7 +153,7 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **Acceptance:** a live-subprocess test where a non-exact-key query returns the documented result
   (either semantic hits, or an explicit not-found that the description predicts).
 
-### WO-18 — MCP failure surface + input safety + seed custody  **[EVIDENCE]**
+### WO-18 — MCP failure surface + input safety + seed custody  **[EVIDENCE]** ✅ PARTIAL
 - Tool failures return JSON-RPC `-32000` (some hosts hide from the model) instead of
   `CallToolResult{isError:true}` with the honesty footer; no input size caps/rate limiting; operator
   seed persisted plaintext to `<store>/.operator_seed` + a new tool-writer key auto-authorized each boot.
@@ -161,13 +161,13 @@ tests/tamper/determinism/cross-impl) stays green after each change.
   protocol faults; add content/query size caps; use `EnvelopeKeyVault` for the operator seed and make
   tool-writer authorization idempotent.
 
-### WO-19 — Surface `ForgetProof` as a self-contained signed deletion certificate  **[CONFIRMED]**
+### WO-19 — Surface `ForgetProof` as a self-contained signed deletion certificate  **[CONFIRMED]** ✅ PARTIAL
 - `Store::forget` drops the proof; `mnemed/src/unix.rs:756` computes `prove_absent` and discards it
   (`let _proof = ...`); MCP has no forget-proof tool. The L3 "prove a deletion" artifact has no delivery.
 - **Fix:** add a CLI `mneme forget --emit-proof <path>` and an mnemed endpoint that return the
   `ForgetProof`; ideally make it a single offline-verifiable signed blob (or bundle the matching Root).
 
-### WO-20 — Audit event export (L3)  **[EVIDENCE / research]**
+### WO-20 — Audit event export (L3)  **[EVIDENCE / research]** ✅ PARTIAL
 - **Fix:** emit structured OpenTelemetry events on every `verify_recall` rejection, promote, forget, and
   dropped sync peer (the who/when/from-what). Named in the blueprint §15.4.
 
@@ -213,4 +213,17 @@ documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, 
 | WO-6 | DONE | `TCB_MANIFEST.md` names `verify_semantic_receipt_tcb_gate` + transitive files |
 | WO-7 | DONE | `mneme audit` help text + honest `StoreUnavailable` exit (not fake path check) |
 | WO-8 | DONE | root `LICENSE` (Apache-2.0) added |
+| WO-9 | DONE | Semantic Tier-2 surface added to `verify-tcb-guard.sh`; self-test catches `HashSet` + `panic!`; procedure bounds use checked conversions; `TCB_MANIFEST.md` ties future semantic scope/budget changes to guard coverage |
+| WO-10 | DONE | `ProcedureMismatch` + `RetrievalDominanceFailed`, verifier/MCP/CLI honesty exports, contracts, crossref, and feature-gated status strings now state membership/completeness is proven while true top-k ranking is not; source/tests guard the phrases |
+| WO-11 | DONE | `durability_fsync_enabled()` debug-only; `audit_durability_at_open` warns + writes `meta/durability_disabled.json` |
+| WO-12 | DONE | `open_store_lock` advisory `flock`; `Store` holds lock for lifetime; `LockHeld`; CLAUDE.md single-writer invariant |
+| WO-13 | DONE | `repair_store` + `mneme repair`; verify-then-clear `.incomplete`; orphan object blob sweep |
+| WO-14 | PARTIAL | `boot_daemon_state` persists operator + opens store; loopback HTTP refused; Unix `getpeereid`/`SO_PEERCRED`; orphaned integration test targets still undeclared |
+| WO-15 | DONE | `zeroize` on `KeyPair` drop + vault `shred`; `ed25519-dalek/zeroize` feature |
+| WO-16 | DONE | Chameleon trapdoor wired in `forget_redact`; `shred_witness_commit` binds `vault-tombstone-v1` + key id |
+| WO-17 | DONE | MCP `key` param + description states exact logical-key lookup; `query` deprecated alias |
+| WO-18 | PARTIAL | Tool failures return `isError:true` + honesty footer; content/query size caps; idempotent tool-writer derivation; operator seed still plaintext file |
+| WO-19 | PARTIAL | `mneme forget --emit-proof`; mnemed `prove_absent` returns `absence_proof_b64`; MCP forget-proof tool not added |
+| WO-20 | PARTIAL | `mneme.audit` tracing events on verify_recall rejection, promote, forget; sync-peer hook stubbed |
 | P0 gate | GREEN | `scripts/ci/validation-lane.sh quick` after all P0 fixes |
+| P1/P2 gate | GREEN | `scripts/ci/validation-lane.sh quick` after WO-9..WO-20 feasible slice |

@@ -1,7 +1,7 @@
 //! Store path and capability bootstrap for the MCP server process.
 
 use mneme_cap::{agent_cap, tool_channel_cap};
-use mneme_crypto::KeyPair;
+use mneme_crypto::{EnvelopeKeyVault, FileKeyVault, KeyPair, KeyVault};
 use mneme_store::Store;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -29,25 +29,14 @@ pub fn open_runtime(store_path: &Path) -> Result<McpRuntime, mneme_core::MnemeEr
         store_path,
         std::env::var("MNEME_OPERATOR_SEED").ok().as_deref(),
     )?;
-    let tool_writer = KeyPair::generate();
-    let store = if store_path.join("root").join("head").exists() || store_path.join("head").exists()
-    {
-        Store::open(store_path, operator.clone())?
-    } else {
-        std::fs::create_dir_all(store_path).map_err(|_| mneme_core::MnemeError::IoFailed {
-            path: store_path.display().to_string(),
-            kind: "create_dir".into(),
-        })?;
-        Store::create(store_path, operator.clone())?
-    };
+    let tool_writer = derive_tool_writer_keypair(&operator);
+    let store = open_or_create_store(store_path, operator.clone())?;
     let mut store = store;
     let write_cap = tool_channel_cap(&operator, tool_writer.public_key_bytes())?;
     let read_cap = agent_cap(&operator, operator.public_key_bytes())?;
+    let writer_pk = tool_writer.public_key_bytes();
     if !store.trust().trusts_writer(&write_cap.writer_hash()) {
-        store
-            .trust_mut()
-            .authorized_writers
-            .push(tool_writer.public_key_bytes());
+        store.trust_mut().authorized_writers.push(writer_pk);
     }
     let shared = Arc::new(Mutex::new(store));
     let handlers = crate::handlers::MemoryHandlers::new(shared, write_cap, read_cap);
@@ -57,28 +46,72 @@ pub fn open_runtime(store_path: &Path) -> Result<McpRuntime, mneme_core::MnemeEr
     })
 }
 
+fn open_or_create_store(
+    store_path: &Path,
+    operator: KeyPair,
+) -> Result<Store, mneme_core::MnemeError> {
+    if store_path.join("roots/HEAD").exists() {
+        return open_store_with_vault(store_path, operator);
+    }
+    std::fs::create_dir_all(store_path).map_err(|e| mneme_core::MnemeError::IoFailed {
+        path: store_path.display().to_string(),
+        kind: e.to_string(),
+    })?;
+    Store::create_with_vault(store_path, operator, vault_for_path(store_path)?)
+}
+
+fn open_store_with_vault(
+    store_path: &Path,
+    operator: KeyPair,
+) -> Result<Store, mneme_core::MnemeError> {
+    Store::open_with_vault(store_path, operator, vault_for_path(store_path)?)
+}
+
+fn vault_for_path(store_path: &Path) -> Result<Box<dyn KeyVault + Send>, mneme_core::MnemeError> {
+    if std::env::var_os("MNEME_KMS_MASTER_KEY_HEX").is_some() {
+        Ok(Box::new(EnvelopeKeyVault::from_env(store_path)?))
+    } else {
+        Ok(Box::new(FileKeyVault::new(store_path)?))
+    }
+}
+
+fn derive_tool_writer_keypair(operator: &KeyPair) -> KeyPair {
+    let seed = operator_seed_bytes(operator);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"mneme-mcp-tool-writer-v1\x00");
+    hasher.update(&seed);
+    KeyPair::from_seed(*hasher.finalize().as_bytes())
+}
+
+fn operator_seed_bytes(operator: &KeyPair) -> [u8; 32] {
+    operator.signing_key().to_bytes()
+}
+
 fn load_or_generate_operator(
     store: &Path,
     seed_hex: Option<&str>,
 ) -> Result<KeyPair, mneme_core::MnemeError> {
-    let seed_path = store.join(".operator_seed");
     if let Some(hex) = seed_hex {
         return Ok(KeyPair::from_seed(parse_seed_hex(hex)?));
     }
+    if let Ok(hex) = std::env::var("MNEME_OPERATOR_SEED") {
+        return Ok(KeyPair::from_seed(parse_seed_hex(hex.trim())?));
+    }
+    let seed_path = store.join(".operator_seed");
     if seed_path.exists() {
         let hex =
-            std::fs::read_to_string(&seed_path).map_err(|_| mneme_core::MnemeError::IoFailed {
+            std::fs::read_to_string(&seed_path).map_err(|e| mneme_core::MnemeError::IoFailed {
                 path: seed_path.display().to_string(),
-                kind: "read".into(),
+                kind: e.to_string(),
             })?;
         return Ok(KeyPair::from_seed(parse_seed_hex(hex.trim())?));
     }
     let (operator, seed) = KeyPair::generate_with_seed();
     std::fs::create_dir_all(store).ok();
-    std::fs::write(&seed_path, hex::encode(seed)).map_err(|_| {
+    std::fs::write(&seed_path, hex::encode(seed)).map_err(|e| {
         mneme_core::MnemeError::IoFailed {
             path: seed_path.display().to_string(),
-            kind: "write".into(),
+            kind: e.to_string(),
         }
     })?;
     Ok(operator)

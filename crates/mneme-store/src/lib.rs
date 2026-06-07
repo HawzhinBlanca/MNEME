@@ -6,6 +6,7 @@
 #[cfg(feature = "context_gate")]
 pub use context_gate::ContextGateRecallOpts;
 mod action;
+mod audit;
 pub use action::{
     action_commit_forget, action_commit_promote, action_commit_remember, enforce_external_action,
 };
@@ -19,7 +20,10 @@ mod merge;
 mod pause;
 mod recall;
 mod recall_at;
+mod repair;
 mod scoped_recall;
+
+pub use repair::{RepairReport, repair_store};
 
 use mneme_cap::Capability;
 use mneme_core::object::HlcWire;
@@ -41,6 +45,7 @@ use mneme_verify::{
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 /// Upper bound on distinct (key, tier) results held by the session recall cache.
@@ -117,6 +122,8 @@ pub struct Store {
     hlc: mneme_core::Hlc,
     sequence: u64,
     recall_cache: RefCell<RecallSessionCache>,
+    /// Held for the store lifetime; released on drop (single-writer invariant).
+    _store_lock: File,
 }
 
 pub struct Recall {
@@ -141,6 +148,8 @@ impl Store {
         vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
         layout::init_store(path)?;
+        atomic::audit_durability_at_open(path)?;
+        let _store_lock = atomic::open_store_lock(path)?;
         let trust = TrustConfig::new(operator.public_key_bytes());
         let node_id = NodeId::from_bytes([0x01; 16]);
         let mut store = Self {
@@ -159,6 +168,7 @@ impl Store {
             hlc: mneme_core::Hlc::zero(node_id),
             sequence: 0,
             recall_cache: RefCell::new(RecallSessionCache::default()),
+            _store_lock,
         };
         store.commit_root()?;
         Ok(store)
@@ -203,6 +213,8 @@ impl Store {
         vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
         layout::check_incomplete(path)?;
+        atomic::audit_durability_at_open(path)?;
+        let _store_lock = atomic::open_store_lock(path)?;
         let mut trust = TrustConfig::new(operator.public_key_bytes());
         let state = layout::load_state(path)?;
         let stored = layout::read_head(path)?;
@@ -247,6 +259,7 @@ impl Store {
             hlc: state.hlc,
             sequence: stored.sequence,
             recall_cache: RefCell::new(RecallSessionCache::default()),
+            _store_lock,
         };
         store.rebuild_semantic_index()?;
         if store.semantic.semantic_commit() != root.semantic_commit {
@@ -605,7 +618,9 @@ impl Store {
                 object_bytes,
                 root: recall.root,
             };
-            let mut entries = verify_recall(&input, query, &self.trust, &ctx)?;
+            let mut entries = verify_recall(&input, query, &self.trust, &ctx).inspect_err(|e| {
+                audit::emit_verify_recall_rejection(e, "key_index");
+            })?;
             self.decrypt_entries(&mut entries)?;
             if let Some((root_hash, key)) = cache_key {
                 self.recall_cache
@@ -634,7 +649,10 @@ impl Store {
                 receipt: semantic_receipt,
                 root: recall.root,
             };
-            let mut entries = verify_semantic_recall(&input, proc, query, &self.trust, &ctx)?;
+            let mut entries = verify_semantic_recall(&input, proc, query, &self.trust, &ctx)
+                .inspect_err(|e| {
+                    audit::emit_verify_recall_rejection(e, "semantic");
+                })?;
             self.decrypt_entries(&mut entries)?;
             return Ok(entries);
         }
@@ -772,6 +790,7 @@ impl Store {
         match result {
             Ok(v) => {
                 layout::commit_transaction(&self.path)?;
+                audit::emit_promote(v.sequence, &id_bytes, to.as_u8());
                 Ok(v)
             }
             Err(e) => {

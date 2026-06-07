@@ -5,7 +5,8 @@ use mneme_core::{
     to_bytes_canonical,
 };
 use mneme_crypto::{
-    KeyPair, TrapdoorKey, sign_message, verify_signature_bytes, verifying_key_from_bytes,
+    KeyPair, TrapdoorKey, chameleon_leaf_hash, sign_message, verify_signature_bytes,
+    verifying_key_from_bytes,
 };
 use mneme_smt::SparseMerkleTree;
 
@@ -278,7 +279,10 @@ pub struct RedactOutcome {
     pub record: RedactionRecord,
 }
 
-/// Verify redacted object bytes bind to the committed content address.
+/// Verify object bytes bind to the committed content address.
+///
+/// For chameleon-redacted payloads this checks structure only (redacted body +
+/// non-empty slot). Use [`verify_redacted_object_identity`] for full trapdoor binding.
 pub fn verify_object_identity(bytes: &[u8], object_id: &[u8; 32]) -> Result<(), MnemeError> {
     if hash_obj(bytes) == *object_id {
         return Ok(());
@@ -287,8 +291,24 @@ pub fn verify_object_identity(bytes: &[u8], object_id: &[u8; 32]) -> Result<(), 
     if record.payload_enc.body != REDACTED_BODY {
         return Err(MnemeError::ObjectTampered);
     }
+    if record.redaction_slot.is_none() {
+        return Err(MnemeError::ObjectTampered);
+    }
+    Ok(())
+}
+
+/// Verify a chameleon-redacted object binds to operator trapdoor + logical key hash.
+pub fn verify_redacted_object_identity(
+    bytes: &[u8],
+    object_id: &[u8; 32],
+    key_hash: &[u8; 32],
+    operator_pk: &[u8; 32],
+) -> Result<(), MnemeError> {
+    verify_object_identity(bytes, object_id)?;
+    let record: ObjectRecord = from_bytes_strict(bytes)?;
     let slot = record.redaction_slot.ok_or(MnemeError::ObjectTampered)?;
-    let expected = redaction_witness(object_id, &record.writer);
+    let trapdoor = TrapdoorKey::from_seed(*blake3::hash(operator_pk).as_bytes());
+    let expected = redaction_witness(key_hash, object_id, &trapdoor);
     if slot != expected {
         return Err(MnemeError::ObjectTampered);
     }
@@ -314,8 +334,14 @@ pub fn forget_redact(input: RedactForgetInput<'_>) -> Result<RedactOutcome, Mnem
 
     let trapdoor =
         TrapdoorKey::from_seed(*blake3::hash(&input.operator.public_key_bytes()).as_bytes());
-    let redacted_bytes = build_redacted_object_bytes(input.object_bytes, &object_id, &trapdoor)?;
-    verify_object_identity(&redacted_bytes, &object_id)?;
+    let redacted_bytes =
+        build_redacted_object_bytes(input.object_bytes, &object_id, &key_hash, &trapdoor)?;
+    verify_redacted_object_identity(
+        &redacted_bytes,
+        &object_id,
+        &key_hash,
+        &input.operator.public_key_bytes(),
+    )?;
 
     let record = RedactionRecord::sign(key_hash, object_id, input.operator, 1, input.reason);
     Ok(RedactOutcome {
@@ -328,23 +354,25 @@ pub fn forget_redact(input: RedactForgetInput<'_>) -> Result<RedactOutcome, Mnem
 fn build_redacted_object_bytes(
     original: &[u8],
     object_id: &[u8; 32],
-    _trapdoor: &TrapdoorKey,
+    key_hash: &[u8; 32],
+    trapdoor: &TrapdoorKey,
 ) -> Result<Vec<u8>, MnemeError> {
     let mut record: ObjectRecord = from_bytes_strict(original)?;
     record.payload_enc.body = REDACTED_BODY.to_vec();
     record.payload_enc.alg = 0;
     record.payload_enc.key_id = None;
     record.payload_enc.nonce = None;
-    record.redaction_slot = Some(redaction_witness(object_id, &record.writer));
+    record.redaction_slot = Some(redaction_witness(key_hash, object_id, trapdoor));
     to_bytes_canonical(&record)
 }
 
-fn redaction_witness(object_id: &[u8; 32], writer: &[u8; 32]) -> [u8; 32] {
-    let mut buf = Vec::with_capacity(23 + 64);
-    buf.extend_from_slice(b"MNEME-redact-witness-v1");
-    buf.extend_from_slice(object_id);
-    buf.extend_from_slice(writer);
-    *blake3::hash(&buf).as_bytes()
+fn redaction_witness(
+    key_hash: &[u8; 32],
+    object_id: &[u8; 32],
+    trapdoor: &TrapdoorKey,
+) -> [u8; 32] {
+    let zero_rand = [0u8; 32];
+    chameleon_leaf_hash(key_hash, object_id, &zero_rand, &trapdoor.public)
 }
 
 fn parse_u16(v: &mneme_core::CborValue) -> Result<u16, MnemeError> {

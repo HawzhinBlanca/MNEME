@@ -143,6 +143,7 @@ impl Store {
         match result {
             Ok((tombstone, root)) => {
                 layout::commit_transaction(&self.path)?;
+                crate::audit::emit_forget(mode, &key_hash, root.sequence);
                 #[cfg(feature = "phase_iii_prove_forget")]
                 let proof = if mode != ForgetMode::Shred {
                     None

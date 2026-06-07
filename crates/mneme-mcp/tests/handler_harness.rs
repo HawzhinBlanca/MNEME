@@ -111,6 +111,8 @@ fn honesty_strings_present_in_tool_contract_constants() {
     assert!(RECALL_DESCRIPTION.contains("recall_verified"));
     assert!(HONESTY_FOOTER.contains("authenticated"));
     assert!(HONESTY_FOOTER.contains("procedure-faithfulness"));
+    assert!(HONESTY_FOOTER.contains("membership/completeness"));
+    assert!(HONESTY_FOOTER.contains("top-k ranking is not proven"));
     assert!(AINJ_MITIGATION.contains("quarantine"));
     assert!(!AINJ_MITIGATION.to_ascii_lowercase().contains("anti-poison"));
 }

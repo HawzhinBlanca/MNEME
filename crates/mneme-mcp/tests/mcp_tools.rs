@@ -48,7 +48,9 @@ fn assert_distance_caveat(surface: &str, text: &str) {
         "not truth",
         "procedure-faithfulness",
         "not exact nearest-neighbor",
+        "membership/completeness",
         "top-k over prover-asserted distances",
+        "top-k ranking is not proven",
         "not top-k by true query-to-embedding distance",
     ] {
         assert!(

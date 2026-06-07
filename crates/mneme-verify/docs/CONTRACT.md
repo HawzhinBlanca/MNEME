@@ -35,7 +35,7 @@ Removed alias: `verify_store_head` → use `verify_signed_head_only` for tests, 
 - **INV-5** Fail-closed reads — no entry path without verified receipt against signed root
 - **B1 / head-only verify** — `verify_signed_head_only` is signature-only; **never** substitute for `verify_store` on boot/CI/adoption paths (`adoption_lint` enforces)
 - **INV-9** Typed `MnemeError` only on trusted path (no `anyhow`, no stringly escape hatch)
-- **§3 honesty** — exported `HONESTY_PROCEDURE` and semantic gate errors: authenticated `≠` true; receipts prove procedure-faithfulness over committed data, **not** exact nearest-neighbor optimality or semantic truth; Phase I `ExactDominance` is top-k over prover-asserted distances until verifiers recompute candidate distances
+- **§3 honesty** — exported `HONESTY_PROCEDURE` and semantic gate errors: authenticated `≠` true; receipts prove procedure-faithfulness over committed data, **not** exact nearest-neighbor optimality or semantic truth; Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven until verifiers recompute candidate distances
 
 ## Proof obligations
 

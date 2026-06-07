@@ -3,8 +3,9 @@
 /// Shared footer for all memory tools (authenticated ≠ true; receipts ≠ exact-NN).
 pub const HONESTY_FOOTER: &str = "Honesty: authenticated≠true (integrity/provenance only, not truth). \
 Receipts prove procedure-faithfulness over committed data, not exact nearest-neighbor optimality. \
-Phase I ExactDominance is top-k over prover-asserted distances, not top-k by true query-to-embedding \
-distance until verifiers recompute candidate distances.";
+Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted distances; \
+true top-k ranking is not proven and it is not top-k by true query-to-embedding distance until \
+verifiers recompute candidate distances.";
 
 /// A-INJ structural mitigation (§2.4, §13.4) — quarantine tier, not anti-poisoning.
 pub const AINJ_MITIGATION: &str = "A-INJ mitigation: tool-channel writes land in quarantine tier; \
@@ -13,7 +14,8 @@ they are attributable and non-actionable at higher min_tier until promoted by a 
 pub const REMEMBER_DESCRIPTION: &str = "Write memory via the MCP tool channel (always quarantine tier). \
 Does not detect falsehood; stores signed, attributable content. ";
 
-pub const RECALL_DESCRIPTION: &str = "Fail-closed recall: runs recall_verified only — no unverified bytes enter agent context. \
+pub const RECALL_DESCRIPTION: &str = "Fail-closed exact logical-key recall (not semantic/vector search): runs recall_verified only — no unverified bytes enter agent context. \
+The `key` argument must match the remembered logical key name exactly; natural-language queries are not supported. \
 Returns entries only after receipt verifies against the signed root. ";
 
 pub const FORGET_DESCRIPTION: &str =

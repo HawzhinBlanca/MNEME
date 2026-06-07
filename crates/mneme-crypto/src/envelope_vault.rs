@@ -193,7 +193,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
         }
         file.write_all(&buf)
             .map_err(|e| io_error(journal.display().to_string(), e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if crate::vault::durability_fsync_enabled() {
             file.sync_all()
                 .map_err(|e| io_error(journal.display().to_string(), e))?;
         }
@@ -228,7 +228,7 @@ fn write_wrapped_key(path: &Path, wrapped: &[u8]) -> Result<(), MnemeError> {
         let mut f = File::create(&tmp).map_err(|e| io_error(path.display().to_string(), e))?;
         f.write_all(wrapped)
             .map_err(|e| io_error(path.display().to_string(), e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if crate::vault::durability_fsync_enabled() {
             f.sync_all()
                 .map_err(|e| io_error(path.display().to_string(), e))?;
         }

@@ -72,6 +72,9 @@ pub fn mint_forget_proof(
 }
 
 /// Reconstruct the SMT non-membership proof carried on the wire (shred path ⇒ tombstone).
+// Public reconstruction helper for an offline verifier; not yet consumed inside this crate
+// under `phase_iii_prove_forget` (the lib build would otherwise trip `#![deny(warnings)]`).
+#[allow(dead_code)]
 pub fn absence_proof_from_wire(proof: &ForgetProof, root: &Root) -> NonMembershipProof {
     NonMembershipProof {
         key: proof.target_commit,

@@ -58,8 +58,9 @@ Decode success **does not** imply cross-org trust. See `docs/redteam/PHASE_IV_FE
 ## 3. Verification contract (all languages)
 
 1. **Authenticated ≠ true** — signatures prove integrity, not semantic truth.
-2. **Procedure-faithfulness ≠ exact-NN** — Phase I `ExactDominance` is
-   top-k over prover-asserted distances, not top-k by true query-to-embedding distance,
+2. **Procedure-faithfulness ≠ exact-NN** — Phase I `ExactDominance` proves
+   membership/completeness plus top-k over prover-asserted distances; true top-k
+   ranking is not proven, and this is not top-k by true query-to-embedding distance
    unless a future `retrieval_proof_level` upgrade is present *and* verified by
    an out-of-TCB PIOP verifier (not shipped).
 3. **Missing or invalid optional proofs fail closed** — never degrade into context.

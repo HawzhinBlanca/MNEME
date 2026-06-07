@@ -3,9 +3,24 @@
 #![forbid(unsafe_code)]
 #![deny(warnings)]
 
-#[cfg(any(not(feature = "phase_iii_bind_action"), test))]
+// These constants are consumed by `account_gate_failure_to_mneme` (below), whose cfg is
+// `any(not(bind_action), not(prove_forget), not(verify), test)`. The imports must match that
+// cfg exactly: gating them more narrowly (e.g. only `not(bind_action)`) drops the import under
+// feature combos where the function still compiles, breaking the build under a single phase_iii
+// feature. Keep these two cfgs in lockstep with the function's cfg.
+#[cfg(any(
+    not(feature = "phase_iii_bind_action"),
+    not(feature = "phase_iii_prove_forget"),
+    not(feature = "phase_iii_verify"),
+    test
+))]
 use mneme_core::ACTION_RECEIPT_VERSION;
-#[cfg(any(not(feature = "phase_iii_prove_forget"), test))]
+#[cfg(any(
+    not(feature = "phase_iii_bind_action"),
+    not(feature = "phase_iii_prove_forget"),
+    not(feature = "phase_iii_verify"),
+    test
+))]
 use mneme_core::FORGET_PROOF_VERSION;
 use mneme_core::{
     ActionReceipt, Capability, ForgetMode, ForgetProof, ForgetTarget, MnemeError, Root,

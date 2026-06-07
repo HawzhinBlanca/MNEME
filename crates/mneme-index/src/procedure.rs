@@ -73,6 +73,34 @@ pub struct IndexedEntry {
 ///
 pub type CandidateRow = (ObjectId, [u8; 32], i64);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcedureFailure {
+    ProcedureBoundInvalid,
+}
+
+fn procedure_failure_to_mneme(failure: ProcedureFailure) -> MnemeError {
+    match failure {
+        ProcedureFailure::ProcedureBoundInvalid => MnemeError::SchemaDrift,
+    }
+}
+
+fn procedure_error(failure: ProcedureFailure) -> MnemeError {
+    procedure_failure_to_mneme(failure)
+}
+
+fn procedure_bound_to_usize(bound: u32) -> Result<usize, MnemeError> {
+    usize::try_from(bound.max(1))
+        .map_err(|_| procedure_error(ProcedureFailure::ProcedureBoundInvalid))
+}
+
+fn procedure_beam_bound(proc: &Procedure) -> Result<usize, MnemeError> {
+    procedure_bound_to_usize(proc.ef_search.max(proc.k))
+}
+
+fn procedure_k_bound(proc: &Procedure) -> Result<usize, MnemeError> {
+    procedure_bound_to_usize(proc.k)
+}
+
 /// Returns `(result_ids, all_candidates)` where `all_candidates` lists every indexed
 /// entry examined (ObjectId asc traversal order) with integer distances.
 pub fn execute_procedure_p(
@@ -92,13 +120,13 @@ pub fn execute_procedure_p(
     let mut ranked = all_candidates.clone();
     ranked.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
 
-    let beam = proc.ef_search.max(proc.k).max(1) as usize;
+    let beam = procedure_beam_bound(proc)?;
     if ranked.len() > beam {
         ranked.truncate(beam);
     }
     ranked.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
 
-    let k = proc.k.max(1) as usize;
+    let k = procedure_k_bound(proc)?;
     if ranked.len() > k {
         ranked.truncate(k);
     }
@@ -111,19 +139,19 @@ pub fn execute_procedure_p(
 pub fn replay_from_candidates(
     proc: &Procedure,
     candidates: &[(ObjectId, [u8; 32], i64)],
-) -> Vec<ObjectId> {
+) -> Result<Vec<ObjectId>, MnemeError> {
     let mut sorted = candidates.to_vec();
     sorted.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
-    let beam = proc.ef_search.max(proc.k).max(1) as usize;
+    let beam = procedure_beam_bound(proc)?;
     if sorted.len() > beam {
         sorted.truncate(beam);
     }
     sorted.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
-    let k = proc.k.max(1) as usize;
+    let k = procedure_k_bound(proc)?;
     if sorted.len() > k {
         sorted.truncate(k);
     }
-    sorted.iter().map(|(id, _, _)| *id).collect()
+    Ok(sorted.iter().map(|(id, _, _)| *id).collect())
 }
 
 #[cfg(test)]
@@ -188,6 +216,19 @@ mod tests {
         assert_eq!(
             execute_procedure_p(&proc, &query, &entries),
             Err(MnemeError::SchemaDrift)
+        );
+    }
+
+    #[test]
+    fn procedure_bounds_use_checked_usize_conversions() {
+        let production = include_str!("procedure.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("procedure tests should follow production code");
+
+        assert!(
+            !production.contains(" as usize"),
+            "procedure replay bounds must use checked conversions, not raw `as usize` casts"
         );
     }
 

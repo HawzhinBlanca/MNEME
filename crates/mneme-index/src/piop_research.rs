@@ -13,8 +13,9 @@ pub const PIOP_RESEARCH_HONESTY: &str = concat!(
     "Phase IV-A zkRAG-style PIOP is UNIMPLEMENTED research. This seam proves NOTHING: ",
     "not exact-NN / not exact nearest-neighbor, not procedure-faithfulness, not semantic truth, ",
     "and it is NOT Plonky2/FRI and NOT a SNARK. It does not retire the current Phase I ",
-    "ExactDominance caveat: current v1 remains top-k over prover-asserted distances, ",
-    "not top-k by true query-to-embedding distance until verifiers recompute candidate distances. ",
+    "ExactDominance caveat: current v1 proves membership/completeness plus top-k over ",
+    "prover-asserted distances; true top-k ranking is not proven and it is not top-k by true ",
+    "query-to-embedding distance until verifiers recompute candidate distances. ",
     "The entry point returns UnsupportedVersion and is wired into no recall, receipt, or verification path. ",
     "See docs/research/PHASE_IV_A_PIOP_SPIKE.md."
 );
@@ -23,8 +24,9 @@ pub const PIOP_RESEARCH_HONESTY: &str = concat!(
 pub const PIOP_RESEARCH_STATUS: &str = concat!(
     "UNIMPLEMENTED (Phase IV-A research spike): global exact-NN over the committed set via a ",
     "zkRAG-style PIOP is a RESEARCH DIRECTION, not a feature and not exact-NN proof in this repo. ",
-    "Current Phase I ExactDominance remains top-k over prover-asserted distances, not top-k by true ",
-    "query-to-embedding distance until verifiers recompute candidate distances. Three blockers remain ",
+    "Current Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted ",
+    "distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding ",
+    "distance until verifiers recompute candidate distances. Three blockers remain ",
     "(stable-buildable succinct-argument stack; field-friendly commitment bridge for the BLAKE3 ",
     "semantic_commit; out-of-TCB verifier architecture). No prover exists; this entry point returns ",
     "UnsupportedVersion. Honest retrieval level remains dominance over the committed/visited set."
@@ -77,7 +79,9 @@ mod tests {
     fn assert_distance_caveat(surface: &str, text: &str) {
         for phrase in [
             "not exact",
+            "membership/completeness",
             "top-k over prover-asserted distances",
+            "top-k ranking is not proven",
             "not top-k by true query-to-embedding distance",
         ] {
             assert!(

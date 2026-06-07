@@ -1,4 +1,4 @@
-use crate::Store;
+use crate::{Store, atomic::durability_fsync_enabled};
 use mneme_core::{
     FixedPointEmbedding, Hlc, LogicalKey, MnemeError, NodeId, decode_content_addressed_object_path,
     decode_hex32, from_bytes_strict, hash_obj,
@@ -626,7 +626,7 @@ fn append_journal_line(path: &Path, name: &str, line: &str) -> Result<(), MnemeE
     file.write_all(line.as_bytes())
         .map_err(|e| io_err(&journal, e))?;
     file.write_all(b"\n").map_err(|e| io_err(&journal, e))?;
-    if std::env::var("MNEME_NO_FSYNC").is_err() {
+    if durability_fsync_enabled() {
         file.sync_all().map_err(|e| io_err(&journal, e))?;
         sync_parent_dir(&journal)?;
     }
@@ -640,7 +640,7 @@ fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
     let journal = path.join("meta").join(name);
     if journal.exists() {
         fs::remove_file(&journal).map_err(|e| io_err(&journal, e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if durability_fsync_enabled() {
             sync_parent_dir(&journal)?;
         }
     }

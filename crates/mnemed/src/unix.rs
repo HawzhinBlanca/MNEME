@@ -8,6 +8,7 @@ use mneme_core::{
 use mneme_crdt::{decode_sync_message, encode_sync_message};
 use mneme_store::Store;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::MutexGuard;
 use std::time::Duration;
@@ -17,6 +18,70 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 pub const UNIX_MAX_FRAME: usize = 4 * 1024 * 1024;
+
+#[cfg(unix)]
+fn verify_unix_peer_credentials(stream: &UnixStream) -> Result<(), std::io::Error> {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    ))]
+    {
+        let mut uid: libc::uid_t = 0;
+        let mut gid: libc::gid_t = 0;
+        let ret = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if uid != unsafe { libc::getuid() } {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "unix peer uid mismatch",
+            ));
+        }
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut cred = libc::ucred {
+            pid: 0,
+            uid: 0,
+            gid: 0,
+        };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let ret = unsafe {
+            libc::getsockopt(
+                stream.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                &mut cred as *mut _ as *mut libc::c_void,
+                &mut len,
+            )
+        };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if cred.uid != unsafe { libc::getuid() } {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "unix peer uid mismatch",
+            ));
+        }
+        return Ok(());
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    )))]
+    {
+        let _ = stream;
+        Ok(())
+    }
+}
 const DEFAULT_CONNECTION_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -177,6 +242,10 @@ impl BoundUnixServer {
                     }
                     accepted = listener.accept() => {
                         let (stream, _) = accepted?;
+                        if let Err(e) = verify_unix_peer_credentials(&stream) {
+                            tracing::debug!("unix peer credential check failed: {e}");
+                            continue;
+                        }
                         spawn_connection(
                             &mut connections,
                             stream,
@@ -195,6 +264,10 @@ impl BoundUnixServer {
                 tokio::select! {
                     accepted = listener.accept() => {
                         let (stream, _) = accepted?;
+                        if let Err(e) = verify_unix_peer_credentials(&stream) {
+                            tracing::debug!("unix peer credential check failed: {e}");
+                            continue;
+                        }
                         spawn_connection(
                             &mut connections,
                             stream,
@@ -753,8 +826,13 @@ fn prove_absent(
     let store = lock_unix_store(state, "prove_absent")?;
     cap.verify(state.operator.as_ref(), store.current_hlc())?;
     let key = LogicalKey { namespace, name };
-    let _proof = store.prove_absent(&key)?;
-    Ok(serde_json::json!({ "absent": true }))
+    let proof = store.prove_absent(&key)?;
+    let proof_bytes = mneme_smt::encode_non_membership_wire(&proof);
+    use base64::Engine;
+    Ok(serde_json::json!({
+        "absent": true,
+        "absence_proof_b64": base64::engine::general_purpose::STANDARD.encode(proof_bytes),
+    }))
 }
 
 fn sync_frame(

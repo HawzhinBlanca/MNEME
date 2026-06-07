@@ -11,8 +11,9 @@ use std::collections::{HashMap, HashSet};
 pub const HONESTY_PROCEDURE: &str = concat!(
     "MNEME semantic receipts prove procedure-faithfulness over authenticated data, ",
     "not semantic truth, not exact nearest-neighbor optimality, and not true nearest neighbors. ",
-    "ExactDominance v1 is top-k over prover-asserted distances, not top-k by true ",
-    "query-to-embedding distance until verifiers recompute candidate distances."
+    "ExactDominance v1 proves membership/completeness plus top-k over prover-asserted distances; ",
+    "true top-k ranking is not proven and it is not top-k by true query-to-embedding distance ",
+    "until verifiers recompute candidate distances."
 );
 
 /// zkANN-1 retrieval proof level (tags match `RetrievalProofLevel`).
@@ -326,6 +327,14 @@ mod soundness_tests {
         assert!(
             HONESTY_PROCEDURE.contains("prover-asserted distances"),
             "ExactDominance v1 must stay scoped to prover-asserted distances"
+        );
+        assert!(
+            HONESTY_PROCEDURE.contains("membership/completeness"),
+            "ExactDominance v1 must state that membership/completeness is the proven part"
+        );
+        assert!(
+            HONESTY_PROCEDURE.contains("top-k ranking is not proven"),
+            "ExactDominance v1 must state that top-k ranking is not proven"
         );
         assert!(
             HONESTY_PROCEDURE.contains("not top-k by true query-to-embedding distance"),

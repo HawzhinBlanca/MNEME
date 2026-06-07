@@ -31,6 +31,7 @@ fn stdio_mcp_protocol_roundtrip_remember_recall_forget() {
     assert!(remember_desc.contains("authenticated"));
     let recall_desc = tools[1]["description"].as_str().unwrap_or("");
     assert!(recall_desc.contains("recall_verified"));
+    assert!(recall_desc.contains("exact logical-key"));
     assert!(recall_desc.contains("procedure-faithfulness"));
 
     let remember = client.call_tool(

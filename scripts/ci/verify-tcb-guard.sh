@@ -493,9 +493,18 @@ PY
 
 run_guard() {
   local root tcb_dir trusted_parser hits index_hits as_cast_hits parser_hits parser_index_hits parser_cast_hits
+  local semantic_file semantic_hits semantic_index_hits semantic_cast_hits
   root="${1:-$ROOT}"
   tcb_dir="${MNEME_TCB_DIR:-$root/crates/mneme-verify/src}"
   trusted_parser="${MNEME_TRUSTED_PARSER:-$root/crates/mneme-index/src/key_index_load.rs}"
+  local semantic_surface=(
+    "$root/crates/mneme-index/src/verify.rs"
+    "$root/crates/mneme-index/src/procedure.rs"
+    "$root/crates/mneme-index/src/provenance.rs"
+    "$root/crates/mneme-index/src/commit.rs"
+    "$root/crates/mneme-index/src/semantic_zk.rs"
+    "$root/crates/mneme-index/src/zkann.rs"
+  )
 
   if [[ ! -d "$tcb_dir" ]]; then
     echo "TCB guard: mneme-verify not present yet — skip"
@@ -535,6 +544,37 @@ run_guard() {
     echo "$as_cast_hits"
     return 1
   fi
+
+  # Semantic receipt verification is Tier-2 trusted surface (TCB_MANIFEST.md).
+  # It is outside the 500-line orchestration budget, but it must still reject
+  # obvious verifier hazards and randomized hash collections. Deterministic
+  # sorting/truncation remains allowed here because procedure replay is the
+  # semantic verifier's job.
+  local SEMANTIC_FORBIDDEN='\bunsafe\b|\b(debug_assert|debug_assert_eq|debug_assert_ne|assert|assert_eq|assert_ne)\s*!|\bunwrap_err\s*\(|\bexpect_err\s*\(|\bunwrap\s*\(|\bexpect\s*\(|\bpanic_any\s*\(|\bresume_unwind\s*\(|\bcatch_unwind\s*\(|\bpanic\s*!|\bunreachable\s*!|\btodo\s*!|\bunimplemented\s*!|\banyhow::|\b(HashMap|HashSet|DefaultHasher|RandomState|BuildHasher|SipHasher|IndexMap|IndexSet)\b|\b(hashbrown|indexmap)\s*::'
+  for semantic_file in "${semantic_surface[@]}"; do
+    if [[ ! -f "$semantic_file" ]]; then
+      continue
+    fi
+    semantic_hits="$(rust_code_hits "$SEMANTIC_FORBIDDEN" "" 1 "$semantic_file")"
+    if [[ -n "$semantic_hits" ]]; then
+      echo "TCB guard FAILED — forbidden patterns in semantic trusted surface ${semantic_file#$root/}:"
+      echo "$semantic_hits"
+      return 1
+    fi
+    semantic_index_hits="$(rust_code_hits "$INDEX_PATTERN" "tcb-index-ok" 1 "$semantic_file")"
+    if [[ -n "$semantic_index_hits" ]]; then
+      echo "TCB guard FAILED — slice-index panic vectors in semantic trusted surface ${semantic_file#$root/} (use .get() or justify with tcb-index-ok):"
+      echo "$semantic_index_hits"
+      return 1
+    fi
+    semantic_cast_hits="$(rust_code_hits "$AS_CAST_PATTERN" "tcb-cast-ok" 1 "$semantic_file")"
+    if [[ -n "$semantic_cast_hits" ]]; then
+      echo "TCB guard FAILED — numeric as-casts in semantic trusted surface ${semantic_file#$root/} (use checked conversions):"
+      echo "$semantic_cast_hits"
+      return 1
+    fi
+  done
+  echo "TCB guard: semantic trusted surface clean"
 
   # Extended trusted surface (§17.6 / TCB_MANIFEST.md): `verify_store` parses the
   # on-disk object-keys / key-index sidecars via `mneme-index::key_index_load`, so
@@ -613,6 +653,32 @@ run_self_test() {
   cat >"$(self_test_trusted_parser "$tmp")" <<'RS'
 pub fn trusted_parser_fixture() {}
 RS
+  cat >"$tmp/crates/mneme-index/src/verify.rs" <<'RS'
+pub fn semantic_surface_fixture() {}
+RS
+
+  cat >"$tmp/crates/mneme-index/src/verify.rs" <<'RS'
+use std::collections::HashSet;
+
+pub fn semantic_surface_fixture() {
+    let _set = HashSet::<u8>::new();
+    panic!("semantic trusted surface must be scanned");
+}
+RS
+  if out="$(run_self_test_guard "$tmp")"; then
+    echo "TCB guard self-test FAILED — semantic trusted surface was not scanned"
+    echo "$out"
+    return 1
+  fi
+  if [[ "$out" != *"semantic trusted surface"* || "$out" != *"HashSet"* || "$out" != *"panic!"* ]]; then
+    echo "TCB guard self-test FAILED — semantic trusted surface hits were not reported"
+    echo "$out"
+    return 1
+  fi
+  cat >"$tmp/crates/mneme-index/src/verify.rs" <<'RS'
+pub fn semantic_surface_fixture() {}
+RS
+  echo "TCB guard self-test: semantic trusted surface coverage OK"
 
   cat >"$(self_test_tcb_src "$tmp")/lib.rs" <<'RS'
 #![forbid(unsafe_code)]

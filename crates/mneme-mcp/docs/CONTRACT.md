@@ -17,8 +17,8 @@ MCP stdio server exposing `memory.remember`, `memory.recall`, and `memory.forget
 - **§13.4** — `memory.remember` → tool-channel capability → quarantine tier default.
 - **§3** — honesty strings in tool descriptions and tool-call errors
   (authenticated≠true / not truth; receipt procedure-faithfulness; not exact nearest-neighbor;
-  Phase I `ExactDominance` is top-k over prover-asserted distances,
-  not top-k by true query-to-embedding distance).
+  Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances;
+  true top-k ranking is not proven and it is not top-k by true query-to-embedding distance).
 
 ## Proof obligations
 

@@ -3,8 +3,9 @@
 //! Semantic retrieval uses wrapped `hnsw_rs` with Merkle-committed nodes and
 //! deterministic procedure P (integer distance, ObjectId tie-break). Receipts
 //! prove procedure-faithfulness, **not exact** nearest neighbors (blueprint §3).
-//! Phase I `ExactDominance` is top-k over prover-asserted distances,
-//! not top-k by true query-to-embedding distance until verifiers recompute candidate distances.
+//! Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances;
+//! true top-k ranking is not proven and this is not top-k by true query-to-embedding distance
+//! until verifiers recompute candidate distances.
 
 #![forbid(unsafe_code)]
 #![deny(warnings)]
@@ -278,7 +279,9 @@ mod tests {
     fn assert_distance_caveat(surface: &str, text: &str) {
         for phrase in [
             "not exact",
+            "membership/completeness",
             "top-k over prover-asserted distances",
+            "top-k ranking is not proven",
             "not top-k by true query-to-embedding distance",
         ] {
             assert!(

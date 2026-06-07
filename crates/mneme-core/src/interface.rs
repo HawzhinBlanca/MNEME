@@ -137,8 +137,9 @@ pub enum DistanceMetric {
 /// Phase I: level of retrieval proof bundled in a Cognition Certificate (§5 honesty).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetrievalProofLevel {
-    /// Top-k dominance over prover-asserted distances for the complete authenticated member set;
-    /// not top-k by true query-to-embedding distance until verifiers recompute candidate distances.
+    /// membership/completeness for the complete authenticated member set plus top-k dominance over
+    /// prover-asserted distances; true top-k ranking is not proven and this is not top-k by true query-to-embedding distance
+    /// until verifiers recompute candidate distances.
     ExactDominance = 0,
     /// Dominance over a prover-asserted set of authenticated members (`visited_order`); not graph replay.
     HnswAuditOnDemand = 1,
@@ -431,6 +432,14 @@ mod tests {
         assert!(
             source.contains("prover-asserted distances"),
             "ExactDominance docs must state that current dominance is over prover-asserted distances"
+        );
+        assert!(
+            source.contains("membership/completeness"),
+            "ExactDominance docs must state that current proof is membership/completeness scoped"
+        );
+        assert!(
+            source.contains("top-k ranking is not proven"),
+            "ExactDominance docs must say top-k ranking is not proven"
         );
         assert!(
             source.contains("not top-k by true query-to-embedding distance"),

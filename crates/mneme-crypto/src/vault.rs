@@ -4,8 +4,23 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use mneme_core::MnemeError;
+use zeroize::Zeroize;
 
 use crate::types::{KEY_ID_LEN, KeyId, OBJECT_KEY_LEN, ObjectKey};
+
+pub(crate) fn durability_fsync_enabled() -> bool {
+    !debug_no_fsync_requested()
+}
+
+#[cfg(debug_assertions)]
+fn debug_no_fsync_requested() -> bool {
+    std::env::var_os("MNEME_NO_FSYNC").is_some()
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_no_fsync_requested() -> bool {
+    false
+}
 
 /// Per-object key vault (blueprint §5.8 `keys/vault/`).
 ///
@@ -88,7 +103,9 @@ impl KeyVault for MemoryKeyVault {
         if !self.keys.contains_key(key_id) && !self.shredded.contains_key(key_id) {
             return Err(MnemeError::KeyVaultMissing);
         }
-        self.keys.remove(key_id);
+        if let Some(mut key) = self.keys.remove(key_id) {
+            key.zeroize();
+        }
         self.shredded.insert(*key_id, ());
         Ok(())
     }
@@ -261,7 +278,7 @@ impl KeyVault for FileKeyVault {
         }
         file.write_all(&buf)
             .map_err(|e| io_error(journal.display().to_string(), e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if durability_fsync_enabled() {
             file.sync_all()
                 .map_err(|e| io_error(journal.display().to_string(), e))?;
         }
@@ -360,10 +377,9 @@ fn write_key_file(path: &Path, key: &ObjectKey) -> Result<(), MnemeError> {
         .map_err(|e| io_error(path.display().to_string(), e))?;
     file.write_all(key)
         .map_err(|e| io_error(path.display().to_string(), e))?;
-    // Honor the same `MNEME_NO_FSYNC` test knob as the store's atomic writer and
-    // journals (durability default is fsync-on). Skipping the per-key fsync only
-    // affects crash durability of freshly written keys, never read correctness.
-    if std::env::var("MNEME_NO_FSYNC").is_err() {
+    // Debug/test builds honor the same `MNEME_NO_FSYNC` test knob as the store's
+    // atomic writer and journals; release builds always fsync.
+    if durability_fsync_enabled() {
         file.sync_all()
             .map_err(|e| io_error(path.display().to_string(), e))?;
     }
@@ -431,5 +447,48 @@ pub(crate) mod hex {
             *slot = u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok()?;
         }
         Some(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn production_source(source: &str) -> &str {
+        source
+            .split_once("#[cfg(test)]")
+            .map_or(source, |(production, _tests)| production)
+    }
+
+    #[test]
+    fn no_fsync_escape_hatch_is_debug_only_and_centralized() {
+        let vault = production_source(include_str!("vault.rs"));
+        let envelope = production_source(include_str!("envelope_vault.rs"));
+        let combined = [vault, envelope].join("\n");
+
+        assert!(
+            vault.contains("fn durability_fsync_enabled("),
+            "vault fsync decisions must route through a named helper"
+        );
+        assert!(
+            vault.contains("#[cfg(debug_assertions)]"),
+            "MNEME_NO_FSYNC may only be read in debug builds"
+        );
+        assert!(
+            vault.contains("#[cfg(not(debug_assertions))]"),
+            "release builds must compile an env-independent fsync path"
+        );
+        assert_eq!(
+            combined
+                .matches("std::env::var(\"MNEME_NO_FSYNC\")")
+                .count(),
+            0,
+            "vault write paths must not read MNEME_NO_FSYNC directly"
+        );
+        assert_eq!(
+            combined
+                .matches("std::env::var_os(\"MNEME_NO_FSYNC\")")
+                .count(),
+            1,
+            "only the debug-only helper may inspect MNEME_NO_FSYNC"
+        );
     }
 }

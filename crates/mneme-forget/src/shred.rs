@@ -41,9 +41,11 @@ pub fn shred_witness_commit(outcome: &ShredOutcome) -> [u8; 32] {
     h.update(&outcome.key_hash);
     h.update(&outcome.object_id);
     if let Some(id) = outcome.shredded_key_id {
+        h.update(b"vault-tombstone-v1\x00");
         h.update(&[1u8]);
         h.update(&id);
     } else {
+        h.update(b"vault-tombstone-v1\x00");
         h.update(&[0u8]);
     }
     *h.finalize().as_bytes()

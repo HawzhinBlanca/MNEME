@@ -4,7 +4,7 @@ use crate::commit::{SemanticMerkleTree, hash_sem_leaf};
 use crate::procedure::replay_from_candidates;
 use crate::receipt::SemanticRecallReceipt;
 use mneme_core::{MnemeError, Procedure, VerificationObject};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[cfg(not(feature = "pedersen_schnorr_zk"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,9 +74,8 @@ pub fn verify_ads_vo_membership(
         ));
     }
 
-    let mut seen_indices = HashSet::with_capacity(vo.leaf_indices.len());
-    let mut commit_to_path: HashMap<[u8; 32], (usize, &Vec<[u8; 32]>)> =
-        HashMap::with_capacity(vo.nodes.len());
+    let mut seen_indices = BTreeSet::new();
+    let mut commit_to_path: BTreeMap<[u8; 32], (usize, &Vec<[u8; 32]>)> = BTreeMap::new();
     for ((commit, path), leaf_index) in vo.nodes.iter().zip(vo.leaf_indices.iter()) {
         if !seen_indices.insert(*leaf_index) {
             return Err(ads_verification_error(
@@ -93,8 +92,8 @@ pub fn verify_ads_vo_membership(
         }
     }
 
-    let mut seen_candidate_objects = HashSet::with_capacity(vo.candidates.len());
-    let mut seen_candidate_commits = HashSet::with_capacity(vo.candidates.len());
+    let mut seen_candidate_objects = BTreeSet::new();
+    let mut seen_candidate_commits = BTreeSet::new();
     for (id, emb, _) in &vo.candidates {
         if !seen_candidate_objects.insert(*id) {
             return Err(ads_verification_error(
@@ -124,7 +123,7 @@ pub fn verify_ads_vo(
     proc: &Procedure,
 ) -> Result<(), MnemeError> {
     verify_ads_vo_membership(vo, semantic_commit, proc)?;
-    let replayed = replay_from_candidates(proc, &vo.candidates);
+    let replayed = replay_from_candidates(proc, &vo.candidates)?;
     if replayed != vo.result_ids {
         return Err(ads_verification_error(
             AdsVerificationFailure::ReplayResultMismatch,
@@ -142,7 +141,7 @@ pub fn verify_semantic_receipt_tcb_gate(
 ) -> Result<(), MnemeError> {
     verify_ads_vo_membership(&receipt.verification_object, &receipt.semantic_commit, proc)?;
     if receipt.provenance.is_none() {
-        let replayed = replay_from_candidates(proc, &receipt.verification_object.candidates);
+        let replayed = replay_from_candidates(proc, &receipt.verification_object.candidates)?;
         if replayed != receipt.verification_object.result_ids {
             return Err(ads_verification_error(
                 AdsVerificationFailure::ReplayResultMismatch,
@@ -222,8 +221,9 @@ pub fn verify_semantic_receipt_full(
 pub const HONESTY_NOT_EXACT_NN: &str = concat!(
     "MNEME semantic receipts prove procedure-faithfulness over authenticated data, ",
     "not semantic truth, not exact nearest-neighbor optimality, and not true nearest neighbors. ",
-    "ExactDominance v1 is top-k over prover-asserted distances, not top-k by true ",
-    "query-to-embedding distance until verifiers recompute candidate distances."
+    "ExactDominance v1 proves membership/completeness plus top-k over prover-asserted distances; ",
+    "true top-k ranking is not proven and it is not top-k by true query-to-embedding distance ",
+    "until verifiers recompute candidate distances."
 );
 
 #[cfg(test)]
@@ -312,7 +312,8 @@ mod tests {
     fn ads_vo_rejects_duplicate_candidate_reusing_one_authenticated_path() {
         let (mut vo, root, proc) = sample_vo();
         vo.candidates[1] = vo.candidates[0];
-        vo.result_ids = crate::procedure::replay_from_candidates(&proc, &vo.candidates);
+        vo.result_ids = crate::procedure::replay_from_candidates(&proc, &vo.candidates)
+            .expect("sample procedure bounds should convert to usize");
 
         assert_eq!(
             verify_ads_vo(&vo, &root, &proc),
@@ -479,6 +480,14 @@ mod tests {
         assert!(
             HONESTY_NOT_EXACT_NN.contains("prover-asserted distances"),
             "ExactDominance v1 must stay scoped to prover-asserted distances"
+        );
+        assert!(
+            HONESTY_NOT_EXACT_NN.contains("membership/completeness"),
+            "ExactDominance v1 must state that membership/completeness is the proven part"
+        );
+        assert!(
+            HONESTY_NOT_EXACT_NN.contains("top-k ranking is not proven"),
+            "ExactDominance v1 must state that top-k ranking is not proven"
         );
         assert!(
             HONESTY_NOT_EXACT_NN.contains("not top-k by true query-to-embedding distance"),

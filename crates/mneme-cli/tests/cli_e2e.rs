@@ -311,12 +311,14 @@ fn merge_two_stores_converges() {
 }
 
 #[test]
-fn audit_missing_root_is_usage_error() {
+fn audit_stub_returns_store_unavailable_without_fake_path_check() {
     mneme()
         .args(["audit", "/no/such/root.cbor"])
         .assert()
         .failure()
-        .code(2);
+        .code(3)
+        .stderr(predicate::str::contains("audit is not yet implemented"))
+        .stderr(predicate::str::contains("store kernel not available"));
 }
 
 #[test]
@@ -629,6 +631,8 @@ fn attest_emits_sigstore_statement() {
         .stdout(predicate::str::contains(
             "top-k over prover-asserted distances",
         ))
+        .stdout(predicate::str::contains("membership/completeness"))
+        .stdout(predicate::str::contains("top-k ranking is not proven"))
         .stdout(predicate::str::contains(
             "not top-k by true query-to-embedding distance",
         ));

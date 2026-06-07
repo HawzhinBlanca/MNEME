@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
+const MAX_TOOL_CONTENT_BYTES: usize = 1_048_576;
+const MAX_TOOL_QUERY_BYTES: usize = 16_384;
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -61,8 +63,7 @@ pub fn run_stdio_loop(handlers: &MemoryHandlers) -> io::Result<()> {
         if req.method == "notifications/initialized" {
             continue;
         }
-        let result = dispatch(handlers, &req.method, &req.params);
-        match result {
+        match dispatch(handlers, &req.method, &req.params) {
             Ok(value) => {
                 let resp = JsonRpcResponse {
                     jsonrpc: "2.0",
@@ -73,7 +74,16 @@ pub fn run_stdio_loop(handlers: &MemoryHandlers) -> io::Result<()> {
                 writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
                 stdout.flush()?;
             }
-            Err(msg) => write_error(&mut stdout, id, -32000, msg)?,
+            Err(msg) => {
+                let resp = JsonRpcResponse {
+                    jsonrpc: "2.0",
+                    id,
+                    result: Some(tool_result_error(msg)),
+                    error: None,
+                };
+                writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
+                stdout.flush()?;
+            }
         }
     }
     Ok(())
@@ -147,11 +157,12 @@ pub fn tool_definitions() -> Vec<Value> {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string" },
+                    "key": { "type": "string", "description": "Exact logical key name (not semantic search)" },
+                    "query": { "type": "string", "description": "Deprecated alias for `key`" },
                     "min_tier": { "type": "string", "enum": ["quarantine", "working", "trusted", "identity"] },
                     "namespace": { "type": "string" }
                 },
-                "required": ["query", "min_tier"]
+                "required": ["min_tier"]
             }
         }),
         json!({
@@ -172,7 +183,7 @@ pub fn tool_definitions() -> Vec<Value> {
 fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Value, String> {
     match name {
         "memory.remember" => {
-            let content = arg_str(args, "content")?;
+            let content = bounded_arg_str(args, "content", MAX_TOOL_CONTENT_BYTES)?;
             let kind = handlers::parse_kind(arg_str(args, "kind")?).map_err(tool_error_message)?;
             let namespace = arg_str(args, "namespace")?;
             let entry_name = args
@@ -191,7 +202,7 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
             })))
         }
         "memory.recall" => {
-            let query = arg_str(args, "query")?;
+            let key = recall_key_arg(args)?;
             let min_tier =
                 handlers::parse_min_tier(arg_str(args, "min_tier")?).map_err(tool_error_message)?;
             let namespace = args
@@ -199,13 +210,13 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
                 .and_then(|v| v.as_str())
                 .unwrap_or("user");
             let entries = handlers
-                .recall(namespace, query, min_tier)
+                .recall(namespace, &key, min_tier)
                 .map_err(tool_error_message)?;
-            Ok(tool_result_json(json!({ "entries": entries })))
+            Ok(tool_result_json(json!({ "entries": entries, "key": key })))
         }
         "memory.forget" => {
             let namespace = arg_str(args, "namespace")?;
-            let target = arg_str(args, "target")?;
+            let target = bounded_arg_str(args, "target", MAX_TOOL_QUERY_BYTES)?;
             let out = handlers
                 .forget(namespace, target)
                 .map_err(tool_error_message)?;
@@ -223,9 +234,39 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("missing argument: {key}"))
 }
 
+fn bounded_arg_str<'a>(args: &'a Value, key: &str, max_bytes: usize) -> Result<&'a str, String> {
+    let value = arg_str(args, key)?;
+    if value.len() > max_bytes {
+        return Err(format!("argument `{key}` exceeds {max_bytes} byte limit"));
+    }
+    Ok(value)
+}
+
+fn recall_key_arg(args: &Value) -> Result<String, String> {
+    if args.get("key").and_then(|v| v.as_str()).is_some() {
+        return bounded_arg_str(args, "key", MAX_TOOL_QUERY_BYTES).map(str::to_string);
+    }
+    if let Some(query) = args.get("query").and_then(|v| v.as_str()) {
+        if query.len() > MAX_TOOL_QUERY_BYTES {
+            return Err(format!(
+                "argument `query` exceeds {MAX_TOOL_QUERY_BYTES} byte limit"
+            ));
+        }
+        return Ok(query.to_string());
+    }
+    Err("missing argument: key (exact logical key name; semantic search is not supported)".into())
+}
+
 fn tool_result_json(value: Value) -> Value {
     json!({
         "content": [{ "type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_default() }],
         "isError": false
+    })
+}
+
+fn tool_result_error(message: String) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": message }],
+        "isError": true
     })
 }

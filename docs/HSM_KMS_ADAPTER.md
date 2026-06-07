@@ -161,6 +161,7 @@ batch semantics). A new adapter should be held to the same parity scenario
   the repo). This is the seam + contract only.
 - Not a change to the honesty boundary: a vault proves key *availability*, never
   semantic truth. Verifiable retrieval still proves procedure-faithfulness,
-  not exact nearest-neighbor optimality: Phase I `ExactDominance` is
-  top-k over prover-asserted distances, not top-k by true query-to-embedding distance until
-  verifiers recompute candidate distances.
+  not exact nearest-neighbor optimality: Phase I `ExactDominance` proves
+  membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven
+  and it is not top-k by true query-to-embedding distance
+  until verifiers recompute candidate distances.
