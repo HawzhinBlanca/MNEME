@@ -1,6 +1,6 @@
 # MNEME Phase Program — Status
 
-**Date:** 2026-06-08 • **Branch:** `harden/differential-adversarial` @ `3b44142` • **PR:** [#8](https://github.com/HawzhinBlanca/MNEME/pull/8) (open, CI re-running after e2e fix)
+**Date:** 2026-06-08 • **Branch:** `harden/differential-adversarial` @ `3556ed8` • **PR:** [#8](https://github.com/HawzhinBlanca/MNEME/pull/8) (open, **CI green**)
 
 **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged; TCB ≤500 unchanged.
 
@@ -12,8 +12,8 @@
 |---|---|---|
 | WO-1..WO-8 (P0 docs/correctness) | **DONE** | `24e764e`..`f95beea` |
 | WO-9..WO-20 (P1/P2 hardening) | **DONE** | `c88f325`..`c0dbf70`, `ca522ba`, `af70b2d` |
-| CI gate fixes | **DONE** | `cb9653e` (audit/flock/clippy), `3b44142` (Node CLI custody) |
-| Local validation | **GREEN** | `validation-lane.sh quick` + `tamper` + `determinism` @ `3b44142` |
+| CI gate fixes | **DONE** | `cb9653e`, `3b44142` (Node CLI custody), `3556ed8` (MCP SDK tool list) |
+| Local validation | **GREEN** | `validation-lane.sh quick` + `tamper` + `determinism` @ `3556ed8` |
 | P3 local scaffolds | **NOT SHIPPED** | Spec in `docs/HUMAN_TASKS.md`; no scripts committed |
 
 **P0–P2 software scope: 100% complete** on this branch. P3 remains human/hardware-gated.

@@ -9,20 +9,20 @@ in-repo, what is gated, and *why* it cannot be marked done without an external i
 > (WO-1..WO-20 delivered; local `validation-lane.sh quick` + `tamper` + `determinism` green;
 > `cargo test -p mnemed` 299/299). **P3 remains human/hardware-gated**
 > (live KMS/HSM, distinct physical host convergence, TEE vendor quotes, machine-checked proofs).
-> **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — CI re-running after `3b44142`
-> (Node CLI e2e custody fix for WO-18 sealed operator seed). Prior failure: `cb9653e` CLI e2e
-> missing `MNEME_KMS_MASTER_KEY_HEX` on init.
+> **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — head @ `3556ed8`; CI green after e2e fixes
+> (`3b44142` CLI custody, `3556ed8` MCP `memory.forget_proof` tool list).
 
 ## PR #8 merge readiness
 
 | Check | Status @ session end |
 |---|---|
-| Head SHA | `3b44142` |
+| Head SHA | `3556ed8` |
 | Local tamper | GREEN |
 | Local determinism | GREEN |
 | Local CLI e2e | GREEN (4/4) |
-| GitHub CI | Re-running (prior run failed CLI e2e only) |
-| Merge | **Ready pending CI green** — do not merge without explicit operator ask |
+| Local MCP SDK e2e | GREEN |
+| GitHub CI gate | **GREEN** |
+| Merge | **Ready** — awaiting explicit operator merge ask |
 
 ## P0–P2 closeout (2026-06-08, software-complete)
 
