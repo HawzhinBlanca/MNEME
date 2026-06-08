@@ -1,7 +1,9 @@
 //! MNEME daemon library — start test/production servers.
 
+mod audit;
 pub mod grpc;
 pub mod http;
+mod observability;
 pub mod state;
 pub mod sync;
 pub mod sync_client;
@@ -11,6 +13,7 @@ pub mod unix;
 pub mod context_gate;
 
 pub use grpc::pb;
+pub use observability::{AUDIT_TARGET, init_observability};
 pub use state::AppState;
 
 use mneme_core::MnemeError;

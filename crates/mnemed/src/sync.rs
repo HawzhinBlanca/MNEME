@@ -15,6 +15,7 @@
 //! Neither dialect can cause a write that bypasses the kernel's verified merge: every
 //! ingested object is re-hashed and its writer re-authorized inside `apply_peer_snapshot`.
 
+use crate::audit;
 use crate::state::{
     ApiError, AppState, capability_from_header, check_rate_limit, parse_capability_b64, verify_cap,
 };
@@ -176,6 +177,10 @@ fn classify_sync_receive(received: Option<Result<Message, axum::Error>>) -> Sync
         Some(Ok(msg)) => SyncReceiveOutcome::Message(msg),
         Some(Err(err)) => {
             tracing::debug!("sync websocket receive failed: {err}");
+            audit::emit_sync_peer_dropped(
+                audit::SYNC_WEBSOCKET_SERVER_PEER,
+                &format!("sync websocket receive failed: {err}"),
+            );
             SyncReceiveOutcome::Failed
         }
         None => SyncReceiveOutcome::Closed,
@@ -209,6 +214,10 @@ fn classify_sync_send(result: Result<(), axum::Error>) -> SyncSendOutcome {
         Ok(()) => SyncSendOutcome::Sent,
         Err(err) => {
             tracing::debug!("sync websocket response send failed: {err}");
+            audit::emit_sync_peer_dropped(
+                audit::SYNC_WEBSOCKET_SERVER_PEER,
+                &format!("sync websocket response send failed: {err}"),
+            );
             SyncSendOutcome::Failed
         }
     }
@@ -251,6 +260,10 @@ impl SyncResponseBuildOutcome {
             SyncResponseBuildOutcome::NoResponse { context, reason } => {
                 if !matches!(reason, SyncNoResponseReason::ClientBye) {
                     tracing::debug!(%context, ?reason, "sync websocket response suppressed");
+                    audit::emit_sync_peer_dropped(
+                        audit::SYNC_WEBSOCKET_SERVER_PEER,
+                        &format!("{context}: {reason:?}"),
+                    );
                 }
                 None
             }
@@ -309,6 +322,10 @@ async fn handle_sync(mut socket: WebSocket, state: AppState) {
                     continue;
                 }
                 if data.len() > SYNC_MAX_FRAME {
+                    audit::emit_sync_peer_dropped(
+                        audit::SYNC_WEBSOCKET_SERVER_PEER,
+                        "sync frame exceeded SYNC_MAX_FRAME",
+                    );
                     break;
                 }
                 let response = match data[0] {

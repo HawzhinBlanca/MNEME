@@ -10,6 +10,7 @@ mod audit;
 pub use action::{
     action_commit_forget, action_commit_promote, action_commit_remember, enforce_external_action,
 };
+pub use audit::AUDIT_TARGET;
 mod atomic;
 mod certify;
 #[cfg(feature = "context_gate")]

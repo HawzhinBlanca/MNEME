@@ -65,6 +65,76 @@ fn sync_client_reuses_server_sync_frame_limit() {
 }
 
 #[test]
+fn sync_peer_drop_audit_hook_is_wired_to_client_and_server() {
+    let daemon_audit = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/audit.rs"),
+    )
+    .unwrap_or_else(|err| panic!("daemon audit module should exist: {err}"));
+    let sync_client = include_str!("../src/sync_client.rs");
+    let sync_server = include_str!("../src/sync.rs");
+    let store_audit = include_str!("../../mneme-store/src/audit.rs");
+
+    assert!(
+        daemon_audit.contains("target: AUDIT_TARGET")
+            || daemon_audit.contains("target: \"mneme.audit\""),
+        "daemon audit module should emit on the shared mneme.audit target"
+    );
+    assert!(
+        daemon_audit.contains("event = \"sync.peer_dropped\""),
+        "daemon audit module should name the sync peer drop event"
+    );
+    assert!(
+        daemon_audit.contains("peer,") && daemon_audit.contains("reason,"),
+        "sync peer drop audit events should carry peer and reason fields"
+    );
+    assert!(
+        sync_client.contains("audit::emit_sync_peer_dropped("),
+        "production sync client should emit a sync peer drop audit event when it drops a peer"
+    );
+    assert!(
+        sync_server.contains("audit::emit_sync_peer_dropped("),
+        "sync websocket server should emit a sync peer drop audit event when it suppresses/drops a peer frame"
+    );
+    assert!(
+        !store_audit.contains("emit_sync_peer_dropped"),
+        "sync peer drop audit hook belongs in mnemed, not as a dead store-kernel stub"
+    );
+}
+
+#[test]
+fn audit_observability_exports_otlp_when_configured() {
+    let observability = include_str!("../src/observability.rs");
+    let store_audit = include_str!("../../mneme-store/src/audit.rs");
+    let main_rs = include_str!("../src/main.rs");
+
+    assert!(
+        observability.contains("pub use mneme_store::AUDIT_TARGET"),
+        "observability module should re-export the shared audit target"
+    );
+    assert!(
+        observability.contains("OTEL_EXPORTER_OTLP_ENDPOINT")
+            && observability.contains("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
+        "observability should honor standard OTLP endpoint env vars"
+    );
+    assert!(
+        observability.contains("tracing_opentelemetry::layer()"),
+        "observability should bridge audit events to OpenTelemetry when OTLP is configured"
+    );
+    assert!(
+        store_audit.contains("pub const AUDIT_TARGET: &str = \"mneme.audit\""),
+        "store audit emitters should share the mneme.audit target constant"
+    );
+    assert!(
+        store_audit.contains("tracing::event!"),
+        "store audit emitters should use explicit tracing events for OTel export"
+    );
+    assert!(
+        main_rs.contains("init_observability()"),
+        "mnemed main should install the observability subscriber"
+    );
+}
+
+#[test]
 fn source_invariant_async_outcome_signature_checks_are_not_whitespace_brittle() {
     let source_invariants = include_str!("source_invariants.rs");
     let quoted_async_fn = ["\"", "async fn "].concat();
@@ -7036,6 +7106,35 @@ fn test_harness_users_shutdown_explicitly() {
         assert_eq!(
             starts, shutdowns,
             "{path} must explicitly shut down every TestHarness it starts"
+        );
+    }
+}
+
+#[test]
+fn operator_seed_custody_is_centralized_outside_frontends() {
+    for (surface, source) in [
+        ("mnemed", include_str!("../src/lib.rs")),
+        (
+            "mneme-mcp",
+            include_str!("../../mneme-mcp/src/store_open.rs"),
+        ),
+        ("mneme-cli", include_str!("../../mneme-cli/src/main.rs")),
+    ] {
+        for forbidden in [
+            "join(\".operator_seed\")",
+            "fs::write(&seed_path",
+            "std::fs::write(&seed_path",
+            "read_to_string(&seed_path",
+            "std::fs::read_to_string(&seed_path",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{surface} should route operator seed custody through mneme-crypto instead of `{forbidden}`"
+            );
+        }
+        assert!(
+            source.contains("load_or_generate_operator"),
+            "{surface} should call the shared operator seed custody helper"
         );
     }
 }

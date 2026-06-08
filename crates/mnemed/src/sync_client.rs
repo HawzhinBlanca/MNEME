@@ -3,6 +3,7 @@
 //! Production counterpart to the in-test `pull_canonical` helper: operators and
 //! `mneme sync pull` use this module; the server side remains in [`super::sync`].
 
+use crate::audit;
 use futures_util::{SinkExt, StreamExt};
 use mneme_core::MnemeError;
 use mneme_core::hash_obj;
@@ -306,9 +307,15 @@ fn normalize_io_timeout(io_timeout: Duration) -> Duration {
 }
 
 fn sync_io_error(peer_ws_url: &str, kind: impl Into<String>) -> MnemeError {
+    sync_peer_dropped_error(peer_ws_url, kind)
+}
+
+fn sync_peer_dropped_error(peer_ws_url: &str, kind: impl Into<String>) -> MnemeError {
+    let kind = kind.into();
+    audit::emit_sync_peer_dropped(peer_ws_url, &kind);
     MnemeError::IoFailed {
         path: peer_ws_url.to_string(),
-        kind: kind.into(),
+        kind,
     }
 }
 
@@ -325,7 +332,13 @@ fn sync_have_objects_decode_error(
     err: super::sync::SyncFrameError,
 ) -> MnemeError {
     match err {
-        super::sync::SyncFrameError::ObjectTampered => MnemeError::ObjectTampered,
+        super::sync::SyncFrameError::ObjectTampered => {
+            audit::emit_sync_peer_dropped(
+                peer_ws_url,
+                "have-objects decode failed: canonical sync object tampered",
+            );
+            MnemeError::ObjectTampered
+        }
         err => sync_frame_error(peer_ws_url, "have-objects decode", err),
     }
 }

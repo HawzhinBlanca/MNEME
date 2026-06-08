@@ -19,7 +19,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    if let Err(err) = mnemed::init_observability() {
+        eprintln!("failed to initialize observability: {err}");
+        std::process::exit(1);
+    }
     let args = Args::parse();
     let config = match server_config_from_args(&args) {
         Ok(config) => config,

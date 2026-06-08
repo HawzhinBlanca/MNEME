@@ -161,9 +161,12 @@ tests/tamper/determinism/cross-impl) stays green after each change.
   operator seed persisted plaintext to `<store>/.operator_seed`; a new tool-writer key was
   auto-authorized each boot.
 - **Current disposition:** tool failures, size caps, and idempotent tool-writer derivation are in place;
-  operator seed custody is centralized in `mneme-crypto`; KMS-backed runs seal/migrate the seed at
-  `keys/operator_seed.sealed` under `MNEME_KMS_MASTER_KEY_HEX`; no-master runs require an explicit
-  process-custody seed and fail closed instead of reading or creating plaintext `.operator_seed`.
+  operator seed custody is centralized in `mneme-crypto::operator_seed`; KMS-backed runs seal/migrate the
+  seed at `keys/operator_seed.sealed` under `MNEME_KMS_MASTER_KEY_HEX` (XChaCha20-Poly1305 envelope,
+  same master as `EnvelopeKeyVault`); no-master runs require an explicit process-custody seed and fail
+  closed instead of reading or creating plaintext `.operator_seed`. Unit tests cover round-trip reopen,
+  legacy migration, tamper (`ObjectTampered`), and wrong-master fail-closed; CLI e2e rejects init without
+  custody; `source_invariants` blocks frontend `.operator_seed` writes.
 - **Fix:** route MnemeError tool failures as `isError:true` (+honesty footer), JSON-RPC errors only for
   protocol faults; add content/query size caps; use `EnvelopeKeyVault` for the operator seed and make
   tool-writer authorization idempotent.
@@ -254,7 +257,7 @@ documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, 
 | WO-15 | DONE | `zeroize` on `KeyPair` drop + vault `shred`; `ed25519-dalek/zeroize` feature |
 | WO-16 | DONE | Chameleon trapdoor wired in `forget_redact`; `shred_witness_commit` binds `vault-tombstone-v1` + key id |
 | WO-17 | DONE | MCP `key` param + description states exact logical-key lookup; `query` deprecated alias |
-| WO-18 | DONE | Tool failures return `isError:true` + honesty footer; content/query size caps; idempotent tool-writer derivation; operator seed custody centralized; KMS-backed runs seal/migrate `keys/operator_seed.sealed`; no-master runs require explicit process-custody seed and fail closed without reading/creating plaintext `.operator_seed` |
+| WO-18 | DONE | Tool failures return `isError:true` + honesty footer; content/query size caps; idempotent tool-writer derivation; `mneme-crypto::operator_seed` seals/migrates `keys/operator_seed.sealed` under `MNEME_KMS_MASTER_KEY_HEX`; round-trip/tamper/wrong-master tests + CLI init fail-closed + frontend custody invariant |
 | WO-19 | DONE | `mneme forget --emit-proof`; MCP `memory.forget_proof` (full ForgetProof CBOR + signed-root fields, `isError:true` + honesty footer on failures); mnemed HTTP `DELETE /v1/forget-proof/{namespace}/{name}`; mnemed Unix `ForgetProof`; smoke: `mcp_forget_proof_tool_returns_verifiable_cbor_and_signed_root_fields`, `stdio_forget_proof_returns_verifiable_cbor_and_signed_root_fields`, `mcp_forget_proof_failure_returns_is_error_with_honesty_footer` |
 | WO-20 | DONE | `mneme.audit` tracing events on verify_recall rejection, promote, forget, and mnemed sync peer drops; daemon client/server hooks wired and dead store stub removed |
 | P3 OSS docs | DONE | Root `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, and `POSITIONING.md`; `mneme-core` honesty-doc invariant guards security/positioning/threat-model caveats and release-doc routing |
