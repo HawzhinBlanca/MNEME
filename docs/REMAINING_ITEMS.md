@@ -1,14 +1,28 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-08 (P1/P2 software closeout on `harden/differential-adversarial`).
+Last updated: 2026-06-08 (P0–P2 closeout + PR #8 CI fix on `harden/differential-adversarial` @ `3b44142`).
 This tracks items beyond the certified single-host v0 core. Each entry states what is
 in-repo, what is gated, and *why* it cannot be marked done without an external input.
 
 > **Work order (2026-06-08):** [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
 > **P0–P2 software scope: 100% complete** on branch `harden/differential-adversarial`
-> (WO-1..WO-20 delivered; `validation-lane.sh quick` + `tamper` green; `cargo test -p mnemed`
-> 299/299 pass after closeout invariant refresh). **P3 remains human/hardware-gated**
+> (WO-1..WO-20 delivered; local `validation-lane.sh quick` + `tamper` + `determinism` green;
+> `cargo test -p mnemed` 299/299). **P3 remains human/hardware-gated**
 > (live KMS/HSM, distinct physical host convergence, TEE vendor quotes, machine-checked proofs).
+> **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — CI re-running after `3b44142`
+> (Node CLI e2e custody fix for WO-18 sealed operator seed). Prior failure: `cb9653e` CLI e2e
+> missing `MNEME_KMS_MASTER_KEY_HEX` on init.
+
+## PR #8 merge readiness
+
+| Check | Status @ session end |
+|---|---|
+| Head SHA | `3b44142` |
+| Local tamper | GREEN |
+| Local determinism | GREEN |
+| Local CLI e2e | GREEN (4/4) |
+| GitHub CI | Re-running (prior run failed CLI e2e only) |
+| Merge | **Ready pending CI green** — do not merge without explicit operator ask |
 
 ## P0–P2 closeout (2026-06-08, software-complete)
 

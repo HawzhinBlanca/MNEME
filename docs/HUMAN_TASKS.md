@@ -25,6 +25,22 @@ and update this file only when a genuinely human-gated item changes.
 | Trust-ops pilot | Choose pilot operators, rotation policy, audit cadence, and incident workflow. | These are organizational controls, not code-only deliverables. |
 | Phase IV prover/interop commitments | Decide whether to fund global exact-NN PIOP work and external SDK/package compatibility targets. | Current Phase IV material is research/sketch work; shipping claims need product and ecosystem decisions. |
 
+## P3 Local Scaffolds (research only — not shipped)
+
+These are **planned in-repo substitutes** for human-gated P3 proofs. They must ship with
+explicit `not external P3 proof` boundaries and must not weaken fail-closed defaults.
+
+| Scaffold | Status @ `3b44142` | Notes |
+|---|---|---|
+| OSS release docs | Not committed | `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md` |
+| Convergence local smoke | Not committed | Same-host merge digest compare; distinct-host still needs `MNEME_SECOND_HOST` |
+| KMS/HSM conformance harness | Not committed | Local vault round-trip; live endpoint proof still operator-gated |
+| TEE attestation policy gate | Not committed | Fail-closed policy over placeholder reports; live vendor quotes human-gated |
+| Formal obligations scan | Not committed | TCB guard self-test + budget scan; Lean proof human-gated |
+| `validation-lane.sh p3-local` | Not committed | Aggregate of the above local gates |
+
+Do not mark these done until the scripts/docs exist and local gates pass.
+
 ## Handling Rule
 
 - Do not store secrets, temporary credentials, hostnames with embedded usernames,
