@@ -127,7 +127,7 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **Disposition:** `boot_daemon_state` persists the operator key and opens existing stores;
   Unix sockets check same-uid peer credentials; HTTP binds refuse non-loopback addresses without
   TLS; `api_integration` is the declared aggregate target for `http_api`/`grpc_api`/`sync_ws`, and
-  `unix_ready` is compiled by the Unix/redteam targets. Evidence commit: `3b12e1e`.
+  `unix_ready` is compiled by the Unix/redteam targets. Evidence commit: `af70b2d`.
 
 ### WO-15 — Zeroize secrets  **[EVIDENCE]** ✅ DONE
 - No `zeroize` anywhere; master key, `ObjectKey`, ed25519 `SigningKey` never wiped on drop. Table stakes
@@ -253,7 +253,7 @@ documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, 
 | WO-11 | DONE | `durability_fsync_enabled()` debug-only; `audit_durability_at_open` warns + writes `meta/durability_disabled.json` |
 | WO-12 | DONE | `open_store_lock` advisory `flock`; `Store` holds lock for lifetime; `LockHeld`; CLAUDE.md single-writer invariant |
 | WO-13 | DONE | `repair_store` + `mneme repair`; verify-then-clear `.incomplete`; orphan object blob sweep |
-| WO-14 | DONE | `boot_daemon_state` persists operator + opens store; loopback HTTP refused; Unix `getpeereid`/`SO_PEERCRED`; `api_integration` aggregate target compiles/runs `http_api`/`grpc_api`/`sync_ws` and `unix_ready` is compiled by Unix/redteam targets; fixed mnemed HTTP bind parse type inference; evidence `3b12e1e` |
+| WO-14 | DONE | `boot_daemon_state` persists operator + opens store; loopback HTTP refused; Unix `getpeereid`/`SO_PEERCRED`; `api_integration` aggregate target compiles/runs `http_api`/`grpc_api`/`sync_ws` and `unix_ready` is compiled by Unix/redteam targets; fixed mnemed HTTP bind parse type inference; evidence `af70b2d` |
 | WO-15 | DONE | `zeroize` on `KeyPair` drop + vault `shred`; `ed25519-dalek/zeroize` feature |
 | WO-16 | DONE | Chameleon trapdoor wired in `forget_redact`; `shred_witness_commit` binds `vault-tombstone-v1` + key id |
 | WO-17 | DONE | MCP `key` param + description states exact logical-key lookup; `query` deprecated alias |
