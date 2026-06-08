@@ -12,8 +12,20 @@ use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 use walkdir::WalkDir;
 
+const TEST_OPERATOR_MASTER_HEX: &str =
+    "5555555555555555555555555555555555555555555555555555555555555555";
+
+fn raw_mneme() -> Command {
+    let mut cmd = Command::cargo_bin("mneme").unwrap();
+    cmd.env_remove("MNEME_OPERATOR_SEED")
+        .env_remove("MNEME_KMS_MASTER_KEY_HEX");
+    cmd
+}
+
 fn mneme() -> Command {
-    Command::cargo_bin("mneme").unwrap()
+    let mut cmd = raw_mneme();
+    cmd.env("MNEME_KMS_MASTER_KEY_HEX", TEST_OPERATOR_MASTER_HEX);
+    cmd
 }
 
 #[test]
@@ -34,6 +46,22 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("sync"))
         .stdout(predicate::str::contains("--vault"));
+}
+
+#[test]
+fn init_without_seed_or_master_rejects_without_plaintext_operator_seed() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+
+    raw_mneme()
+        .args(["init", store.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("operator seed custody missing"))
+        .stderr(predicate::str::contains("invalid usage"));
+
+    assert!(!store.join(".operator_seed").exists());
 }
 
 #[test]

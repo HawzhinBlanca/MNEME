@@ -17,7 +17,7 @@ pub use observability::{AUDIT_TARGET, init_observability};
 pub use state::AppState;
 
 use mneme_core::MnemeError;
-use mneme_crypto::KeyPair;
+use mneme_crypto::{KeyPair, load_or_generate_operator};
 use mneme_store::Store;
 use state::{RateLimiter, SharedStore};
 use std::fs;
@@ -29,6 +29,8 @@ use tokio::net::TcpListener;
 type ServerTaskResult = Result<(), MnemeError>;
 type ServerTaskHandle = tokio::task::JoinHandle<ServerTaskResult>;
 type ServerTaskJoin = Result<ServerTaskResult, tokio::task::JoinError>;
+const TEST_OPERATOR_SEED_HEX: &str =
+    "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
 
 pub const DEFAULT_RATE_LIMIT_PER_MINUTE: u32 = 120;
 
@@ -123,12 +125,20 @@ async fn wait_for_running_server_shutdown(mut shutdown_rx: tokio::sync::watch::R
 }
 
 pub fn test_state(store_path: &Path) -> Result<(AppState, KeyPair, KeyPair), MnemeError> {
-    boot_daemon_state(store_path)
+    boot_daemon_state_with_operator_seed(store_path, Some(TEST_OPERATOR_SEED_HEX))
 }
 
-/// Production boot: persist operator seed, open existing store (never recreate on boot).
+/// Production boot: open existing store (never recreate on boot) with explicit/sealed
+/// operator seed custody.
 pub fn boot_daemon_state(store_path: &Path) -> Result<(AppState, KeyPair, KeyPair), MnemeError> {
-    let operator = load_or_create_operator_seed(store_path)?;
+    boot_daemon_state_with_operator_seed(store_path, None)
+}
+
+fn boot_daemon_state_with_operator_seed(
+    store_path: &Path,
+    seed_hex: Option<&str>,
+) -> Result<(AppState, KeyPair, KeyPair), MnemeError> {
+    let operator = load_or_generate_operator(store_path, seed_hex)?;
     let store = if store_path.join("roots/HEAD").exists() {
         Store::open(store_path, operator.clone())?
     } else {
@@ -146,50 +156,6 @@ pub fn boot_daemon_state(store_path: &Path) -> Result<(AppState, KeyPair, KeyPai
         rate_limit: Arc::new(Mutex::new(RateLimiter::new(DEFAULT_RATE_LIMIT_PER_MINUTE))),
     };
     Ok((state, operator, agent))
-}
-
-fn load_or_create_operator_seed(store_path: &Path) -> Result<KeyPair, MnemeError> {
-    let seed_path = store_path.join(".operator_seed");
-    if let Ok(hex) = std::env::var("MNEME_OPERATOR_SEED") {
-        return Ok(KeyPair::from_seed(parse_operator_seed_hex(hex.trim())?));
-    }
-    if seed_path.exists() {
-        let hex = fs::read_to_string(&seed_path).map_err(|e| MnemeError::IoFailed {
-            path: seed_path.display().to_string(),
-            kind: e.to_string(),
-        })?;
-        return Ok(KeyPair::from_seed(parse_operator_seed_hex(hex.trim())?));
-    }
-    let (operator, seed) = KeyPair::generate_with_seed();
-    fs::create_dir_all(store_path).map_err(|e| MnemeError::IoFailed {
-        path: store_path.display().to_string(),
-        kind: e.to_string(),
-    })?;
-    fs::write(&seed_path, hex::encode(seed)).map_err(|e| MnemeError::IoFailed {
-        path: seed_path.display().to_string(),
-        kind: e.to_string(),
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&seed_path, fs::Permissions::from_mode(0o600)).map_err(|e| {
-            MnemeError::IoFailed {
-                path: seed_path.display().to_string(),
-                kind: e.to_string(),
-            }
-        })?;
-    }
-    Ok(operator)
-}
-
-fn parse_operator_seed_hex(hex_str: &str) -> Result<[u8; 32], MnemeError> {
-    let bytes = hex::decode(hex_str).map_err(|_| MnemeError::CapMalformed)?;
-    if bytes.len() != 32 {
-        return Err(MnemeError::CapMalformed);
-    }
-    let mut seed = [0u8; 32];
-    seed.copy_from_slice(&bytes);
-    Ok(seed)
 }
 
 pub fn ensure_http_bind_loopback(addr: SocketAddr) -> Result<(), MnemeError> {

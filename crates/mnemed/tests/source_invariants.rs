@@ -7138,3 +7138,33 @@ fn operator_seed_custody_is_centralized_outside_frontends() {
         );
     }
 }
+
+#[test]
+fn operator_seed_custody_is_centralized_outside_frontends() {
+    for (surface, source) in [
+        ("mnemed", include_str!("../src/lib.rs")),
+        (
+            "mneme-mcp",
+            include_str!("../../mneme-mcp/src/store_open.rs"),
+        ),
+        ("mneme-cli", include_str!("../../mneme-cli/src/main.rs")),
+    ] {
+        for forbidden in [
+            "join(\".operator_seed\")",
+            "fs::write(&seed_path",
+            "std::fs::write(&seed_path",
+            "read_to_string(&seed_path",
+            "std::fs::read_to_string(&seed_path",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{surface} should route operator seed custody through mneme-crypto instead of `{forbidden}`"
+            );
+        }
+        assert!(
+            source.contains("load_or_generate_operator"),
+            "{surface} should call the shared operator seed custody helper"
+        );
+    }
+}
+

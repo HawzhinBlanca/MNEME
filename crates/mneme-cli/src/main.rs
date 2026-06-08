@@ -29,7 +29,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; generated and stored on first use if absent
+    /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; required unless MNEME_KMS_MASTER_KEY_HEX is set to seal generated custody
     #[arg(long, global = true, env = "MNEME_OPERATOR_SEED")]
     operator_seed: Option<String>,
 
@@ -592,18 +592,20 @@ fn load_or_generate_operator(
     store: &Path,
     seed_hex: Option<&str>,
 ) -> Result<KeyPair, CliErrorKind> {
-    let seed_path = store.join(".operator_seed");
-    if let Some(hex) = seed_hex {
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex)?));
+    mneme_crypto::load_or_generate_operator(store, seed_hex).map_err(operator_seed_error_to_cli)
+}
+
+fn operator_seed_error_to_cli(err: MnemeError) -> CliErrorKind {
+    match err {
+        MnemeError::CapMalformed => CliErrorKind::Usage,
+        MnemeError::KeyVaultMissing => {
+            eprintln!(
+                "mneme: operator seed custody missing: provide --operator-seed/MNEME_OPERATOR_SEED or MNEME_KMS_MASTER_KEY_HEX"
+            );
+            CliErrorKind::Usage
+        }
+        other => CliErrorKind::Kernel(other),
     }
-    if seed_path.exists() {
-        let hex = std::fs::read_to_string(&seed_path).map_err(|_| CliErrorKind::Usage)?;
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex.trim())?));
-    }
-    let (operator, seed) = KeyPair::generate_with_seed();
-    std::fs::create_dir_all(store).ok();
-    std::fs::write(&seed_path, hex::encode(seed)).map_err(|_| CliErrorKind::Usage)?;
-    Ok(operator)
 }
 
 fn write_forget_proof(path: &Path, proof: &ForgetProof) -> Result<(), CliErrorKind> {
