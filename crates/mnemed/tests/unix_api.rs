@@ -2,6 +2,7 @@
 
 mod unix_ready;
 
+use base64::Engine;
 use mneme_cap::agent_cap;
 use mneme_core::{NodeId, SyncMessage};
 use mneme_crdt::encode_sync_message;
@@ -500,6 +501,37 @@ fn expect_kernel_response_payload_check_passed(
         Ok(payload) => payload,
         Err(message) => panic!("{message}"),
     }
+}
+
+fn expect_unix_json_str<'a>(value: &'a serde_json::Value, key: &str, context: &str) -> &'a str {
+    expect_unix_json_value_str(&value[key], &format!("{context}: Unix JSON `{key}`"))
+}
+
+fn expect_unix_json_value_str<'a>(value: &'a serde_json::Value, context: &str) -> &'a str {
+    value
+        .as_str()
+        .unwrap_or_else(|| panic!("{context} string missing"))
+}
+
+fn expect_unix_json_object<'a>(
+    value: &'a serde_json::Value,
+    key: &str,
+    context: &str,
+) -> &'a serde_json::Map<String, serde_json::Value> {
+    value[key]
+        .as_object()
+        .unwrap_or_else(|| panic!("{context}: Unix JSON `{key}` object missing"))
+}
+
+fn expect_unix_forget_proof_bytes(proof_b64: &str, context: &str) -> Vec<u8> {
+    base64::engine::general_purpose::STANDARD
+        .decode(proof_b64)
+        .unwrap_or_else(|err| panic!("{context}: Unix forget-proof base64 decode failed: {err}"))
+}
+
+fn expect_unix_forget_proof(proof_bytes: &[u8], context: &str) -> mneme_core::ForgetProof {
+    mneme_core::decode_forget_proof(proof_bytes)
+        .unwrap_or_else(|err| panic!("{context}: Unix forget-proof CBOR decode failed: {err:?}"))
 }
 
 fn assert_connection_closed_error(err: &std::io::Error, context: &str) {
@@ -1439,5 +1471,79 @@ async fn unix_prove_absent_requires_capability() {
         resp,
         "prove-absent without capability must fail as auth denial",
     );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn unix_forget_proof_returns_canonical_proof_bound_to_signed_root() {
+    let dir = expect_unix_api_tempdir("forget-proof");
+    let sock = dir.path().join("forget-proof.sock");
+    let (state, operator, agent) = expect_unix_api_state_with_keys(dir.path(), "forget-proof");
+    let cap_b64 = expect_unix_agent_cap_b64(&operator, &agent, "forget-proof");
+    let server = spawn_unix(sock.clone(), state).await;
+
+    let remember = expect_request_json_response(
+        request_json(
+            &sock,
+            &KernelRequest::Remember {
+                cap_b64: cap_b64.clone(),
+                namespace: "unix".into(),
+                name: "proof-target".into(),
+                body_b64: base64::engine::general_purpose::STANDARD.encode(b"delete with proof"),
+            },
+        ),
+        "forget-proof remember request",
+    )
+    .await;
+    let _ = expect_kernel_response_payload(remember, "forget-proof remember response");
+
+    let forget = expect_request_json_response(
+        request_json(
+            &sock,
+            &KernelRequest::ForgetProof {
+                cap_b64: cap_b64.clone(),
+                namespace: "unix".into(),
+                name: "proof-target".into(),
+            },
+        ),
+        "forget-proof request",
+    )
+    .await;
+    let payload = expect_kernel_response_payload(forget, "forget-proof response");
+    let proof_b64 = expect_unix_json_str(&payload, "proof_cbor_b64", "forget-proof response");
+    let proof_bytes = expect_unix_forget_proof_bytes(proof_b64, "forget-proof response");
+    let proof = expect_unix_forget_proof(&proof_bytes, "forget-proof response");
+    let root = expect_unix_json_object(&payload, "root", "forget-proof response");
+    assert_eq!(
+        hex::encode(proof.root_bound),
+        expect_unix_json_value_str(
+            &root["preimage_hash_hex"],
+            "forget-proof root preimage hash"
+        )
+    );
+    assert_eq!(
+        hex::encode(proof.root_bound),
+        expect_unix_json_str(&payload, "root_hash_hex", "forget-proof response")
+    );
+    assert_eq!(proof.version, mneme_core::FORGET_PROOF_VERSION);
+    assert!(
+        expect_unix_json_value_str(&root["signature_hex"], "forget-proof root signature").len()
+            >= 128
+    );
+
+    let recall = expect_request_json_response(
+        request_json(
+            &sock,
+            &KernelRequest::RecallVerified {
+                cap_b64,
+                namespace: "unix".into(),
+                name: "proof-target".into(),
+            },
+        ),
+        "forget-proof recall after request",
+    )
+    .await;
+    assert_kernel_response_error_code(recall, "Forgotten", "forget-proof recall must fail closed");
+
     server.shutdown().await;
 }

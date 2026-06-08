@@ -6,6 +6,9 @@ use mneme_store::Store;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+const TEST_OPERATOR_SEED_HEX: &str =
+    "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+
 pub struct McpRuntime {
     pub handlers: crate::handlers::MemoryHandlers,
     pub store_path: PathBuf,
@@ -25,10 +28,15 @@ fn dirs_home() -> PathBuf {
 }
 
 pub fn open_runtime(store_path: &Path) -> Result<McpRuntime, mneme_core::MnemeError> {
-    let operator = load_or_generate_operator(
-        store_path,
-        std::env::var("MNEME_OPERATOR_SEED").ok().as_deref(),
-    )?;
+    let seed = std::env::var("MNEME_OPERATOR_SEED").ok();
+    open_runtime_with_operator_seed(store_path, seed.as_deref())
+}
+
+fn open_runtime_with_operator_seed(
+    store_path: &Path,
+    seed_hex: Option<&str>,
+) -> Result<McpRuntime, mneme_core::MnemeError> {
+    let operator = load_or_generate_operator(store_path, seed_hex)?;
     let tool_writer = derive_tool_writer_keypair(&operator);
     let store = open_or_create_store(store_path, operator.clone())?;
     let mut store = store;
@@ -128,5 +136,5 @@ fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], mneme_core::MnemeError> {
 }
 
 pub fn test_runtime(dir: &Path) -> McpRuntime {
-    open_runtime(dir).expect("test runtime")
+    open_runtime_with_operator_seed(dir, Some(TEST_OPERATOR_SEED_HEX)).expect("test runtime")
 }

@@ -1,4 +1,5 @@
 use super::common::TestHarness;
+use base64::Engine;
 use mneme_cap::agent_cap;
 use mneme_crypto::KeyPair;
 use mnemed::ServerConfig;
@@ -46,6 +47,37 @@ async fn expect_http_json(resp: reqwest::Response, context: &str) -> serde_json:
     resp.json::<serde_json::Value>()
         .await
         .unwrap_or_else(|err| panic!("{context}: HTTP JSON decode failed: {err}"))
+}
+
+fn expect_http_json_str<'a>(value: &'a serde_json::Value, key: &str, context: &str) -> &'a str {
+    expect_http_json_value_str(&value[key], &format!("{context}: HTTP JSON `{key}`"))
+}
+
+fn expect_http_json_value_str<'a>(value: &'a serde_json::Value, context: &str) -> &'a str {
+    value
+        .as_str()
+        .unwrap_or_else(|| panic!("{context} string missing"))
+}
+
+fn expect_http_json_object<'a>(
+    value: &'a serde_json::Value,
+    key: &str,
+    context: &str,
+) -> &'a serde_json::Map<String, serde_json::Value> {
+    value[key]
+        .as_object()
+        .unwrap_or_else(|| panic!("{context}: HTTP JSON `{key}` object missing"))
+}
+
+fn expect_http_forget_proof_bytes(proof_b64: &str, context: &str) -> Vec<u8> {
+    base64::engine::general_purpose::STANDARD
+        .decode(proof_b64)
+        .unwrap_or_else(|err| panic!("{context}: HTTP forget-proof base64 decode failed: {err}"))
+}
+
+fn expect_http_forget_proof(proof_bytes: &[u8], context: &str) -> mneme_core::ForgetProof {
+    mneme_core::decode_forget_proof(proof_bytes)
+        .unwrap_or_else(|err| panic!("{context}: HTTP forget-proof CBOR decode failed: {err:?}"))
 }
 
 fn expect_http_cap_b64(cap: &mneme_cap::Capability, context: &str) -> String {
@@ -259,6 +291,78 @@ async fn prove_absent_never_written_key() {
     assert_eq!(resp.status(), 200);
     let body = expect_http_json(resp, "HTTP prove-absent response").await;
     assert_eq!(body["absent"], true);
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn forget_proof_returns_canonical_proof_bound_to_signed_root() {
+    let h = TestHarness::new().await;
+    let client = reqwest::Client::new();
+    let auth = h.agent_auth_header();
+
+    let remember = expect_http_response(
+        client
+            .post(format!("{}/v1/memory", h.http_base()))
+            .header("Authorization", &auth)
+            .json(&json!({
+                "namespace": "user",
+                "name": "proof-target",
+                "kind": "semantic",
+                "body": "delete with proof"
+            }))
+            .send(),
+        "HTTP remember for forget-proof",
+    )
+    .await;
+    assert_eq!(remember.status(), 200);
+
+    let forget = expect_http_response(
+        client
+            .delete(format!(
+                "{}/v1/forget-proof/user/proof-target",
+                h.http_base()
+            ))
+            .header("Authorization", &auth)
+            .send(),
+        "HTTP forget-proof",
+    )
+    .await;
+    assert_eq!(forget.status(), 200);
+    let body = expect_http_json(forget, "HTTP forget-proof response").await;
+    let proof_b64 = expect_http_json_str(&body, "proof_cbor_b64", "HTTP forget-proof response");
+    let proof_bytes = expect_http_forget_proof_bytes(proof_b64, "HTTP forget-proof response");
+    let proof = expect_http_forget_proof(&proof_bytes, "HTTP forget-proof response");
+    let root = expect_http_json_object(&body, "root", "HTTP forget-proof response");
+    assert_eq!(
+        hex::encode(proof.root_bound),
+        expect_http_json_value_str(
+            &root["preimage_hash_hex"],
+            "HTTP forget-proof root preimage hash"
+        )
+    );
+    assert_eq!(
+        hex::encode(proof.root_bound),
+        expect_http_json_str(&body, "root_hash_hex", "HTTP forget-proof response")
+    );
+    assert_eq!(proof.version, mneme_core::FORGET_PROOF_VERSION);
+    assert!(
+        expect_http_json_value_str(&root["signature_hex"], "HTTP forget-proof root signature")
+            .len()
+            >= 128
+    );
+
+    let recall_after = expect_http_response(
+        client
+            .get(format!(
+                "{}/v1/memory/user/proof-target?min_tier=working",
+                h.http_base()
+            ))
+            .header("Authorization", &auth)
+            .send(),
+        "HTTP recall after forget-proof",
+    )
+    .await;
+    assert_eq!(recall_after.status(), 410);
     h.shutdown().await;
 }
 

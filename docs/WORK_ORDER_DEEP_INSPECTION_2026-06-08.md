@@ -119,13 +119,15 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **Fix:** add `mneme repair` / `Store::recover` that re-validates on-disk state vs HEAD and clears the
   marker only if self-consistent, else reports what's partial; sweep orphan blobs; document the runbook.
 
-### WO-14 — Daemon production hardening  **[EVIDENCE]** ✅ PARTIAL
-- mnemed mints an **ephemeral operator key + `Store::create` on every boot** (caps from a prior boot
-  fail verify); no Unix `SO_PEERCRED` (0o600 only); `--http` accepts `0.0.0.0` with no TLS (caps as
-  cleartext Bearer); orphaned daemon test files (`http_api.rs`/`grpc_api.rs`/`sync_ws.rs`/`unix_ready.rs`)
-  aren't declared in `Cargo.toml` so they never compile/run.
-- **Fix:** persist the operator key + open (not recreate) the store on boot; add `SO_PEERCRED`/`getpeereid`
-  uid check; require TLS or refuse non-loopback binds; declare the test targets.
+### WO-14 — Daemon production hardening  **[EVIDENCE]** ✅ DONE
+- **Original finding:** mnemed minted an ephemeral operator key + `Store::create` on every boot
+  (caps from a prior boot failed verify); no Unix `SO_PEERCRED`/`getpeereid` uid check; `--http`
+  accepted `0.0.0.0` with no TLS; daemon API test files were suspected orphaned under
+  `autotests = false`.
+- **Disposition:** `boot_daemon_state` persists the operator key and opens existing stores;
+  Unix sockets check same-uid peer credentials; HTTP binds refuse non-loopback addresses without
+  TLS; `api_integration` is the declared aggregate target for `http_api`/`grpc_api`/`sync_ws`, and
+  `unix_ready` is compiled by the Unix/redteam targets.
 
 ### WO-15 — Zeroize secrets  **[EVIDENCE]** ✅ DONE
 - No `zeroize` anywhere; master key, `ObjectKey`, ed25519 `SigningKey` never wiped on drop. Table stakes
@@ -153,21 +155,35 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **Acceptance:** a live-subprocess test where a non-exact-key query returns the documented result
   (either semantic hits, or an explicit not-found that the description predicts).
 
-### WO-18 — MCP failure surface + input safety + seed custody  **[EVIDENCE]** ✅ PARTIAL
-- Tool failures return JSON-RPC `-32000` (some hosts hide from the model) instead of
-  `CallToolResult{isError:true}` with the honesty footer; no input size caps/rate limiting; operator
-  seed persisted plaintext to `<store>/.operator_seed` + a new tool-writer key auto-authorized each boot.
+### WO-18 — MCP failure surface + input safety + seed custody  **[EVIDENCE]** ✅ DONE
+- **Original finding:** tool failures returned JSON-RPC `-32000` (some hosts hide from the model)
+  instead of `CallToolResult{isError:true}` with the honesty footer; no input size caps/rate limiting;
+  operator seed persisted plaintext to `<store>/.operator_seed`; a new tool-writer key was
+  auto-authorized each boot.
+- **Current disposition:** tool failures, size caps, and idempotent tool-writer derivation are in place;
+  operator seed custody is centralized in `mneme-crypto`; KMS-backed runs seal/migrate the seed at
+  `keys/operator_seed.sealed` under `MNEME_KMS_MASTER_KEY_HEX`; no-master runs require an explicit
+  process-custody seed and fail closed instead of reading or creating plaintext `.operator_seed`.
 - **Fix:** route MnemeError tool failures as `isError:true` (+honesty footer), JSON-RPC errors only for
   protocol faults; add content/query size caps; use `EnvelopeKeyVault` for the operator seed and make
   tool-writer authorization idempotent.
 
-### WO-19 — Surface `ForgetProof` as a self-contained signed deletion certificate  **[CONFIRMED]** ✅ PARTIAL
-- `Store::forget` drops the proof; `mnemed/src/unix.rs:756` computes `prove_absent` and discards it
-  (`let _proof = ...`); MCP has no forget-proof tool. The L3 "prove a deletion" artifact has no delivery.
+### WO-19 — Surface `ForgetProof` as a self-contained signed deletion certificate  **[CONFIRMED]** ✅ DONE
+- **Original finding:** `Store::forget` dropped the proof; `mnemed/src/unix.rs:756` computed
+  `prove_absent` and discarded it (`let _proof = ...`); MCP had no forget-proof tool. The L3
+  "prove a deletion" artifact had no complete delivery surface.
+- **Current disposition:** CLI `mneme forget --emit-proof`, MCP `memory.forget_proof`, mnemed HTTP
+  `DELETE /v1/forget-proof/{namespace}/{name}`, and mnemed Unix `ForgetProof` now return canonical
+  `ForgetProof` CBOR bound to the post-commit signed root.
 - **Fix:** add a CLI `mneme forget --emit-proof <path>` and an mnemed endpoint that return the
   `ForgetProof`; ideally make it a single offline-verifiable signed blob (or bundle the matching Root).
 
-### WO-20 — Audit event export (L3)  **[EVIDENCE / research]** ✅ PARTIAL
+### WO-20 — Audit event export (L3)  **[EVIDENCE / research]** ✅ DONE
+- **Original finding:** `mneme.audit` tracing covered verified-recall rejection, promote, and forget,
+  but the dropped sync-peer hook was a dead store-kernel stub.
+- **Current disposition:** `mneme.audit` tracing events cover `verify_recall` rejection, promote,
+  forget, and mnemed sync peer drops from the production sync client plus WebSocket server
+  suppressed/drop paths. Sync peer events carry `peer` and `reason`.
 - **Fix:** emit structured OpenTelemetry events on every `verify_recall` rejection, promote, forget, and
   dropped sync peer (the who/when/from-what). Named in the blueprint §15.4.
 
@@ -178,18 +194,34 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **L2 two-host CONVERGENCE proof:** A1 already proves cross-host *root* determinism (macOS/arm64 ↔
   Windows/x86_64, `XHOST_DETERMINISM_PROOF.md`). The gap is that the determinism scripts run only
   single-node `foundation-gate`; the **CRDT merge/anti-entropy** path is never run cross-host and
-  convergence is asserted on roots, not the object SET. Extend the scripts to run merge cross-host and
-  compare an object-set digest. (~1–2 wks; the real run needs a second physical host — the LEAN bar.)
+  convergence is asserted on roots, not the object SET. `scripts/ci/convergence-two-host.sh` now
+  compares deterministic object-set digests after merge convergence, supports same-host
+  `--local-smoke`, and fails closed under `MNEME_STRICT_CROSS_HOST=1` unless
+  `MNEME_SECOND_HOST` is set. The real proof still needs a distinct physical host.
 - **Real KMS/HSM adapter:** AWS+GCP+PKCS#11 envelope, two-tier KEK rotation, conformance harness.
-  (~2 wks; non-extractable HSM structurally can't satisfy in-process AEAD — documented cap.)
+  `mneme_crypto::run_key_vault_conformance` and `scripts/kms/conformance-local.sh` now provide
+  the no-secret adapter contract scaffold, including same-id/different-key conflict rejection.
+  Live AWS/GCP/PKCS#11 proof and two-tier KEK rotation remain external-endpoint work.
 - **TEE attestation:** off by default, Nitro first (COSE/CBOR, simplest single root), then SGX-DCAP /
   SEV-SNP; a frozen `AcceptedReportPolicy` (pinned root, measurement allowlist, nonce/freshness).
-  (~3–4 engineer-weeks/vendor. Today `mneme-attest` is dead code that accepts any well-formed ASN.1.)
-- **Formal methods:** Kani staged panic-freedom proof over the TCB + reachable parsers; Bolero dual-mode
-  harnesses. (~5–6 wks, no specialist for stages 1–4.)
-- **OSS release:** LICENSE (WO-8) + SECURITY.md + CONTRIBUTING; consolidate `THREAT_MODEL.md`; add
-  `POSITIONING.md` vs prior art (V3DB / ANNProof / PROV-AGENT / VCs); then commit → content-review the
-  diff → merge PR #8 → tag.
+  `mneme-attest` now has `verify_accepted_report_policy` and
+  `scripts/ci/attestation-policy-local.sh` for local fail-closed policy checks over already-verified
+  claims; real vendor quote verification and hardware evidence remain external.
+- **Formal methods:** `docs/FORMAL_METHODS_SCAFFOLD.md` and
+  `scripts/ci/formal-obligations-local.sh` now inventory the local proof-obligation scaffold: TCB
+  guard self-test, current TCB guard scan, TCB line-budget test, and honesty-doc boundary test.
+  Real Lean/F*/Kani/Bolero proof artifacts remain human-gated.
+- **P3 local aggregate gate:** `docs/P3_LOCAL_SCAFFOLDS.md` and
+  `scripts/ci/validation-lane.sh p3-local` run the no-secret convergence, KMS/HSM, TEE policy, and
+  formal-obligation scaffolds together while preserving the human-gated proof boundaries.
+  `scripts/ci/p3-local-watch-history-summary.sh` validates retained watch history rows and emits
+  the recent pass/fail streak for hourly reports. `scripts/ci/p3-local-hourly-report.sh` reruns
+  the local lane and writes a durable local-only `hourly-report.json` artifact, retained snapshots,
+  and compact `hourly-report-index.json` with retained `reports` plus `latest_report_sha256`;
+  `scripts/ci/p3-local-hourly-report-verify.sh` verifies that saved report without rerunning the lane.
+- **OSS release:** LICENSE (WO-8), `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, and
+  `POSITIONING.md` are present with guarded honesty strings. Remaining release actions are human
+  content review, merge/release decision, and tag.
 
 ---
 
@@ -218,12 +250,37 @@ documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, 
 | WO-11 | DONE | `durability_fsync_enabled()` debug-only; `audit_durability_at_open` warns + writes `meta/durability_disabled.json` |
 | WO-12 | DONE | `open_store_lock` advisory `flock`; `Store` holds lock for lifetime; `LockHeld`; CLAUDE.md single-writer invariant |
 | WO-13 | DONE | `repair_store` + `mneme repair`; verify-then-clear `.incomplete`; orphan object blob sweep |
-| WO-14 | PARTIAL | `boot_daemon_state` persists operator + opens store; loopback HTTP refused; Unix `getpeereid`/`SO_PEERCRED`; orphaned integration test targets still undeclared |
+| WO-14 | DONE | `boot_daemon_state` persists operator + opens store; loopback HTTP refused; Unix `getpeereid`/`SO_PEERCRED`; `api_integration` aggregate target compiles/runs `http_api`/`grpc_api`/`sync_ws` and `unix_ready` is compiled by Unix/redteam targets; fixed mnemed HTTP bind parse type inference |
 | WO-15 | DONE | `zeroize` on `KeyPair` drop + vault `shred`; `ed25519-dalek/zeroize` feature |
 | WO-16 | DONE | Chameleon trapdoor wired in `forget_redact`; `shred_witness_commit` binds `vault-tombstone-v1` + key id |
 | WO-17 | DONE | MCP `key` param + description states exact logical-key lookup; `query` deprecated alias |
-| WO-18 | PARTIAL | Tool failures return `isError:true` + honesty footer; content/query size caps; idempotent tool-writer derivation; operator seed still plaintext file |
-| WO-19 | PARTIAL | `mneme forget --emit-proof`; mnemed `prove_absent` returns `absence_proof_b64`; MCP forget-proof tool not added |
-| WO-20 | PARTIAL | `mneme.audit` tracing events on verify_recall rejection, promote, forget; sync-peer hook stubbed |
+| WO-18 | DONE | Tool failures return `isError:true` + honesty footer; content/query size caps; idempotent tool-writer derivation; operator seed custody centralized; KMS-backed runs seal/migrate `keys/operator_seed.sealed`; no-master runs require explicit process-custody seed and fail closed without reading/creating plaintext `.operator_seed` |
+| WO-19 | DONE | `mneme forget --emit-proof`; MCP `memory.forget_proof` (full ForgetProof CBOR + signed-root fields, `isError:true` + honesty footer on failures); mnemed HTTP `DELETE /v1/forget-proof/{namespace}/{name}`; mnemed Unix `ForgetProof`; smoke: `mcp_forget_proof_tool_returns_verifiable_cbor_and_signed_root_fields`, `stdio_forget_proof_returns_verifiable_cbor_and_signed_root_fields`, `mcp_forget_proof_failure_returns_is_error_with_honesty_footer` |
+| WO-20 | DONE | `mneme.audit` tracing events on verify_recall rejection, promote, forget, and mnemed sync peer drops; daemon client/server hooks wired and dead store stub removed |
+| P3 OSS docs | DONE | Root `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, and `POSITIONING.md`; `mneme-core` honesty-doc invariant guards security/positioning/threat-model caveats and release-doc routing |
+| P3 convergence scaffold | LOCAL-SCAFFOLD | `scripts/ci/convergence-two-host.sh --local-smoke` compares object-set digests after same-host merge convergence; default output uses retained per-run `out/convergence-two-host/local-smoke-runs/run.*` directories with `local-smoke-run.json`; `MNEME_STRICT_CROSS_HOST=1` fails closed without `MNEME_SECOND_HOST`; real distinct-host proof remains human-gated |
+| P3 KMS/HSM conformance scaffold | LOCAL-SCAFFOLD | `mneme_crypto::run_key_vault_conformance`; `scripts/kms/conformance-local.sh`; same-id/different-key vault imports now fail closed with `KeyVaultCorrupt`; live endpoint proof remains human-gated |
+| P3 TEE attestation policy scaffold | LOCAL-SCAFFOLD | `mneme_attest::verify_accepted_report_policy`; `docs/TEE_ATTESTATION_POLICY.md`; `scripts/ci/attestation-policy-local.sh`; placeholder/unsupported/stale/mismatched claims fail closed; live vendor quote proof remains human-gated |
+| P3 formal-methods scaffold | LOCAL-SCAFFOLD | `docs/FORMAL_METHODS_SCAFFOLD.md`; `scripts/ci/formal-obligations-local.sh`; TCB guard self-test + current guard scan + `tcb_budget`; real machine-checked proof remains human-gated |
+| P3 local aggregate gate | LOCAL-SCAFFOLD | `docs/P3_LOCAL_SCAFFOLDS.md`; `scripts/ci/validation-lane.sh p3-local`; `scripts/ci/p3-local-scaffolds.sh`; `scripts/ci/p3-local-summary-verify.sh`; runs convergence local smoke + KMS/HSM local conformance + TEE policy local + formal obligations; writes `out/p3-local-scaffolds/summary.json` with `schema_version: p3-local-scaffolds.v1`, `execution_mode: gates-run`, `gates_executed: true`, per-gate `gate_results` marked `status: passed`, each passed gate `artifact_path` linked to local metadata plus `artifact_sha256` with its sha256 digest, `source_state`, and `clean_checkout_proof: false`; the verifier checks saved `summary.json` schema version, status transitions, artifact basenames, `artifact_path` existence, and `artifact_sha256` digest matches; unsupported versions fail closed as `unsupported schema_version`; `--write-result` writes a compact `verify_result` companion JSON with `schema_version: p3-local-summary-verify.v1`, `summary_sha256`, `summary_run_status`, `gate_statuses`, and failure `failure_reason`; `summary_sha256` binds the result to the exact `summary.json` bytes read by the verifier; the validation lane writes this to `out/p3-local-scaffolds/verify-result.json` by default, supports `P3_LOCAL_VERIFY_RESULT`, and removes stale summary/result artifacts before each run; `scripts/ci/p3-local-watch-check.sh` validates the bound summary/result pair plus local-only boundaries and emits one watcher line, `p3-local-watch.v1 status=passed` or `p3-local-watch.v1 status=failed failure_reason=...`; the lane appends watcher outcomes to `out/p3-local-scaffolds/watch-history.jsonl` by default, supports `P3_LOCAL_WATCH_HISTORY`, and direct watcher runs support `--append-history`; history rows use `schema_version: p3-local-watch-history.v1`; history retains the newest 168 rows by default and supports `P3_LOCAL_WATCH_HISTORY_RETAIN` or watcher `--history-retain N`; `scripts/ci/p3-local-watch-history-summary.sh` validates retained history rows and emits `p3-local-watch-history-summary.v1` with `history_rows`, `latest_status`, `current_streak_status`, `current_streak_count`, `last_failure_reason`, and `not external P3 proof`, while invalid rows fail closed as `invalid_history_row`; `scripts/ci/p3-local-hourly-report.sh` reruns the local lane, writes `out/p3-local-scaffolds/hourly-report.json`, retains newest snapshot copies under `out/p3-local-scaffolds/hourly-report-snapshots` with `P3_LOCAL_HOURLY_REPORT_SNAPSHOT_DIR` and `P3_LOCAL_HOURLY_REPORT_RETAIN` overrides, and writes compact `out/p3-local-scaffolds/hourly-report-index.json` with `schema_version: p3-local-hourly-report-index.v1`, retained `reports`, `latest_snapshot_path`, and `latest_report_sha256`; hourly reports use `schema_version: p3-local-hourly-report.v1`, `lane_status`, `lane_exit_code`, `history_summary_status`, streak fields, `snapshot_path`, `snapshot_count`, `snapshot_retain`, `index_path`, `index_report_count`, and `not external P3 proof`; `scripts/ci/p3-local-hourly-report-verify.sh` validates saved reports without rerunning the lane, checks every retained index `reports` entry against its snapshot body, and emits `p3-local-hourly-report-verify.v1`, failing stale history as `stale_history`, digest mismatches as `summary_sha256_mismatch`, changed snapshots as `snapshot_mismatch`, corrupt retained snapshots as `report_entry_snapshot_invalid_json`, malformed retained reports shape as `reports_not_list`, retained reports count drift as `reports_count_mismatch`, non-object retained report entries as `report_entry_not_object`, retained-index summary field drift as `report_entry_summary_sha256_mismatch`, unindexed retained snapshots as `reports_missing_retained_snapshots`, latest-snapshot pointer drift as `latest_snapshot_path_mismatch`, latest-report digest drift as `latest_report_sha256_mismatch`, missing latest retained entries as `latest_entry_missing`, historical index drift as `index_mismatch`, and over-retained snapshots as `snapshot_retention_exceeded`; `scripts/ci/p3-local-hourly-fixture.py` centralizes reusable synthetic hourly report/index fixtures; `scripts/ci/p3-local-hourly-report-verify-selftest.sh` emits `p3-local-hourly-report-verify-selftest.v1`, verifies a clean synthetic two-snapshot fixture, and requires tampered index cases to fail with `report_entry_sha256_mismatch`, `report_entry_snapshot_not_retained`, `report_entry_duplicate_snapshot_path`, `report_entry_snapshot_invalid_json`, `report_entry_not_object`, `report_entry_summary_sha256_mismatch`, `reports_not_list`, `reports_count_mismatch`, `reports_missing_retained_snapshots`, `latest_snapshot_path_mismatch`, `latest_report_sha256_mismatch`, and `latest_entry_missing`; `validation-lane.sh p3-local` runs that self-test after summary/watch checks; failed runs write a failure manifest with `run_status: failed`, `failed_gate`, `failed_exit_code`, the failed gate `status: failed`, and later gates `status: not_executed`; `--write-summary-only` writes `execution_mode: summary-only`, `gates_executed: false`, and per-gate `status: not_executed`; real P3 proofs remain human-gated |
+| P3 hourly retained-index generated-at detail | LOCAL-SCAFFOLD | Retained index `generated_at_utc` field drift against the retained snapshot body fails closed as `report_entry_generated_at_utc_mismatch`; the fixture helper exposes `generated-at-utc-field`; the self-test emits `generated_at_utc_detail=report_entry_generated_at_utc_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index lane detail | LOCAL-SCAFFOLD | Retained index `lane_status` field drift against the retained snapshot body fails closed as `report_entry_lane_status_mismatch`; the fixture helper exposes `lane-status-field`; the self-test emits `lane_status_detail=report_entry_lane_status_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index history-summary detail | LOCAL-SCAFFOLD | Retained index `history_summary_status` field drift against the retained snapshot body fails closed as `report_entry_history_summary_status_mismatch`; the fixture helper exposes `history-summary-status-field`; the self-test emits `history_summary_status_detail=report_entry_history_summary_status_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index history-rows detail | LOCAL-SCAFFOLD | Retained index `history_rows` field drift against the retained snapshot body fails closed as `report_entry_history_rows_mismatch`; the fixture helper exposes `history-rows-field`; the self-test emits `history_rows_detail=report_entry_history_rows_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index latest-status detail | LOCAL-SCAFFOLD | Retained index `latest_status` field drift against the retained snapshot body fails closed as `report_entry_latest_status_mismatch`; the fixture helper exposes `latest-status-field`; the self-test emits `latest_status_detail=report_entry_latest_status_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index current-streak-status detail | LOCAL-SCAFFOLD | Retained index `current_streak_status` field drift against the retained snapshot body fails closed as `report_entry_current_streak_status_mismatch`; the fixture helper exposes `current-streak-status-field`; the self-test emits `current_streak_status_detail=report_entry_current_streak_status_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index current-streak-count detail | LOCAL-SCAFFOLD | Retained index `current_streak_count` field drift against the retained snapshot body fails closed as `report_entry_current_streak_count_mismatch`; the fixture helper exposes `current-streak-count-field`; the self-test emits `current_streak_count_detail=report_entry_current_streak_count_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index last-failure-reason detail | LOCAL-SCAFFOLD | Retained index `last_failure_reason` field drift against the retained snapshot body fails closed as `report_entry_last_failure_reason_mismatch`; the fixture helper exposes `last-failure-reason-field`; the self-test emits `last_failure_reason_detail=report_entry_last_failure_reason_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index not-proof detail | LOCAL-SCAFFOLD | Retained index `not_proof` field drift against the retained snapshot body fails closed as `report_entry_not_proof_mismatch`; the fixture helper exposes `not-proof-field`; the self-test emits `not_proof_field_detail=report_entry_not_proof_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly index schema detail | LOCAL-SCAFFOLD | Hourly index `schema_version` drift fails closed as `schema_version_mismatch`; the fixture helper exposes `index-schema-version`; the self-test emits `index_schema_detail=schema_version_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly index generated-by detail | LOCAL-SCAFFOLD | Hourly index `generated_by` drift fails closed as `generated_by_mismatch`; the fixture helper exposes `index-generated-by`; the self-test emits `index_generated_by_detail=generated_by_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly index not-proof boundary detail | LOCAL-SCAFFOLD | Hourly index `not_proof` boundary drift fails closed as `not_proof_boundary_missing`; the fixture helper exposes `index-not-proof-boundary`; the self-test emits `index_not_proof_detail=not_proof_boundary_missing`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly latest-entry digest detail | LOCAL-SCAFFOLD | Latest retained index entry `report_sha256` drift against the index-level `latest_report_sha256` fails closed as `latest_entry_report_sha256_mismatch`; the fixture helper exposes `latest-entry-report-sha256`; the self-test emits `latest_entry_report_detail=latest_entry_report_sha256_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index status detail | LOCAL-SCAFFOLD | Retained index `status` field drift against the retained snapshot body fails closed as `report_entry_status_mismatch`; the fixture helper exposes `status-field`; the self-test emits `status_field_detail=report_entry_status_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index failure detail | LOCAL-SCAFFOLD | Retained index `failure_reason` drift against the retained snapshot body fails closed as `report_entry_failure_reason_mismatch`; the fixture helper exposes `failure-reason`; the self-test emits `failure_reason_detail=report_entry_failure_reason_mismatch`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-snapshot read detail | LOCAL-SCAFFOLD | Retained snapshot files that cannot be read fail closed as `report_entry_snapshot_read_failed`; the fixture helper exposes `snapshot-unreadable`; the self-test emits `snapshot_read_detail=report_entry_snapshot_read_failed`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-snapshot shape detail | LOCAL-SCAFFOLD | Retained snapshot files that decode to non-object JSON fail closed as `report_entry_snapshot_not_object`; the fixture helper exposes `snapshot-not-object`; the self-test emits `snapshot_shape_detail=report_entry_snapshot_not_object`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index digest detail | LOCAL-SCAFFOLD | Retained report entries with malformed `report_sha256` fail closed as `report_entry_sha256_invalid`; the fixture helper exposes `report-sha256-invalid`; the self-test emits `entry_sha256_shape_detail=report_entry_sha256_invalid`; this remains local scaffold evidence, not external P3 proof |
+| P3 hourly retained-index detail | LOCAL-SCAFFOLD | Retained report entries missing `snapshot_path` fail closed as `report_entry_snapshot_path_missing`; the fixture helper exposes `report-entry-snapshot-path-missing`; the self-test emits `entry_path_detail=report_entry_snapshot_path_missing`; this remains local scaffold evidence, not external P3 proof |
 | P0 gate | GREEN | `scripts/ci/validation-lane.sh quick` after all P0 fixes |
 | P1/P2 gate | GREEN | `scripts/ci/validation-lane.sh quick` after WO-9..WO-20 feasible slice |

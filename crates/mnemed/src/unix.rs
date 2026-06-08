@@ -1,9 +1,10 @@
 //! Unix domain socket kernel API + §11 sync frames (local-first).
 
 use crate::state::{AppState, capability_from_header};
+use base64::Engine;
 use mneme_core::{
-    Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, SyncMessage,
-    TrustTier,
+    Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, Root, SyncMessage,
+    TrustTier, encode_forget_proof,
 };
 use mneme_crdt::{decode_sync_message, encode_sync_message};
 use mneme_store::Store;
@@ -40,7 +41,7 @@ fn verify_unix_peer_credentials(stream: &UnixStream) -> Result<(), std::io::Erro
                 "unix peer uid mismatch",
             ));
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -68,7 +69,7 @@ fn verify_unix_peer_credentials(stream: &UnixStream) -> Result<(), std::io::Erro
                 "unix peer uid mismatch",
             ));
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(any(
         target_os = "linux",
@@ -106,6 +107,11 @@ pub enum KernelRequest {
         namespace: String,
         name: String,
         mode: String,
+    },
+    ForgetProof {
+        cap_b64: String,
+        namespace: String,
+        name: String,
     },
     ProveAbsent {
         cap_b64: String,
@@ -674,6 +680,11 @@ fn dispatch_inner(state: &AppState, req: KernelRequest) -> Result<serde_json::Va
             name,
             mode,
         } => forget(state, &cap_b64, namespace, name, mode),
+        KernelRequest::ForgetProof {
+            cap_b64,
+            namespace,
+            name,
+        } => forget_proof(state, &cap_b64, namespace, name),
         KernelRequest::ProveAbsent {
             cap_b64,
             namespace,
@@ -812,6 +823,27 @@ fn forget(
     Ok(serde_json::json!({ "forgot": true }))
 }
 
+fn forget_proof(
+    state: &AppState,
+    cap_b64: &str,
+    namespace: String,
+    name: String,
+) -> Result<serde_json::Value, MnemeError> {
+    let cap = cap_from_b64(cap_b64)?;
+    validate_logical_key(&namespace, &name)?;
+    let mut store = lock_unix_store(state, "forget_proof")?;
+    let key = LogicalKey { namespace, name };
+    let proven =
+        store.forget_with_proof(ForgetTarget::LogicalKey(key), &cap, ForgetMode::Shred, None)?;
+    let proof_bytes = encode_forget_proof(&proven.proof)?;
+    Ok(serde_json::json!({
+        "root_hash_hex": hex::encode(proven.root.preimage_hash),
+        "proof_version": proven.proof.version,
+        "proof_cbor_b64": base64::engine::general_purpose::STANDARD.encode(proof_bytes),
+        "root": signed_root_json(&proven.root),
+    }))
+}
+
 fn prove_absent(
     state: &AppState,
     cap_b64: &str,
@@ -828,11 +860,24 @@ fn prove_absent(
     let key = LogicalKey { namespace, name };
     let proof = store.prove_absent(&key)?;
     let proof_bytes = mneme_smt::encode_non_membership_wire(&proof);
-    use base64::Engine;
     Ok(serde_json::json!({
         "absent": true,
         "absence_proof_b64": base64::engine::general_purpose::STANDARD.encode(proof_bytes),
     }))
+}
+
+fn signed_root_json(root: &Root) -> serde_json::Value {
+    serde_json::json!({
+        "version": root.version,
+        "preimage_hash_hex": hex::encode(root.preimage_hash),
+        "dag_head_root_hex": hex::encode(root.dag_head_root),
+        "key_index_root_hex": hex::encode(root.key_index_root),
+        "semantic_commit_hex": hex::encode(root.semantic_commit),
+        "hlc_max_hex": hex::encode(root.hlc_max),
+        "prev_root_hex": hex::encode(root.prev_root),
+        "signature_hex": hex::encode(&root.signature),
+        "sequence": root.sequence,
+    })
 }
 
 fn sync_frame(

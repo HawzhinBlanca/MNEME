@@ -1,8 +1,10 @@
 //! Tool handlers — testable without MCP transport (blueprint §14.1).
 
+use base64::Engine;
 use mneme_cap::Capability;
 use mneme_core::{
-    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, TrustTier,
+    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, Root,
+    TrustTier, encode_forget_proof,
 };
 use mneme_store::Store;
 use std::sync::{Arc, Mutex};
@@ -156,6 +158,39 @@ impl MemoryHandlers {
         })
     }
 
+    /// `memory.forget_proof` — shred + tombstone + canonical ForgetProof artifact.
+    pub fn forget_with_proof(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<ForgetProofResult, MnemeError> {
+        let target = ForgetTarget::LogicalKey(LogicalKey {
+            namespace: normalize_tool_namespace(namespace),
+            name: name.to_string(),
+        });
+        let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
+        let action_receipt = Self::optional_action_receipt_for_forget(
+            &store,
+            &target,
+            ForgetMode::Shred,
+            &self.read_cap,
+        )?;
+        let proven = store.forget_with_proof(
+            target,
+            &self.read_cap,
+            ForgetMode::Shred,
+            action_receipt.as_ref(),
+        )?;
+        let proof_bytes = encode_forget_proof(&proven.proof)?;
+        let proof_cbor_b64 = base64::engine::general_purpose::STANDARD.encode(proof_bytes);
+        Ok(ForgetProofResult {
+            root_hash_hex: hex::encode(proven.root.preimage_hash),
+            proof_version: proven.proof.version,
+            proof_cbor_b64,
+            root: SignedRootResult::from_root(&proven.root),
+        })
+    }
+
     #[cfg(feature = "phase_iii_bind")]
     fn optional_action_receipt_for_remember(
         store: &Store,
@@ -226,6 +261,43 @@ impl RecallEntry {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ForgetResult {
     pub root_hash_hex: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ForgetProofResult {
+    pub root_hash_hex: String,
+    pub proof_version: u16,
+    pub proof_cbor_b64: String,
+    pub root: SignedRootResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SignedRootResult {
+    pub version: u16,
+    pub preimage_hash_hex: String,
+    pub dag_head_root_hex: String,
+    pub key_index_root_hex: String,
+    pub semantic_commit_hex: String,
+    pub hlc_max_hex: String,
+    pub prev_root_hex: String,
+    pub signature_hex: String,
+    pub sequence: u64,
+}
+
+impl SignedRootResult {
+    fn from_root(root: &Root) -> Self {
+        Self {
+            version: root.version,
+            preimage_hash_hex: hex::encode(root.preimage_hash),
+            dag_head_root_hex: hex::encode(root.dag_head_root),
+            key_index_root_hex: hex::encode(root.key_index_root),
+            semantic_commit_hex: hex::encode(root.semantic_commit),
+            hlc_max_hex: hex::encode(root.hlc_max),
+            prev_root_hex: hex::encode(root.prev_root),
+            signature_hex: hex::encode(&root.signature),
+            sequence: root.sequence,
+        }
+    }
 }
 
 pub fn parse_kind(s: &str) -> Result<MemoryKind, MnemeError> {

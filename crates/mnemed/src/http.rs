@@ -8,9 +8,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
+use base64::Engine;
 use mneme_cap::Capability;
 use mneme_core::{
-    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier,
+    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, Root, TrustTier,
+    encode_forget_proof,
 };
 use mneme_core::{MnemeError, ObjectId};
 use serde::{Deserialize, Serialize};
@@ -83,6 +85,27 @@ struct ForgetResponse {
 }
 
 #[derive(Serialize)]
+struct ForgetProofResponse {
+    root_hash_hex: String,
+    proof_version: u16,
+    proof_cbor_b64: String,
+    root: SignedRootJson,
+}
+
+#[derive(Serialize)]
+struct SignedRootJson {
+    version: u16,
+    preimage_hash_hex: String,
+    dag_head_root_hex: String,
+    key_index_root_hex: String,
+    semantic_commit_hex: String,
+    hlc_max_hex: String,
+    prev_root_hex: String,
+    signature_hex: String,
+    sequence: u64,
+}
+
+#[derive(Serialize)]
 struct ProveAbsentResponse {
     root_hash_hex: String,
     absent: bool,
@@ -101,6 +124,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/memory", post(remember))
         .route("/v1/memory/{namespace}/{name}", get(recall))
         .route("/v1/memory/{namespace}/{name}", delete(forget))
+        .route("/v1/forget-proof/{namespace}/{name}", delete(forget_proof))
         .route("/v1/memory/promote", post(promote))
         .route("/v1/prove-absent/{namespace}/{name}", get(prove_absent))
         .route(
@@ -234,6 +258,35 @@ async fn forget(
     }))
 }
 
+async fn forget_proof(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((namespace, name)): Path<(String, String)>,
+) -> Result<Json<ForgetProofResponse>, ApiError> {
+    let cap = auth_cap(&headers)?;
+    check_rate_limit(&state, &cap)?;
+    verify_cap(&state, &cap)?;
+    let mut store = state
+        .store
+        .lock()
+        .map_err(|_| ApiError::internal("store lock poisoned"))?;
+    let proven = store
+        .forget_with_proof(
+            ForgetTarget::LogicalKey(LogicalKey { namespace, name }),
+            &cap,
+            ForgetMode::Shred,
+            None,
+        )
+        .map_err(ApiError::from_mneme)?;
+    let proof_bytes = encode_forget_proof(&proven.proof).map_err(ApiError::from_mneme)?;
+    Ok(Json(ForgetProofResponse {
+        root_hash_hex: hex::encode(proven.root.preimage_hash),
+        proof_version: proven.proof.version,
+        proof_cbor_b64: base64::engine::general_purpose::STANDARD.encode(proof_bytes),
+        root: SignedRootJson::from_root(&proven.root),
+    }))
+}
+
 async fn promote(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -263,6 +316,22 @@ async fn promote(
         dag_head_root_hex: hex::encode(root.dag_head_root),
         key_index_root_hex: hex::encode(root.key_index_root),
     }))
+}
+
+impl SignedRootJson {
+    fn from_root(root: &Root) -> Self {
+        Self {
+            version: root.version,
+            preimage_hash_hex: hex::encode(root.preimage_hash),
+            dag_head_root_hex: hex::encode(root.dag_head_root),
+            key_index_root_hex: hex::encode(root.key_index_root),
+            semantic_commit_hex: hex::encode(root.semantic_commit),
+            hlc_max_hex: hex::encode(root.hlc_max),
+            prev_root_hex: hex::encode(root.prev_root),
+            signature_hex: hex::encode(&root.signature),
+            sequence: root.sequence,
+        }
+    }
 }
 
 async fn prove_absent(

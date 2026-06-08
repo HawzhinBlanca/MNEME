@@ -21,6 +21,8 @@ Returns entries only after receipt verifies against the signed root. ";
 pub const FORGET_DESCRIPTION: &str =
     "Cryptographic forget (shred) with tombstone; root remains verifiable. ";
 
+pub const FORGET_PROOF_DESCRIPTION: &str = "Cryptographic forget (shred) with tombstone plus canonical ForgetProof CBOR and signed-root metadata for offline deletion-certificate verification. ";
+
 /// Append §3 honesty boundary to tool-call error messages (not footnotes).
 pub fn tool_error_message(err: mneme_core::MnemeError) -> String {
     let base = format!("{err:?}");

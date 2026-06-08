@@ -2,8 +2,8 @@
 
 use crate::handlers::{self, MemoryHandlers};
 use crate::honesty::{
-    AINJ_MITIGATION, FORGET_DESCRIPTION, HONESTY_FOOTER, RECALL_DESCRIPTION, REMEMBER_DESCRIPTION,
-    tool_error_message,
+    AINJ_MITIGATION, FORGET_DESCRIPTION, FORGET_PROOF_DESCRIPTION, HONESTY_FOOTER,
+    RECALL_DESCRIPTION, REMEMBER_DESCRIPTION, tool_error_message,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -135,6 +135,10 @@ fn forget_description() -> String {
     format!("{FORGET_DESCRIPTION}{HONESTY_FOOTER}")
 }
 
+fn forget_proof_description() -> String {
+    format!("{FORGET_PROOF_DESCRIPTION}{HONESTY_FOOTER}")
+}
+
 pub fn tool_definitions() -> Vec<Value> {
     vec![
         json!({
@@ -168,6 +172,18 @@ pub fn tool_definitions() -> Vec<Value> {
         json!({
             "name": "memory.forget",
             "description": forget_description(),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "namespace": { "type": "string" },
+                    "target": { "type": "string" }
+                },
+                "required": ["namespace", "target"]
+            }
+        }),
+        json!({
+            "name": "memory.forget_proof",
+            "description": forget_proof_description(),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -223,6 +239,19 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
             Ok(tool_result_json(
                 json!({ "root_hash_hex": out.root_hash_hex }),
             ))
+        }
+        "memory.forget_proof" => {
+            let namespace = arg_str(args, "namespace")?;
+            let target = bounded_arg_str(args, "target", MAX_TOOL_QUERY_BYTES)?;
+            let out = handlers
+                .forget_with_proof(namespace, target)
+                .map_err(tool_error_message)?;
+            Ok(tool_result_json(json!({
+                "root_hash_hex": out.root_hash_hex,
+                "proof_version": out.proof_version,
+                "proof_cbor_b64": out.proof_cbor_b64,
+                "root": out.root,
+            })))
         }
         _ => Err(format!("unknown tool: {name}")),
     }
