@@ -3,24 +3,9 @@
 #![forbid(unsafe_code)]
 #![deny(warnings)]
 
-// These constants are consumed by `account_gate_failure_to_mneme` (below), whose cfg is
-// `any(not(bind_action), not(prove_forget), not(verify), test)`. The imports must match that
-// cfg exactly: gating them more narrowly (e.g. only `not(bind_action)`) drops the import under
-// feature combos where the function still compiles, breaking the build under a single phase_iii
-// feature. Keep these two cfgs in lockstep with the function's cfg.
-#[cfg(any(
-    not(feature = "phase_iii_bind_action"),
-    not(feature = "phase_iii_prove_forget"),
-    not(feature = "phase_iii_verify"),
-    test
-))]
+#[cfg(any(not(feature = "phase_iii_bind_action"), test))]
 use mneme_core::ACTION_RECEIPT_VERSION;
-#[cfg(any(
-    not(feature = "phase_iii_bind_action"),
-    not(feature = "phase_iii_prove_forget"),
-    not(feature = "phase_iii_verify"),
-    test
-))]
+#[cfg(any(not(feature = "phase_iii_prove_forget"), test))]
 use mneme_core::FORGET_PROOF_VERSION;
 use mneme_core::{
     ActionReceipt, Capability, ForgetMode, ForgetProof, ForgetTarget, MnemeError, Root,
@@ -78,9 +63,13 @@ pub const PHASE_III_PROVE_FORGET_OPEN: bool = false;
 ))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AccountGateFailure {
+    #[cfg(any(not(feature = "phase_iii_bind_action"), test))]
     BindAction,
+    #[cfg(any(not(feature = "phase_iii_prove_forget"), test))]
     ProveForget,
+    #[cfg(any(not(feature = "phase_iii_verify"), test))]
     VerifyActionReceipt(u16),
+    #[cfg(any(not(feature = "phase_iii_verify"), test))]
     VerifyForgetProof(u16),
 }
 
@@ -92,12 +81,15 @@ enum AccountGateFailure {
 ))]
 fn account_gate_failure_to_mneme(failure: AccountGateFailure) -> MnemeError {
     match failure {
+        #[cfg(any(not(feature = "phase_iii_bind_action"), test))]
         AccountGateFailure::BindAction => MnemeError::UnsupportedVersion {
             got: ACTION_RECEIPT_VERSION,
         },
+        #[cfg(any(not(feature = "phase_iii_prove_forget"), test))]
         AccountGateFailure::ProveForget => MnemeError::UnsupportedVersion {
             got: FORGET_PROOF_VERSION,
         },
+        #[cfg(any(not(feature = "phase_iii_verify"), test))]
         AccountGateFailure::VerifyActionReceipt(got)
         | AccountGateFailure::VerifyForgetProof(got) => MnemeError::UnsupportedVersion { got },
     }

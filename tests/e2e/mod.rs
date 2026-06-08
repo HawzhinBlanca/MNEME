@@ -99,6 +99,7 @@ fn e2e_remember_appends_key_index_journal_without_rewriting_base() {
     let journal = std::fs::read_to_string(dir.path().join("meta/key_index.journal")).unwrap();
     assert_eq!(journal.lines().count(), 2);
 
+    drop(store);
     let mut reopened = Store::open(dir.path(), operator).unwrap();
     reopened.trust_mut().authorized_writers.push(cap.subject);
     let query = Query {
@@ -1053,7 +1054,9 @@ fn e2e_90day_forget_shred_proves_absent_and_fails_recall() {
         MnemeError::Forgotten
     );
 
-    let reopened = Store::open(store_dir.path(), store.operator_keypair().clone()).unwrap();
+    let operator = store.operator_keypair().clone();
+    drop(store);
+    let reopened = Store::open(store_dir.path(), operator).unwrap();
     assert!(reopened.prove_absent(&query.logical_key).is_ok());
 
     let shredded = read_first_object_blob(store_dir.path());

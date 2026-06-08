@@ -339,9 +339,22 @@ fn merge_two_stores_converges() {
 }
 
 #[test]
-fn audit_stub_returns_store_unavailable_without_fake_path_check() {
+fn audit_missing_root_is_usage_error() {
     mneme()
         .args(["audit", "/no/such/root.cbor"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("root checkpoint not found"));
+}
+
+#[test]
+fn audit_stub_returns_store_unavailable_without_fake_path_check() {
+    let dir = tempdir().unwrap();
+    let root_path = dir.path().join("checkpoint.cbor");
+    fs::write(&root_path, b"").unwrap();
+    mneme()
+        .args(["audit", root_path.to_str().unwrap()])
         .assert()
         .failure()
         .code(3)
