@@ -1,14 +1,21 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-01 (B6 seam refactor committed). This tracks items beyond the
-certified single-host v0 core. Each entry states what is in-repo, what is gated, and
-*why* it cannot be marked done without an external input.
+Last updated: 2026-06-08 (P1/P2 software closeout on `harden/differential-adversarial`).
+This tracks items beyond the certified single-host v0 core. Each entry states what is
+in-repo, what is gated, and *why* it cannot be marked done without an external input.
 
-> **New (2026-06-08):** prioritized work order from a deep multi-agent inspection —
-> see [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
-> P0 = honesty defects in shipped source + the confirmed A-REPLAY HLC byte-order bug
-> (`mneme-root/src/lib.rs:127`); P1 = TCB semantic-gate scope, store/daemon hardening;
-> P2 = MCP exact-key-only recall + ForgetProof delivery; P3 = KMS/TEE/formal/OSS (gated).
+> **Work order (2026-06-08):** [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
+> **P0–P2 software scope: 100% complete** on branch `harden/differential-adversarial`
+> (WO-1..WO-20 delivered; `validation-lane.sh quick` + `tamper` green; `cargo test -p mnemed`
+> 299/299 pass after closeout invariant refresh). **P3 remains human/hardware-gated**
+> (live KMS/HSM, distinct physical host convergence, TEE vendor quotes, machine-checked proofs).
+
+## P0–P2 closeout (2026-06-08, software-complete)
+
+All prioritized honesty, correctness, deployment-hardening, MCP, and L3-delivery items
+from the deep inspection are implemented and gated in-repo. Remaining P3 work is scaffold +
+documentation with explicit `not external P3 proof` boundaries; no further P0/P1/P2 code
+tasks block merge readiness on this branch.
 
 ## Delivered (code, tested, CI-verified)
 

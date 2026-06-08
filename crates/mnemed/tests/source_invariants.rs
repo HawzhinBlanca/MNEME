@@ -4095,7 +4095,11 @@ fn store_layout_parse_failures_are_classified_not_schema_drift_collapsed() {
             "fn sync_parent_dir(",
             "apply_key_index_journal",
         ),
-        ("fn parse_hex32(", "fn io_err(", "parse_hex32"),
+        (
+            "fn apply_sidecar(",
+            "fn walk_objects(",
+            "apply_sidecar decode_hex32",
+        ),
     ] {
         let section = source_between_markers(layout, marker, end_marker, context);
         assert!(
@@ -4113,17 +4117,14 @@ fn store_layout_parse_failures_are_classified_not_schema_drift_collapsed() {
         "fn layout_parse_failure_to_mneme(",
         "fn layout_json_parse_error(",
         "fn layout_embedding_shape_error(",
-        "fn layout_hex_length_error(",
-        "fn layout_hex_digit_error(",
+        "fn layout_duplicate_object_error(",
+        "decode_hex32(",
         "LayoutParseFailure::ObjectKeysSidecarJson",
         "LayoutParseFailure::ObjectKeysJournalJson",
         "LayoutParseFailure::EmbeddingSidecarJson",
         "LayoutParseFailure::EmbeddingShape",
         "LayoutParseFailure::EmbeddingJournalJson",
-        "LayoutParseFailure::KeyIndexSidecarJson",
-        "LayoutParseFailure::KeyIndexJournalJson",
-        "LayoutParseFailure::HexLength",
-        "LayoutParseFailure::HexDigit",
+        "LayoutParseFailure::DuplicateObject",
     ] {
         assert!(
             layout.contains(required),
@@ -4136,6 +4137,7 @@ fn store_layout_parse_failures_are_classified_not_schema_drift_collapsed() {
 fn store_kernel_schema_failures_are_classified_not_schema_drift_collapsed() {
     let store = include_str!("../../mneme-store/src/lib.rs");
     let verify_store = include_str!("../../mneme-verify/src/store.rs");
+    let dag = include_str!("../../mneme-dag/src/lib.rs");
 
     for (source, marker, end_marker, context) in [
         (
@@ -4151,10 +4153,10 @@ fn store_kernel_schema_failures_are_classified_not_schema_drift_collapsed() {
             "store bench_embedding",
         ),
         (
-            verify_store,
+            dag,
+            "pub fn load_content_addressed_objects(",
             "fn walk_objects(",
-            "fn io_err(",
-            "verify_store walk_objects",
+            "dag load_content_addressed_objects",
         ),
     ] {
         let section = source_between_markers(source, marker, end_marker, context);
@@ -4184,9 +4186,42 @@ fn store_kernel_schema_failures_are_classified_not_schema_drift_collapsed() {
         );
     }
 
+    let verify_store_body = source_between_markers(
+        verify_store,
+        "pub fn verify_store(",
+        "fn read_head(",
+        "verify_store body",
+    );
     assert!(
-        verify_store.contains("fn verify_store_object_filename_error("),
-        "verify_store object filename classification should use a named fail-closed helper"
+        verify_store_body.contains("load_content_addressed_objects(path)?"),
+        "verify_store should delegate object filename/path parsing to the shared DAG loader"
+    );
+    assert!(
+        !verify_store_body.contains("decode_hex32(")
+            && !verify_store_body.contains("MnemeError::SchemaDrift"),
+        "verify_store should not inline object filename parsing or collapse it directly"
+    );
+
+    let dag_loader = source_between_markers(
+        dag,
+        "pub fn load_content_addressed_objects(",
+        "fn io_err(",
+        "dag loader",
+    );
+    assert!(
+        dag_loader.contains("decode_content_addressed_object_path(objects_dir, &path)?"),
+        "content-addressed object loading should use the canonical object path parser"
+    );
+
+    let load_error_sites = source_between_markers(
+        verify_store,
+        "fn load_previous_root(",
+        "fn io_err(",
+        "verify_store load_previous_root",
+    );
+    assert!(
+        !load_error_sites.contains("MnemeError::SchemaDrift"),
+        "verify_store local load helpers should not add a bare SchemaDrift bypass"
     );
 }
 

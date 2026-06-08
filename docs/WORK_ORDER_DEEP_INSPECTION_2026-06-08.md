@@ -286,4 +286,6 @@ documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, 
 | P3 hourly retained-index digest detail | LOCAL-SCAFFOLD | Retained report entries with malformed `report_sha256` fail closed as `report_entry_sha256_invalid`; the fixture helper exposes `report-sha256-invalid`; the self-test emits `entry_sha256_shape_detail=report_entry_sha256_invalid`; this remains local scaffold evidence, not external P3 proof |
 | P3 hourly retained-index detail | LOCAL-SCAFFOLD | Retained report entries missing `snapshot_path` fail closed as `report_entry_snapshot_path_missing`; the fixture helper exposes `report-entry-snapshot-path-missing`; the self-test emits `entry_path_detail=report_entry_snapshot_path_missing`; this remains local scaffold evidence, not external P3 proof |
 | P0 gate | GREEN | `scripts/ci/validation-lane.sh quick` after all P0 fixes |
-| P1/P2 gate | GREEN | `scripts/ci/validation-lane.sh quick` after WO-9..WO-20 feasible slice |
+| P1/P2 gate | GREEN | `scripts/ci/validation-lane.sh quick` + `tamper` after WO-9..WO-20 feasible slice |
+| P1/P2 closeout | SOFTWARE-COMPLETE | WO-1..WO-20 done; `cargo test -p mnemed` 299/299; stale `source_invariants` refs refreshed after `decode_hex32` + `load_content_addressed_objects` refactor (no symbol restore needed) |
+| Stash disposition | HELD | `non-wo14`, `post-wo20-wip`, `wip-after-wo20`, `non-wo20`, `wo20-temp` overlap current tree — not popped (conflict risk) |
