@@ -13,6 +13,8 @@ path = "src/main.rs"
 [lib]
 path = "src/lib.rs"
 
+# autotests = false: every integration module must be reachable from a [[test]] target.
+# HTTP/gRPC/WebSocket API suites compile under `api_integration` (mod http_api, grpc_api, sync_ws).
 [[test]]
 name = "api_integration"
 path = "tests/api_integration.rs"
@@ -29,6 +31,7 @@ path = "tests/two_peer_ws_sync.rs"
 name = "v11_object_sync"
 path = "tests/v11_object_sync.rs"
 
+# Unix socket readiness helper (`unix_ready.rs`) compiles via `unix_api` and `redteam_paths`.
 [[test]]
 name = "unix_api"
 path = "tests/unix_api.rs"

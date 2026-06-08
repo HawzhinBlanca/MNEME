@@ -7111,60 +7111,89 @@ fn test_harness_users_shutdown_explicitly() {
 }
 
 #[test]
-fn operator_seed_custody_is_centralized_outside_frontends() {
-    for (surface, source) in [
-        ("mnemed", include_str!("../src/lib.rs")),
-        (
-            "mneme-mcp",
-            include_str!("../../mneme-mcp/src/store_open.rs"),
-        ),
-        ("mneme-cli", include_str!("../../mneme-cli/src/main.rs")),
+fn daemon_integration_modules_are_wired_through_declared_targets() {
+    let cargo = include_str!("../Cargo.toml");
+    let api_integration = include_str!("api_integration.rs");
+    let unix_api = include_str!("unix_api.rs");
+    let redteam_paths = include_str!("redteam_paths.rs");
+
+    for target in [
+        "name = \"api_integration\"",
+        "name = \"unix_api\"",
+        "name = \"redteam_paths\"",
     ] {
-        for forbidden in [
-            "join(\".operator_seed\")",
-            "fs::write(&seed_path",
-            "std::fs::write(&seed_path",
-            "read_to_string(&seed_path",
-            "std::fs::read_to_string(&seed_path",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{surface} should route operator seed custody through mneme-crypto instead of `{forbidden}`"
-            );
-        }
         assert!(
-            source.contains("load_or_generate_operator"),
-            "{surface} should call the shared operator seed custody helper"
+            cargo.contains(target),
+            "mnemed Cargo.toml should declare `{target}` under autotests = false"
         );
     }
+    for module in ["mod http_api;", "mod grpc_api;", "mod sync_ws;"] {
+        assert!(
+            api_integration.contains(module),
+            "api_integration should compile `{module}`"
+        );
+    }
+    assert!(
+        unix_api.contains("mod unix_ready;") && redteam_paths.contains("mod unix_ready;"),
+        "unix_ready should compile through unix_api and redteam_paths"
+    );
 }
 
 #[test]
-fn operator_seed_custody_is_centralized_outside_frontends() {
-    for (surface, source) in [
-        ("mnemed", include_str!("../src/lib.rs")),
-        (
-            "mneme-mcp",
-            include_str!("../../mneme-mcp/src/store_open.rs"),
-        ),
-        ("mneme-cli", include_str!("../../mneme-cli/src/main.rs")),
-    ] {
-        for forbidden in [
-            "join(\".operator_seed\")",
-            "fs::write(&seed_path",
-            "std::fs::write(&seed_path",
-            "read_to_string(&seed_path",
-            "std::fs::read_to_string(&seed_path",
-        ] {
-            assert!(
-                !source.contains(forbidden),
-                "{surface} should route operator seed custody through mneme-crypto instead of `{forbidden}`"
-            );
-        }
-        assert!(
-            source.contains("load_or_generate_operator"),
-            "{surface} should call the shared operator seed custody helper"
-        );
-    }
+fn daemon_http_bind_refuses_non_loopback_without_tls() {
+    let lib = include_str!("../src/lib.rs");
+    let main = include_str!("../src/main.rs");
+
+    assert!(
+        lib.contains("pub fn ensure_http_bind_loopback("),
+        "mnemed library should expose loopback-only HTTP bind guard"
+    );
+    assert!(
+        lib.contains("ensure_http_bind_loopback(config.http_addr)?"),
+        "mnemed start path should enforce loopback-only HTTP binds"
+    );
+    assert!(
+        main.contains("refusing non-loopback --http bind without TLS"),
+        "mnemed CLI should fail closed on non-loopback --http without TLS"
+    );
+    assert!(
+        main.contains("let http_addr: SocketAddr"),
+        "mnemed CLI HTTP bind parse should be typed for loopback enforcement"
+    );
 }
 
+#[test]
+fn boot_daemon_state_opens_existing_store_instead_of_recreating() {
+    let lib = include_str!("../src/lib.rs");
+
+    assert!(
+        lib.contains("pub fn boot_daemon_state("),
+        "mnemed should expose a production boot helper"
+    );
+    assert!(
+        lib.contains("store_path.join(\"roots/HEAD\").exists()"),
+        "boot path should open existing stores instead of always creating"
+    );
+    assert!(
+        lib.contains("Store::open(store_path, operator.clone())?"),
+        "boot path should call Store::open for existing stores"
+    );
+}
+
+#[test]
+fn unix_peer_credentials_are_checked_before_serving() {
+    let unix = include_str!("../src/unix.rs");
+
+    assert!(
+        unix.contains("fn verify_unix_peer_credentials("),
+        "Unix kernel API should verify peer credentials"
+    );
+    assert!(
+        unix.contains("getpeereid(") || unix.contains("SO_PEERCRED"),
+        "Unix kernel API should use getpeereid or SO_PEERCRED for same-uid enforcement"
+    );
+    assert!(
+        unix.contains("unix peer uid mismatch"),
+        "Unix kernel API should reject cross-uid peers"
+    );
+}

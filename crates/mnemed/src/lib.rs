@@ -424,4 +424,16 @@ mod tests {
         .shutdown()
         .await;
     }
+
+    #[test]
+    fn ensure_http_bind_loopback_accepts_localhost() {
+        let addr = "127.0.0.1:7845".parse().expect("loopback parse");
+        assert_eq!(ensure_http_bind_loopback(addr), Ok(()));
+    }
+
+    #[test]
+    fn ensure_http_bind_loopback_rejects_non_loopback_without_tls() {
+        let addr = "0.0.0.0:7845".parse().expect("non-loopback parse");
+        assert_eq!(ensure_http_bind_loopback(addr), Err(MnemeError::CapDenied));
+    }
 }

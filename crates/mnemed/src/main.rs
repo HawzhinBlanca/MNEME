@@ -1,5 +1,6 @@
 use clap::Parser;
 use mnemed::ServerConfig;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -62,7 +63,7 @@ async fn wait_for_shutdown_signal(
 }
 
 fn server_config_from_args(args: &Args) -> Result<ServerConfig, String> {
-    let http_addr = args
+    let http_addr: SocketAddr = args
         .http
         .parse()
         .map_err(|e| format!("invalid --http address: {e}"))?;
@@ -118,6 +119,30 @@ mod tests {
             Ok(()) => panic!("{context}: expected shutdown signal error"),
             Err(err) => err,
         }
+    }
+
+    #[test]
+    fn cli_refuses_non_loopback_http_bind_without_tls() {
+        let args = expect_cli_args(
+            &[
+                "mnemed",
+                "--store",
+                "/tmp/mneme-store",
+                "--http",
+                "0.0.0.0:7845",
+            ],
+            "non-loopback HTTP CLI config",
+        );
+
+        let err = match server_config_from_args(&args) {
+            Ok(_) => panic!("expected non-loopback --http bind to be refused"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.contains("refusing non-loopback --http bind without TLS"),
+            "unexpected non-loopback bind error: {err}"
+        );
     }
 
     #[test]
