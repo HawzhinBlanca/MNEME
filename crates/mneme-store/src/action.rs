@@ -3,8 +3,8 @@
 use crate::Store;
 use mneme_cap::Capability;
 use mneme_core::{
-    ActionReceipt, Draft, ForgetMode, ForgetTarget, LogicalKey, MnemeError, ObjectId, Root,
-    TrustTier,
+    ACTION_RECEIPT_VERSION, ActionReceipt, Draft, ForgetMode, ForgetTarget, LogicalKey, MnemeError,
+    ObjectId, Root, TrustTier,
 };
 use mneme_crypto::KeyPair;
 
@@ -82,6 +82,11 @@ pub fn enforce_external_action(
 }
 
 impl Store {
+    /// Mint an `ActionReceipt` for an external action commit (P3-1).
+    ///
+    /// Fail-closed unless the **`phase_iii_bind`** store feature is enabled. Workspace feature
+    /// unification can enable `mneme-account/phase_iii_bind_action` transitively via
+    /// `phase_iii_prove_forget`; this path must not open until the store feature is explicit.
     pub fn bind_external_action(
         &self,
         action_commit: [u8; 32],
@@ -91,12 +96,28 @@ impl Store {
     ) -> Result<ActionReceipt, MnemeError> {
         self.verify_cap(cap)?;
         let root = self.current_root()?;
-        mneme_account::bind_action(
-            action_commit,
-            cap.inner(),
-            sanctioner_signer,
-            &root,
-            cognition_cert_commit,
-        )
+        #[cfg(feature = "phase_iii_bind")]
+        {
+            mneme_account::bind_action(
+                action_commit,
+                cap.inner(),
+                sanctioner_signer,
+                &root,
+                cognition_cert_commit,
+            )
+        }
+        #[cfg(not(feature = "phase_iii_bind"))]
+        {
+            let _ = (
+                action_commit,
+                cap,
+                sanctioner_signer,
+                cognition_cert_commit,
+                root,
+            );
+            Err(MnemeError::UnsupportedVersion {
+                got: ACTION_RECEIPT_VERSION,
+            })
+        }
     }
 }
