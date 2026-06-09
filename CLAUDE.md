@@ -35,7 +35,7 @@ cargo test -p mneme-store -- recall_verified --nocapture   # single test by name
 cargo test --workspace -- --nocapture
 
 # Validation ladder (preferred way to run gates)
-scripts/ci/validation-lane.sh quick        # fmt + clippy + TCB guard + kill/resume smoke
+scripts/ci/validation-lane.sh quick        # fmt + clippy + TCB guard + kill/resume + validation-contract smoke
 scripts/ci/validation-lane.sh crypto       # crypto/smt fault injection
 scripts/ci/validation-lane.sh tamper       # generative tamper suite (≥150 cases)
 scripts/ci/validation-lane.sh determinism  # foundation-gate ×2

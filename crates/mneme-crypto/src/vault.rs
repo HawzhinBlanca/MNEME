@@ -221,7 +221,13 @@ impl KeyVault for FileKeyVault {
             secure_delete(&path)?;
         }
         if !tombstone.exists() {
-            File::create(&tombstone).map_err(|e| io_error(tombstone.display().to_string(), e))?;
+            let file = File::create(&tombstone)
+                .map_err(|e| io_error(tombstone.display().to_string(), e))?;
+            if durability_fsync_enabled() {
+                file.sync_all()
+                    .map_err(|e| io_error(tombstone.display().to_string(), e))?;
+                sync_parent_dir(&tombstone)?;
+            }
         }
         self.live.remove(key_id);
         self.shredded.insert(*key_id);
@@ -292,6 +298,19 @@ impl KeyVault for FileKeyVault {
         if let Some(buffered) = self.batch.take() {
             for (id, _) in buffered {
                 self.live.remove(&id);
+            }
+        }
+    }
+}
+
+impl Drop for FileKeyVault {
+    fn drop(&mut self) {
+        for val in self.live.values_mut() {
+            val.zeroize();
+        }
+        if let Some(buf) = self.batch.as_mut() {
+            for (_, val) in buf {
+                val.zeroize();
             }
         }
     }
@@ -382,6 +401,7 @@ fn write_key_file(path: &Path, key: &ObjectKey) -> Result<(), MnemeError> {
     if durability_fsync_enabled() {
         file.sync_all()
             .map_err(|e| io_error(path.display().to_string(), e))?;
+        sync_parent_dir(path)?;
     }
     Ok(())
 }
@@ -414,7 +434,30 @@ fn secure_delete(path: &Path) -> Result<(), MnemeError> {
             .map_err(|e| io_error(path.display().to_string(), e))?;
     }
     fs::remove_file(path).map_err(|e| io_error(path.display().to_string(), e))?;
+    if durability_fsync_enabled() {
+        sync_parent_dir(path)?;
+    }
     Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            if parent.as_os_str().is_empty() {
+                return Ok(());
+            }
+            let dir = File::open(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
+            dir.sync_all()
+                .map_err(|e| io_error(parent.display().to_string(), e))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 pub(crate) fn io_error(path: String, err: std::io::Error) -> MnemeError {

@@ -56,6 +56,7 @@ case "$LANE" in
       -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
     bash scripts/ci/kill-resume-smoke.sh
     bash scripts/ci/mcp-smoke.sh
+    bash scripts/ci/validation-contract-smoke.sh
     ;;
 
   crypto)

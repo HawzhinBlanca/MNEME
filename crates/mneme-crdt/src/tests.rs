@@ -329,11 +329,12 @@ fn merge_property_snapshot(keypair: &KeyPair, key_slot: u8, wall_ms: u64) -> Pee
 }
 
 fn merge_property_kind(key_slot: u8) -> MemoryKind {
-    match key_slot % 4 {
+    match key_slot % 5 {
         0 => MemoryKind::Episodic,
         1 => MemoryKind::Semantic,
         2 => MemoryKind::Identity,
-        _ => MemoryKind::Procedural,
+        3 => MemoryKind::Procedural,
+        _ => MemoryKind::Working,
     }
 }
 
@@ -450,4 +451,103 @@ fn mst_vector_snapshot(label: &str) -> PeerSnapshot {
 
 fn to_hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn merge_working_memory_converges_deterministically() {
+    let op = KeyPair::from_seed([0x01; 32]);
+    let agent_b = KeyPair::from_seed([0x02; 32]);
+    let mut trust = TrustConfig::new(op.public_key_bytes());
+    trust.authorize_capability_subject(agent_b.public_key_bytes());
+
+    let key = LogicalKey {
+        namespace: "user".into(),
+        name: "scratch".into(),
+    };
+    let key_hash = key.hash();
+
+    // Local Working record (HLC time 10)
+    let rec_a = sample_record(writer_hash(&op.public_key_bytes()), MemoryKind::Working, 10);
+    let bytes_a = record_bytes(&rec_a);
+    let id_a = hash_obj(&bytes_a);
+
+    // Peer Working record (HLC time 20)
+    let rec_b = sample_record(
+        writer_hash(&agent_b.public_key_bytes()),
+        MemoryKind::Working,
+        20,
+    );
+    let bytes_b = record_bytes(&rec_b);
+    let id_b = hash_obj(&bytes_b);
+
+    // Direct merge should pick peer_b because it has newer HLC
+    let winner = merge_object_versions(id_a, &bytes_a, id_b, &bytes_b).expect("merge");
+    assert_eq!(winner.object_id, id_b);
+    assert_eq!(winner.canonical_bytes, bytes_b);
+    assert!(winner.retained_alternatives.is_empty());
+
+    // Merge convergence: apply snapshots in different orders
+    let mut smt_a = SparseMerkleTree::new();
+    smt_a.upsert(key_hash, id_a);
+    let mut objects_a = HashMap::from([(id_a, bytes_a.clone())]);
+    let mut k2o_a = HashMap::from([(key_hash, id_a)]);
+    let mut ok_a = HashMap::from([(id_a, key.clone())]);
+
+    let peer = PeerSnapshot {
+        key_index: {
+            let mut ki = SparseMerkleTree::new();
+            ki.upsert(key_hash, id_b);
+            ki
+        },
+        key_to_object: HashMap::from([(key_hash, id_b)]),
+        object_keys: HashMap::from([(id_b, key.clone())]),
+        objects: HashMap::from([(id_b, bytes_b.clone())]),
+        dag: DagIndex::new(),
+    };
+
+    apply_peer_snapshot(
+        &mut smt_a,
+        &mut k2o_a,
+        &mut ok_a,
+        &mut objects_a,
+        &mut DagIndex::new(),
+        &peer,
+        &trust,
+    )
+    .expect("apply");
+
+    let mut smt_b = SparseMerkleTree::new();
+    smt_b.upsert(key_hash, id_b);
+    let mut objects_b = HashMap::from([(id_b, bytes_b.clone())]);
+    let mut k2o_b = HashMap::from([(key_hash, id_b)]);
+    let mut ok_b = HashMap::from([(id_b, key.clone())]);
+
+    let peer_a = PeerSnapshot {
+        key_index: {
+            let mut ki = SparseMerkleTree::new();
+            ki.upsert(key_hash, id_a);
+            ki
+        },
+        key_to_object: HashMap::from([(key_hash, id_a)]),
+        object_keys: HashMap::from([(id_a, key.clone())]),
+        objects: HashMap::from([(id_a, bytes_a)]),
+        dag: DagIndex::new(),
+    };
+
+    apply_peer_snapshot(
+        &mut smt_b,
+        &mut k2o_b,
+        &mut ok_b,
+        &mut objects_b,
+        &mut DagIndex::new(),
+        &peer_a,
+        &trust,
+    )
+    .expect("apply");
+
+    assert_eq!(
+        smt_a.root(),
+        smt_b.root(),
+        "Working memory merge convergence: roots match"
+    );
 }

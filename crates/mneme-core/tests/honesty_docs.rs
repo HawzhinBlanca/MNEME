@@ -222,6 +222,173 @@ fn validation_lane_full_and_preflight_share_cross_host_honesty_printer() {
 }
 
 #[test]
+fn full_preflight_smoke_preserves_executable_contract() {
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/full-preflight-smoke.sh"
+    );
+    let smoke =
+        std::fs::read_to_string(smoke_path).expect("full-preflight smoke script must exist");
+
+    for phrase in [
+        "bash scripts/ci/validation-lane.sh full-preflight",
+        "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism",
+        "validation-lane (full-preflight): heavy checks are NOT executed by this lane.",
+        "validation-lane (full-preflight): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host).",
+        "validation-lane (full-preflight): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host.",
+        "validation-lane (full-preflight): OK",
+        "full-preflight-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "full-preflight smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn unknown_lane_smoke_preserves_executable_contract() {
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-unknown-smoke.sh"
+    );
+    let smoke = std::fs::read_to_string(smoke_path).expect("unknown-lane smoke script must exist");
+
+    for phrase in [
+        "bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
+        "status=$?",
+        "require_exit_status \"$label\" \"$status\" \"2\" \"$output\"",
+        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|full-preflight|full)",
+        "validation-lane-unknown-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "unknown-lane smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_smoke_scripts_share_assertion_helpers() {
+    let full_preflight_smoke = include_str!("../../../scripts/ci/full-preflight-smoke.sh");
+    let unknown_lane_smoke = include_str!("../../../scripts/ci/validation-lane-unknown-smoke.sh");
+
+    for (name, smoke) in [
+        ("full-preflight-smoke", full_preflight_smoke),
+        ("validation-lane-unknown-smoke", unknown_lane_smoke),
+    ] {
+        assert!(
+            smoke.contains("source scripts/ci/smoke-assertions.sh"),
+            "{name} must source the shared smoke assertion helper"
+        );
+
+        for local_assertion in ["require_line()", "require_absent()", "line_count=\"$(wc -l"] {
+            assert!(
+                !smoke.contains(local_assertion),
+                "{name} must not carry local assertion helper `{local_assertion}`"
+            );
+        }
+    }
+
+    let helper_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/smoke-assertions.sh"
+    );
+    let helper =
+        std::fs::read_to_string(helper_path).expect("shared smoke assertion helper must exist");
+
+    for function in [
+        "require_exact_line()",
+        "require_absent_substring()",
+        "require_line_count()",
+        "require_exit_status()",
+    ] {
+        assert!(
+            helper.contains(function),
+            "shared smoke assertion helper must define `{function}`"
+        );
+    }
+}
+
+#[test]
+fn smoke_assertion_helper_has_executable_self_smoke() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/smoke-assertions-smoke.sh"),
+        "validation contract smoke must run the shared assertion helper self-smoke"
+    );
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/smoke-assertions-smoke.sh"
+    );
+    let smoke =
+        std::fs::read_to_string(smoke_path).expect("smoke assertion helper self-smoke must exist");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "require_exact_line \"$label\" \"$sample_output\" \"alpha\"",
+        "require_absent_substring \"$label\" \"$sample_output\" \"gamma\"",
+        "require_line_count \"$label\" \"$sample_output\" \"2\"",
+        "require_exit_status \"$label\" \"2\" \"2\" \"$sample_output\"",
+        "expect_failure \"missing exact line\"",
+        "expect_failure \"forbidden substring\"",
+        "expect_failure \"line count mismatch\"",
+        "expect_failure \"exit status mismatch\"",
+        "smoke-assertions-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "smoke assertion helper self-smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_lane_quick_runs_aggregate_validation_contract_smoke() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let quick_lane = validation_lane
+        .split("\n  quick)")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  crypto)").next())
+        .expect("validation-lane must define a quick lane");
+
+    assert!(
+        quick_lane.contains("bash scripts/ci/validation-contract-smoke.sh"),
+        "quick lane must run the aggregate validation contract smoke"
+    );
+
+    for direct_smoke in [
+        "bash scripts/ci/full-preflight-smoke.sh",
+        "bash scripts/ci/validation-lane-unknown-smoke.sh",
+    ] {
+        assert!(
+            !quick_lane.contains(direct_smoke),
+            "quick lane must delegate `{direct_smoke}` through validation-contract-smoke.sh"
+        );
+    }
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-contract-smoke.sh"
+    );
+    let smoke =
+        std::fs::read_to_string(smoke_path).expect("validation contract smoke script must exist");
+
+    for phrase in [
+        "bash scripts/ci/full-preflight-smoke.sh",
+        "bash scripts/ci/validation-lane-unknown-smoke.sh",
+        "validation-contract-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation contract smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn validation_lane_merge_delegates_to_reliability_wrapper() {
     let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
     let validate_reliability = include_str!("../../../scripts/validate_reliability.sh");
