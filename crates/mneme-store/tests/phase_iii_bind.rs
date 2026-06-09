@@ -29,7 +29,6 @@ fn setup() -> (TempDir, Store, KeyPair, Capability) {
 #[test]
 fn bind_external_action_fail_closed_by_default() {
     let (_dir, store, operator, cap) = setup();
-    assert!(!std::hint::black_box(PHASE_III_BIND_ACTION_OPEN));
     let err = store
         .bind_external_action([0xAB; 32], &cap, &operator, None)
         .unwrap_err();
