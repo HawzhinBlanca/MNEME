@@ -4,7 +4,7 @@ use crate::Store;
 use mneme_cap::Capability;
 use mneme_core::{
     ActionReceipt, Draft, ForgetMode, ForgetTarget, LogicalKey, MnemeError, ObjectId, Root,
-    TrustTier,
+    TrustTier, ACTION_RECEIPT_VERSION,
 };
 use mneme_crypto::KeyPair;
 
@@ -91,12 +91,28 @@ impl Store {
     ) -> Result<ActionReceipt, MnemeError> {
         self.verify_cap(cap)?;
         let root = self.current_root()?;
-        mneme_account::bind_action(
-            action_commit,
-            cap.inner(),
-            sanctioner_signer,
-            &root,
-            cognition_cert_commit,
-        )
+        #[cfg(feature = "phase_iii_bind")]
+        {
+            mneme_account::bind_action(
+                action_commit,
+                cap.inner(),
+                sanctioner_signer,
+                &root,
+                cognition_cert_commit,
+            )
+        }
+        #[cfg(not(feature = "phase_iii_bind"))]
+        {
+            let _ = (
+                action_commit,
+                sanctioner_signer,
+                cognition_cert_commit,
+                cap,
+                root,
+            );
+            Err(MnemeError::UnsupportedVersion {
+                got: ACTION_RECEIPT_VERSION,
+            })
+        }
     }
 }
