@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MNEME validation ladder (blueprint §18).
 #
-# Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full>
+# Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>
 # Fuzz: full → fuzz-meaningful.sh (≥30s/target, 7 targets); quick uses kill-resume only.
 #       Standalone smoke: scripts/ci/fuzz-smoke.sh (-runs=16).
 # Parallel agents: set CARGO_TARGET_DIR=out/agent-targets/ci-harness (or per-lane default applies).
@@ -10,7 +10,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# shellcheck source=lib.sh
+# shellcheck source=scripts/ci/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 LANE="${1:-quick}"
@@ -21,6 +21,26 @@ fail_closed() {
   local section="$2"
   echo "MNEME validation-lane ($LANE): ${suite} not wired (${section}) — failing closed." >&2
   exit 1
+}
+
+FULL_SUBLANES=(quick crypto tamper merge determinism)
+
+print_local_cross_host_honesty_boundary() {
+  echo "validation-lane ($LANE): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
+  echo "validation-lane ($LANE): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."
+}
+
+print_full_preflight_plan() {
+  echo "validation-lane (full-preflight): planned sublanes: ${FULL_SUBLANES[*]}"
+  echo "validation-lane (full-preflight): heavy checks are NOT executed by this lane."
+  print_local_cross_host_honesty_boundary
+}
+
+run_full_sublanes() {
+  local sublane
+  for sublane in "${FULL_SUBLANES[@]}"; do
+    bash "$0" "$sublane"
+  done
 }
 
 case "$LANE" in
@@ -57,30 +77,21 @@ case "$LANE" in
     ;;
 
   merge)
-    if cargo test -p mneme-crdt -- merge_convergence 2>/dev/null; then
-      cargo test -p mneme-crdt -- merge_convergence -- --nocapture
-    else
-      fail_closed "CRDT merge property tests" "§18 merge / §9.4"
+    if [[ -x scripts/validate_reliability.sh ]]; then
+      exec scripts/validate_reliability.sh merge
     fi
+    fail_closed "CRDT merge property tests" "§18 merge / §9.4"
     ;;
 
   determinism)
-    if cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
-      mneme_ci_clean_foundation_gate_dirs "$ROOT"
-      out="$ROOT/out/ci-foundation-gate"
-      for run in 1 2; do
-        dest="$out"
-        [[ "$run" -eq 2 ]] && dest="${out}-2"
-        cargo run -p mneme-cli -- determinism foundation-gate \
-          --out "$dest" \
-          --timestamp "1970-01-01T00:00:00Z"
-        cargo run -p mneme-cli -- determinism foundation-verify \
-          "$dest/foundation.report.json" \
-          --output "$dest/foundation.verify.json"
-      done
-    else
-      fail_closed "determinism foundation-gate" "§17.7 / §18 determinism"
+    if [[ -x scripts/validate_reliability.sh ]]; then
+      exec scripts/validate_reliability.sh determinism
     fi
+    fail_closed "determinism foundation-gate" "§17.7 / §18 determinism"
+    ;;
+
+  full-preflight)
+    print_full_preflight_plan
     ;;
 
   full)
@@ -88,17 +99,13 @@ case "$LANE" in
     mneme_ci_ensure_target_dir "$ROOT" full
     export MNEME_CI_LANE=full
     mneme_ci_clean_foundation_gate_dirs "$ROOT"
-    bash "$0" quick
-    bash "$0" crypto
-    bash "$0" tamper
-    bash "$0" determinism
+    run_full_sublanes
     bash scripts/ci/determinism-local-second-host.sh
     # F-B: the full lane runs ONLY the same-host dual-workspace reproducibility
     # check. It is explicitly NOT the §17.7 cross-host milestone, which stays
     # UNPROVEN until run with MNEME_SECOND_HOST=<distinct host> (and, for a strict
     # release gate, MNEME_STRICT_CROSS_HOST=1 to force fail-closed without a peer).
-    echo "validation-lane (full): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
-    echo "validation-lane (full): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."
+    print_local_cross_host_honesty_boundary
     bash scripts/ci/determinism-two-machine.sh
     bash scripts/ci/cross-implementation-vectors.sh
     cargo test --workspace -- --nocapture
@@ -116,7 +123,7 @@ case "$LANE" in
     ;;
 
   *)
-    echo "Unknown lane: $LANE (expected quick|crypto|tamper|merge|determinism|full)" >&2
+    echo "Unknown lane: $LANE (expected quick|crypto|tamper|merge|determinism|full-preflight|full)" >&2
     exit 2
     ;;
 esac

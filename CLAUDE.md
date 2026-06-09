@@ -39,6 +39,7 @@ scripts/ci/validation-lane.sh quick        # fmt + clippy + TCB guard + kill/res
 scripts/ci/validation-lane.sh crypto       # crypto/smt fault injection
 scripts/ci/validation-lane.sh tamper       # generative tamper suite (≥150 cases)
 scripts/ci/validation-lane.sh determinism  # foundation-gate ×2
+scripts/ci/validation-lane.sh full-preflight # cheap full-lane plan + honesty check (no heavy execution)
 scripts/ci/validation-lane.sh full         # everything above + bench + fuzz + vectors
 
 # §21 acceptance demo (offline, tests real adversarial scenarios)

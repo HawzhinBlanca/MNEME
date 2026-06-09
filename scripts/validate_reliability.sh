@@ -6,9 +6,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 LANE="${1:-tamper}"
-export CARGO_TERM_COLOR=always
-export RUSTFLAGS="${RUSTFLAGS:--Dwarnings}"
-export RUST_TEST_THREADS="${RUST_TEST_THREADS:-4}"
+
+# shellcheck source=scripts/ci/lib.sh
+source "$ROOT/scripts/ci/lib.sh"
+mneme_ci_init "$ROOT" "$LANE"
 
 fail_closed() {
   local reason="$1"
@@ -27,10 +28,12 @@ case "$LANE" in
     require_store
     echo "==> store generative tamper (≥120 executed cases)"
     cargo test -p mneme-store --test tamper_suite tamper_suite_generative -- --nocapture
-    echo "==> verify tamper suites (key + semantic + cap)"
+    echo "==> verify tamper suites (key + semantic + cap + checkpoint + tombstone)"
     cargo test -p mneme-verify --test tamper_suite -- --nocapture
     cargo test -p mneme-verify --test tamper_semantic -- --nocapture
     cargo test -p mneme-verify --test tamper_cap -- --nocapture
+    cargo test -p mneme-verify --test tamper_checkpoint -- --nocapture
+    cargo test -p mneme-verify --test tamper_tombstone -- --nocapture
     ;;
 
   determinism)
