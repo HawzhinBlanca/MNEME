@@ -94,9 +94,9 @@ impl Store {
         #[cfg(not(feature = "phase_iii_bind"))]
         {
             let _ = (action_commit, cap, sanctioner_signer, cognition_cert_commit);
-            return Err(MnemeError::UnsupportedVersion {
+            Err(MnemeError::UnsupportedVersion {
                 got: ACTION_RECEIPT_VERSION,
-            });
+            })
         }
         #[cfg(feature = "phase_iii_bind")]
         {
