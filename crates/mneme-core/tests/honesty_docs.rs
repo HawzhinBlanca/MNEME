@@ -299,6 +299,7 @@ fn validation_smoke_scripts_share_assertion_helpers() {
 
     for function in [
         "require_exact_line()",
+        "require_exact_output()",
         "require_absent_substring()",
         "require_line_count()",
         "require_exit_status()",
@@ -329,10 +330,12 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
     for phrase in [
         "source scripts/ci/smoke-assertions.sh",
         "require_exact_line \"$label\" \"$sample_output\" \"alpha\"",
+        "require_exact_output \"$label\" \"$sample_output\" \"$sample_output\"",
         "require_absent_substring \"$label\" \"$sample_output\" \"gamma\"",
         "require_line_count \"$label\" \"$sample_output\" \"2\"",
         "require_exit_status \"$label\" \"2\" \"2\" \"$sample_output\"",
         "expect_failure \"missing exact line\"",
+        "expect_failure \"output mismatch\"",
         "expect_failure \"forbidden substring\"",
         "expect_failure \"line count mismatch\"",
         "expect_failure \"exit status mismatch\"",
@@ -341,6 +344,27 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
         assert!(
             smoke.contains(phrase),
             "smoke assertion helper self-smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_contract_smoke_enforces_exact_component_output() {
+    let smoke = include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "expected_output=\"$(cat <<'EOF'",
+        "smoke-assertions-smoke: OK",
+        "full-preflight-smoke: OK",
+        "validation-lane-unknown-smoke: OK",
+        "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
+        "printf '%s\\n' \"$output\"",
+        "validation-contract-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation contract smoke must preserve `{phrase}`"
         );
     }
 }

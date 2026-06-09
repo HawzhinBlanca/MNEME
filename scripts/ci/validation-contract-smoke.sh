@@ -5,8 +5,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-bash scripts/ci/smoke-assertions-smoke.sh
-bash scripts/ci/full-preflight-smoke.sh
-bash scripts/ci/validation-lane-unknown-smoke.sh
+source scripts/ci/smoke-assertions.sh
+
+label="validation-contract-smoke"
+expected_output="$(cat <<'EOF'
+smoke-assertions-smoke: OK
+full-preflight-smoke: OK
+validation-lane-unknown-smoke: OK
+EOF
+)"
+
+output="$(
+  bash scripts/ci/smoke-assertions-smoke.sh
+  bash scripts/ci/full-preflight-smoke.sh
+  bash scripts/ci/validation-lane-unknown-smoke.sh
+)"
+
+require_exact_output "$label" "$output" "$expected_output"
+printf '%s\n' "$output"
 
 echo "validation-contract-smoke: OK"

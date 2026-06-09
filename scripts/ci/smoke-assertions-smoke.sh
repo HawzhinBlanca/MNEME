@@ -37,6 +37,7 @@ expect_failure() {
 }
 
 require_exact_line "$label" "$sample_output" "alpha"
+require_exact_output "$label" "$sample_output" "$sample_output"
 require_absent_substring "$label" "$sample_output" "gamma"
 require_line_count "$label" "$sample_output" "2"
 require_exit_status "$label" "2" "2" "$sample_output"
@@ -44,6 +45,10 @@ require_exit_status "$label" "2" "2" "$sample_output"
 expect_failure "missing exact line" \
   "$label: missing expected line:" \
   require_exact_line "$label" "$sample_output" "gamma"
+
+expect_failure "output mismatch" \
+  "$label: output mismatch" \
+  require_exact_output "$label" "$sample_output" $'beta\nalpha'
 
 expect_failure "forbidden substring" \
   "$label: forbidden output found: beta" \

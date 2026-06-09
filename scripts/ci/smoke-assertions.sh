@@ -15,6 +15,21 @@ require_exact_line() {
   fi
 }
 
+require_exact_output() {
+  local label="$1"
+  local actual="$2"
+  local expected="$3"
+
+  if [[ "$actual" != "$expected" ]]; then
+    echo "$label: output mismatch" >&2
+    echo "$label: expected output:" >&2
+    printf '%s\n' "$expected" >&2
+    echo "$label: actual output:" >&2
+    printf '%s\n' "$actual" >&2
+    exit 1
+  fi
+}
+
 require_absent_substring() {
   local label="$1"
   local output="$2"
