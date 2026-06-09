@@ -59,7 +59,12 @@ test("official MCP SDK client gets receipt-verified recall from mneme-mcp", asyn
   try {
     const { tools } = await client.listTools();
     const names = tools.map((tdef) => tdef.name).sort();
-    assert.deepEqual(names, ["memory.forget", "memory.recall", "memory.remember"]);
+    assert.deepEqual(names, [
+      "memory.forget",
+      "memory.forget_proof",
+      "memory.recall",
+      "memory.remember",
+    ]);
 
     const remembered = toolJson(
       await client.callTool({

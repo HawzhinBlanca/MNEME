@@ -29,7 +29,15 @@ fn agent_session_sim_multi_turn_tool_loop_quarantine_forget_fail_closed() {
         .iter()
         .filter_map(|t| t["name"].as_str())
         .collect();
-    assert_eq!(names, ["memory.remember", "memory.recall", "memory.forget"]);
+    assert_eq!(
+        names,
+        [
+            "memory.remember",
+            "memory.recall",
+            "memory.forget",
+            "memory.forget_proof"
+        ]
+    );
     let remember_desc = tools[0]["description"].as_str().unwrap_or("");
     assert!(remember_desc.contains("quarantine"));
     assert!(remember_desc.contains("authenticated"));

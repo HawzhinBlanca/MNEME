@@ -17,6 +17,21 @@ pub const ASSEMBLY_PROFILE_V1: AssemblyProfile = AssemblyProfile {
 
 const PROMPT_MAGIC: &[u8] = b"MNEME-CTX-ASM-v1\n";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AssemblyFailure {
+    UnsupportedProfile,
+}
+
+fn assembly_failure_to_mneme(failure: AssemblyFailure) -> MnemeError {
+    match failure {
+        AssemblyFailure::UnsupportedProfile => MnemeError::SchemaDrift,
+    }
+}
+
+fn unsupported_assembly_profile_error() -> MnemeError {
+    assembly_failure_to_mneme(AssemblyFailure::UnsupportedProfile)
+}
+
 /// Outcome of deterministic assembly: prompt bytes + domain-separated digests.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssemblyOutcome {
@@ -64,7 +79,7 @@ pub fn assemble_verified_context(
         return Err(MnemeError::ProcedureMismatch);
     }
     if profile != ASSEMBLY_PROFILE_V1 {
-        return Err(MnemeError::SchemaDrift);
+        return Err(unsupported_assembly_profile_error());
     }
 
     let mut payloads: Vec<&[u8]> = Vec::with_capacity(entries.len());
@@ -153,6 +168,66 @@ mod tests {
             record,
             plaintext: plaintext.to_vec(),
         }
+    }
+
+    fn source_between_markers<'a>(
+        source: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+        context: &str,
+    ) -> &'a str {
+        let start = source
+            .find(start_marker)
+            .unwrap_or_else(|| panic!("{context} should contain start marker `{start_marker}`"));
+        let end_offset = source[start..]
+            .find(end_marker)
+            .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
+        &source[start..start + end_offset]
+    }
+
+    #[test]
+    fn assembly_failures_are_classified_not_schema_drift_collapsed() {
+        let source = include_str!("assembly.rs");
+        let section = source_between_markers(
+            source,
+            "pub const ASSEMBLY_PROFILE_V1",
+            "#[cfg(test)]",
+            "context assembly production section",
+        );
+
+        for forbidden in [
+            "return Err(MnemeError::SchemaDrift)",
+            "Err(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "context assembly should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum AssemblyFailure",
+            "fn assembly_failure_to_mneme(",
+            "fn unsupported_assembly_profile_error(",
+            "AssemblyFailure::UnsupportedProfile",
+        ] {
+            assert!(
+                section.contains(required),
+                "context assembly failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn assembly_failure_classifier_preserves_public_schema_drift() {
+        assert_eq!(
+            assembly_failure_to_mneme(AssemblyFailure::UnsupportedProfile),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            unsupported_assembly_profile_error(),
+            MnemeError::SchemaDrift
+        );
     }
 
     #[test]

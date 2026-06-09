@@ -15,7 +15,7 @@ fail closed.
 | Phase | Goal | Unlocks (the new proof) | Exit gate | ~Effort | Spec |
 |---|---|---|---|---|---|
 | **0 ✅** | Verifiable memory | integrity · provenance · authorization of stored memory | `master` green; cross-OS determinism proven | shipped | `READINESS.md`, `MNEME_2.0_TASK_SPEC.md` |
-| **I ✅** | Verifiable **retrieval** + Certificate v1 | the recall is *correct*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team closed @ `d433999` (`9462a04`); offline `verify-cert`; git tag **`phase-i`** @ `42079de` (software pin: **`phase-i-software`** @ `be2b536` — predates TCB fail-open @ `a494fe0`; do not move without release policy) | shipped | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
+| **I ✅** | Verifiable **retrieval** + Certificate v1 | the recall is *receipt-bound*, *time-anchored*, *un-poisoned* | `validation-lane full` + forgery red-team closed @ `d433999` (`9462a04`); offline `verify-cert`; git tag **`phase-i`** @ `42079de` (software pin: **`phase-i-software`** @ `be2b536` — predates TCB fail-open @ `a494fe0`; do not move without release policy) | shipped | [`PHASE_I_TASK_SPEC.md`](PHASE_I_TASK_SPEC.md) |
 | **II** | The **Context Gate** (the kernel) | the model consumed *exactly* the certified context | strict CCA/output binding on `master` @ `01abbbc`; cert v2 draft + `context_gate` tests; TEE/RA pending — **`phase-ii-software` tag not cut** (software slice only; gate closed) | ~3–5 mo | [`PHASE_II_TASK_SPEC.md`](PHASE_II_TASK_SPEC.md) |
 | **III** | **Accountability** complete | who sanctioned the action · what was forgotten · machine-checked TCB | NIST 4-dim met; Lean/F* proof; regulated pilot + 3rd-party audit — wire slice on `master`; gate closed | ~4 mo | [`PHASE_III_TASK_SPEC.md`](PHASE_III_TASK_SPEC.md) |
 | **IV** | **Scale & standard** | global exact-NN; federated certificates; open spec | certificate is an interop standard; cost ≈ "default tier" — PIOP research only | ongoing | [`PHASE_IV_TASK_SPEC.md`](PHASE_IV_TASK_SPEC.md) |
@@ -34,16 +34,16 @@ Phase 0 ✅ ──▶ Phase I ✅ ──▶ Phase II ──▶ Phase III ──�
 
 ## Phase I — Verifiable retrieval + Certificate v1  *(buildable today)*
 
-**Goal:** prove a recall is correct, time-anchored, and un-poisoned; fuse into one offline cert.
+**Goal:** prove a recall is receipt-bound, time-anchored, and un-poisoned; fuse into one offline cert.
 
 **Clear steps**
-1. **zkANN-1** — proven-correct retrieval: *exact dominance* (flat index) + *audit-on-demand* (HNSW). Forged/reordered/truncated top-k → typed rejection.
+1. **zkANN-1** — authenticated dominance evidence: full-set membership/completeness with top-k over prover-asserted distances (flat index) + *audit-on-demand* (HNSW). Forged/reordered/truncated top-k → typed rejection.
 2. **Bi-temporal recall** — add valid-time to `Draft`; `recall_verified_at(RootSeq|ValidTime)` bound to the *historical* signed root (A-REPLAY safe).
 3. **Poison-evidence** — provenance-scoped recall whose receipt proves the `written_by/since/min_tier` filter held (anti-MINJA); auditable promotion events.
 4. **Certificate v1** — dCBOR schema binding root + receipt + zkANN-1 proof + time anchor + provenance attestation; `mneme certify` / `mneme verify-cert` (offline); `crossref` independent verifier.
 
 **Exit gate:** all P1-1…P1-5 in the spec green; `validation-lane full`; forgery red-team fails closed.
-**Honest level reached:** retrieval *correct over the committed/visited set* (not yet global exact-NN).
+**Honest level reached:** retrieval is authenticated and procedure-faithful over the committed/visited set; flat-path distances are not yet verifier-recomputed, so this is not true query-to-embedding top-k and not global exact-NN.
 
 ## Phase II — The Context Gate  *(the "almost impossible" kernel)*
 

@@ -39,8 +39,11 @@ context_gate = ["mneme-gate", "mneme-gate/phase_ii_gate_open", "dep:mneme-contex
 commitment_binding = []
 # 12-month milestone (B3): real transparent zero-knowledge proof (Pedersen + Schnorr over
 # Ristretto) of a private retrieval-match statement — knowledge that a committed entry equals
-# a hidden query. Zero-knowledge + no trusted setup — NOT semantic truth, NOT exact-NN
-# (blueprint §3). Backend is Pedersen/Schnorr, NOT Plonky2/FRI (Plonky2 1.x is nightly-only).
+# a hidden query. Zero-knowledge + no trusted setup — NOT semantic truth, NOT exact-NN /
+# not exact nearest-neighbor. Phase I ExactDominance proves membership/completeness
+# plus top-k over prover-asserted distances; true top-k ranking is not proven, and
+# this is not top-k by true query-to-embedding distance until verifiers recompute
+# candidate distances. Backend is Pedersen/Schnorr, NOT Plonky2/FRI (Plonky2 1.x is nightly-only).
 # The feature name reflects the actual backend. The `B3_DEFERRAL_STATUS` string in
 # `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
 pedersen_schnorr_zk = ["dep:curve25519-dalek", "dep:rand"]
@@ -49,9 +52,12 @@ pedersen_schnorr_zk = ["dep:curve25519-dalek", "dep:rand"]
 plonky2_prover = ["pedersen_schnorr_zk"]
 # Phase IV-A research seam (UNIMPLEMENTED). Off by default; wired into NO recall/receipt/
 # verify path. The entry point returns UnsupportedVersion so it can never fabricate a proof.
-# Proves NOTHING — not exact-NN, not Plonky2/FRI, not a SNARK. Pure research placeholder for
-# the zkRAG-style global exact-NN direction. See docs/research/PHASE_IV_A_PIOP_SPIKE.md and
-# the `piop_research_seam_is_honest` regression test in lib.rs.
+# Proves NOTHING — not exact-NN, not Plonky2/FRI, not a SNARK. Pure research placeholder
+# for the zkRAG-style global exact-NN direction. Current Phase I ExactDominance
+# proves membership/completeness plus top-k over prover-asserted distances; true
+# top-k ranking is not proven, and this is not top-k by true query-to-embedding
+# distance until verifiers recompute candidate distances. See docs/research/PHASE_IV_A_PIOP_SPIKE.md
+# and the `piop_research_seam_is_honest` regression test in lib.rs.
 piop_research = []
 
 [[test]]
@@ -71,3 +77,4 @@ path = "tests/zkann_exact_dominance.rs"
 hex.workspace = true
 mneme-context = { workspace = true }
 serde_json.workspace = true
+tempfile.workspace = true

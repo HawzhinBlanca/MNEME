@@ -1,8 +1,35 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-01 (B6 seam refactor committed). This tracks items beyond the
-certified single-host v0 core. Each entry states what is in-repo, what is gated, and
-*why* it cannot be marked done without an external input.
+Last updated: 2026-06-08 (P0–P2 closeout + PR #8 CI fix on `harden/differential-adversarial` @ `3b44142`).
+This tracks items beyond the certified single-host v0 core. Each entry states what is
+in-repo, what is gated, and *why* it cannot be marked done without an external input.
+
+> **Work order (2026-06-08):** [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
+> **P0–P2 software scope: 100% complete** on branch `harden/differential-adversarial`
+> (WO-1..WO-20 delivered; local `validation-lane.sh quick` + `tamper` + `determinism` green;
+> `cargo test -p mnemed` 299/299). **P3 remains human/hardware-gated**
+> (live KMS/HSM, distinct physical host convergence, TEE vendor quotes, machine-checked proofs).
+> **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — head @ `3556ed8`; CI green after e2e fixes
+> (`3b44142` CLI custody, `3556ed8` MCP `memory.forget_proof` tool list).
+
+## PR #8 merge readiness
+
+| Check | Status @ session end |
+|---|---|
+| Head SHA | `3556ed8` |
+| Local tamper | GREEN |
+| Local determinism | GREEN |
+| Local CLI e2e | GREEN (4/4) |
+| Local MCP SDK e2e | GREEN |
+| GitHub CI gate | **GREEN** |
+| Merge | **Ready** — awaiting explicit operator merge ask |
+
+## P0–P2 closeout (2026-06-08, software-complete)
+
+All prioritized honesty, correctness, deployment-hardening, MCP, and L3-delivery items
+from the deep inspection are implemented and gated in-repo. Remaining P3 work is scaffold +
+documentation with explicit `not external P3 proof` boundaries; no further P0/P1/P2 code
+tasks block merge readiness on this branch.
 
 ## Delivered (code, tested, CI-verified)
 

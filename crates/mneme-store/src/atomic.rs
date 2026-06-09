@@ -6,6 +6,23 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+
+pub(crate) fn durability_fsync_enabled() -> bool {
+    !debug_no_fsync_requested()
+}
+
+#[cfg(debug_assertions)]
+fn debug_no_fsync_requested() -> bool {
+    std::env::var_os("MNEME_NO_FSYNC").is_some()
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_no_fsync_requested() -> bool {
+    false
+}
+
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
     atomic_write_inner(path, data, true)
 }
@@ -23,12 +40,12 @@ fn atomic_write_inner(path: &Path, data: &[u8], sync_dir: bool) -> Result<(), Mn
     {
         let mut f = File::create(&tmp).map_err(|e| io_err(path, e))?;
         f.write_all(data).map_err(|e| io_err(path, e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if durability_fsync_enabled() {
             f.sync_all().map_err(|e| io_err(path, e))?;
         }
     }
     fs::rename(&tmp, path).map_err(|e| io_err(path, e))?;
-    if sync_dir && std::env::var("MNEME_NO_FSYNC").is_err() {
+    if sync_dir && durability_fsync_enabled() {
         sync_parent_dir(path)?;
     }
     Ok(())
@@ -38,7 +55,7 @@ fn atomic_write_inner(path: &Path, data: &[u8], sync_dir: bool) -> Result<(), Mn
 pub fn flush_parent_dirs(
     paths: impl IntoIterator<Item = impl AsRef<Path>>,
 ) -> Result<(), MnemeError> {
-    if std::env::var("MNEME_NO_FSYNC").is_ok() {
+    if !durability_fsync_enabled() {
         return Ok(());
     }
     let mut seen = HashSet::new();
@@ -149,13 +166,112 @@ pub fn check_no_incomplete(store: &Path) -> Result<(), MnemeError> {
     Ok(())
 }
 
-#[allow(dead_code)]
+/// Advisory exclusive lock for single-writer store access (L2 deployment invariant).
 pub fn open_store_lock(store: &Path) -> Result<File, MnemeError> {
+    if let Some(parent) = store.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+        }
+    }
+    fs::create_dir_all(store).map_err(|e| io_err(store, e))?;
     let lock = store.join(".mneme.lock");
-    OpenOptions::new()
+    let file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
         .open(&lock)
-        .map_err(|e| io_err(&lock, e))
+        .map_err(|e| io_err(&lock, e))?;
+    #[cfg(unix)]
+    {
+        let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if ret == -1 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::WouldBlock
+                || err.raw_os_error() == Some(libc::EWOULDBLOCK)
+            {
+                return Err(MnemeError::LockHeld);
+            }
+            return Err(io_err(&lock, err));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = &file;
+        return Err(MnemeError::IoFailed {
+            path: lock.display().to_string(),
+            kind: "advisory flock requires unix".into(),
+        });
+    }
+    Ok(file)
+}
+
+const DURABILITY_DISABLED_META: &str = "meta/durability_disabled.json";
+
+/// One-time durability audit at store open (WO-11).
+pub fn audit_durability_at_open(store: &Path) -> Result<(), MnemeError> {
+    let flag_path = store.join(DURABILITY_DISABLED_META);
+    if flag_path.exists() {
+        eprintln!(
+            "mneme-store: WARNING — prior session wrote meta/durability_disabled.json; \
+             crash-unsafe durability was enabled in a debug/test run"
+        );
+    }
+    if !durability_fsync_enabled() {
+        eprintln!(
+            "mneme-store: WARNING — MNEME_NO_FSYNC is set; all fsync barriers are disabled \
+             (debug/test only, crash-unsafe)"
+        );
+        fs::create_dir_all(store.join("meta")).map_err(|e| io_err(store, e))?;
+        let payload = serde_json::json!({
+            "reason": "MNEME_NO_FSYNC",
+            "fsync_enabled": false,
+        });
+        let data = serde_json::to_string_pretty(&payload)
+            .map_err(|_| MnemeError::SerializationNonCanonical)?;
+        atomic_write(&flag_path, data.as_bytes())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    fn production_source(source: &str) -> &str {
+        source
+            .split_once("#[cfg(test)]")
+            .map_or(source, |(production, _tests)| production)
+    }
+
+    #[test]
+    fn no_fsync_escape_hatch_is_debug_only_and_centralized() {
+        let atomic = production_source(include_str!("atomic.rs"));
+        let layout = production_source(include_str!("layout.rs"));
+        let combined = [atomic, layout].join("\n");
+
+        assert!(
+            atomic.contains("fn durability_fsync_enabled("),
+            "store fsync decisions must route through a named helper"
+        );
+        assert!(
+            atomic.contains("#[cfg(debug_assertions)]"),
+            "MNEME_NO_FSYNC may only be read in debug builds"
+        );
+        assert!(
+            atomic.contains("#[cfg(not(debug_assertions))]"),
+            "release builds must compile an env-independent fsync path"
+        );
+        assert_eq!(
+            combined
+                .matches("std::env::var(\"MNEME_NO_FSYNC\")")
+                .count(),
+            0,
+            "store write paths must not read MNEME_NO_FSYNC directly"
+        );
+        assert_eq!(
+            combined
+                .matches("std::env::var_os(\"MNEME_NO_FSYNC\")")
+                .count(),
+            1,
+            "only the debug-only helper may inspect MNEME_NO_FSYNC"
+        );
+    }
 }

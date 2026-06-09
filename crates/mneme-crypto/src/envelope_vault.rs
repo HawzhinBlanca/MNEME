@@ -1,5 +1,6 @@
 //! Envelope-encrypted file vault (B6) — per-object keys encrypted at rest under a
-//! 32-byte master key (from env or from AWS KMS `GenerateDataKey` via `aws-kms` feature).
+//! 32-byte master key from `MNEME_KMS_MASTER_KEY_HEX` (e.g. an AWS KMS data key fetched
+//! out-of-process by `scripts/kms/dek-from-aws.sh`).
 //!
 //! Layout matches [`FileKeyVault`] (`keys/vault/` journal + per-id files) but bytes on
 //! disk are `nonce24 ‖ AEAD(master, object_key)` — never plaintext keys.
@@ -192,7 +193,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
         }
         file.write_all(&buf)
             .map_err(|e| io_error(journal.display().to_string(), e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if crate::vault::durability_fsync_enabled() {
             file.sync_all()
                 .map_err(|e| io_error(journal.display().to_string(), e))?;
         }
@@ -227,7 +228,7 @@ fn write_wrapped_key(path: &Path, wrapped: &[u8]) -> Result<(), MnemeError> {
         let mut f = File::create(&tmp).map_err(|e| io_error(path.display().to_string(), e))?;
         f.write_all(wrapped)
             .map_err(|e| io_error(path.display().to_string(), e))?;
-        if std::env::var("MNEME_NO_FSYNC").is_err() {
+        if crate::vault::durability_fsync_enabled() {
             f.sync_all()
                 .map_err(|e| io_error(path.display().to_string(), e))?;
         }

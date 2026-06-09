@@ -33,7 +33,11 @@
 //!
 //! This proves a *committed retrieval match* with zero-knowledge of the witness. It does
 //! **not** prove semantic truth, that the entry is the true nearest neighbor, or that an
-//! authenticated entry is factually correct. **Authenticated ≠ true.**
+//! authenticated entry is factually correct. It also does not upgrade Phase I
+//! `ExactDominance`: current v1 proves membership/completeness plus top-k over
+//! prover-asserted distances; true top-k ranking is not proven and this is not
+//! top-k by true query-to-embedding distance until verifiers recompute candidate distances.
+//! **Authenticated ≠ true.**
 //!
 //! v0/90-day still ships [`super::commitment_binding`] (feature `commitment_binding`): a
 //! tagged BLAKE3 binding envelope that rejects forgeries but is **not** zero-knowledge.
@@ -60,12 +64,17 @@ const FS_DOMAIN: &[u8] = b"MNEME-ZK-RETRIEVAL-PEDERSEN-SCHNORR-v1";
 pub const ZK_BACKEND: &str = "pedersen-schnorr-ristretto-nizk (transparent, no trusted setup)";
 
 /// Status tag for the B3 milestone (documentation / honesty exports).
-pub const B3_DEFERRAL_STATUS: &str = "IMPLEMENTED (12-month milestone B3): real transparent zero-knowledge retrieval-match proof. \
-     Backend is Pedersen commitments + Schnorr equality NIZK over Ristretto (no trusted setup) — NOT Plonky2/FRI, \
-     because Plonky2 1.x is nightly-only (feature(specialization)) and the repo pins stable 1.86.0. Proves \
-     zero-knowledge of a committed entry matching a hidden query; reveals only the public commitment. \
-     Faithful-execution privacy — NOT semantic truth, NOT exact-NN. v0/90-day still uses commitment_binding \
-     (BLAKE3 envelope, not ZK).";
+pub const B3_DEFERRAL_STATUS: &str = concat!(
+    "IMPLEMENTED (12-month milestone B3): real transparent zero-knowledge retrieval-match proof. ",
+    "Backend is Pedersen commitments + Schnorr equality NIZK over Ristretto (no trusted setup) — NOT Plonky2/FRI, ",
+    "because Plonky2 1.x is nightly-only (feature(specialization)) and the repo pins stable 1.86.0. ",
+    "Proves zero-knowledge of a committed entry matching a hidden query; reveals only the public commitment. ",
+    "Faithful-execution privacy — NOT semantic truth, NOT exact-NN / not exact nearest-neighbor. ",
+    "It does not prove ranking; Phase I ExactDominance proves membership/completeness plus top-k ",
+    "over prover-asserted distances; true top-k ranking is not proven and it is not top-k by true ",
+    "query-to-embedding distance until verifiers recompute candidate distances. ",
+    "v0/90-day still uses commitment_binding (BLAKE3 envelope, not ZK)."
+);
 
 /// Honesty boundary for the `pedersen_schnorr_zk` feature (named for the actual backend).
 ///
@@ -73,9 +82,15 @@ pub const B3_DEFERRAL_STATUS: &str = "IMPLEMENTED (12-month milestone B3): real 
 /// Plonky2/V3DB SNARK target; the regression tests below assert this constant mentions
 /// the Plonky2/FRI name only as a *non*-claim — protecting against future contributors
 /// re-labelling the implementation in a way that misrepresents the backend.
-pub const PEDERSEN_SCHNORR_HONESTY: &str = "ZK retrieval proof is a real zero-knowledge proof (Pedersen + Schnorr over Ristretto, transparent, \
-     no trusted setup; NOT Plonky2, NOT FRI). It proves faithful execution of a retrieval-match predicate with \
-     witness privacy; it is not semantic truth, not exact-NN, and not a claim that an authenticated entry is factually correct.";
+pub const PEDERSEN_SCHNORR_HONESTY: &str = concat!(
+    "ZK retrieval proof is a real zero-knowledge proof (Pedersen + Schnorr over Ristretto, transparent, ",
+    "no trusted setup; NOT Plonky2, NOT FRI). It proves faithful execution of a retrieval-match predicate with ",
+    "witness privacy; it is not semantic truth, not exact-NN / not exact nearest-neighbor, ",
+    "and not a claim that an authenticated entry is factually correct. It proves no ranking; ",
+    "Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted ",
+    "distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding ",
+    "distance until verifiers recompute candidate distances."
+);
 
 /// Opaque ZK retrieval proof for a private retrieval-match statement.
 ///
@@ -106,6 +121,43 @@ impl RetrievalWitness {
             query: entry,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PedersenSchnorrFailure {
+    UnsatisfiableWitness,
+    PublishedCommitLengthInvalid,
+    PublishedCommitDoesNotMatchProof,
+    ProofByteLengthInvalid,
+    EntryCommitEncodingRejected,
+    QueryCommitEncodingRejected,
+    NonceEncodingRejected,
+    ResponseScalarNonCanonical,
+    EntryCommitDecompressionRejected,
+    QueryCommitDecompressionRejected,
+    NonceDecompressionRejected,
+    SchnorrEquationFailed,
+}
+
+fn pedersen_schnorr_failure_to_mneme(failure: PedersenSchnorrFailure) -> MnemeError {
+    match failure {
+        PedersenSchnorrFailure::UnsatisfiableWitness
+        | PedersenSchnorrFailure::PublishedCommitLengthInvalid
+        | PedersenSchnorrFailure::PublishedCommitDoesNotMatchProof
+        | PedersenSchnorrFailure::ProofByteLengthInvalid
+        | PedersenSchnorrFailure::EntryCommitEncodingRejected
+        | PedersenSchnorrFailure::QueryCommitEncodingRejected
+        | PedersenSchnorrFailure::NonceEncodingRejected
+        | PedersenSchnorrFailure::ResponseScalarNonCanonical
+        | PedersenSchnorrFailure::EntryCommitDecompressionRejected
+        | PedersenSchnorrFailure::QueryCommitDecompressionRejected
+        | PedersenSchnorrFailure::NonceDecompressionRejected
+        | PedersenSchnorrFailure::SchnorrEquationFailed => MnemeError::ZkProofInvalid,
+    }
+}
+
+fn pedersen_schnorr_error(failure: PedersenSchnorrFailure) -> MnemeError {
+    pedersen_schnorr_failure_to_mneme(failure)
 }
 
 /// Second Pedersen generator `H`, derived deterministically from a fixed domain so nobody
@@ -159,7 +211,9 @@ pub fn prove_pedersen_schnorr(
 
     // A false statement (query != entry) is not provable; fail closed.
     if entry != query {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::UnsatisfiableWitness,
+        ));
     }
 
     let mut rng = OsRng;
@@ -199,31 +253,44 @@ pub fn verify_pedersen_schnorr(
     public_commit: &[u8],
 ) -> Result<(), MnemeError> {
     if public_commit.len() != PUBLIC_COMMIT_LEN {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::PublishedCommitLengthInvalid,
+        ));
     }
     // The caller's published commitment must match the entry the proof binds to.
     if public_commit != proof.public_commit {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::PublishedCommitDoesNotMatchProof,
+        ));
     }
     if proof.proof_bytes.len() != PROOF_LEN {
-        return Err(MnemeError::ZkProofInvalid);
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::ProofByteLengthInvalid,
+        ));
     }
 
     let c_e = CompressedRistretto::from_slice(&proof.public_commit)
-        .map_err(|_| MnemeError::ZkProofInvalid)?;
+        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::EntryCommitEncodingRejected))?;
     let c_q = CompressedRistretto::from_slice(&proof.proof_bytes[0..32])
-        .map_err(|_| MnemeError::ZkProofInvalid)?;
+        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::QueryCommitEncodingRejected))?;
     let nonce_point = CompressedRistretto::from_slice(&proof.proof_bytes[32..64])
-        .map_err(|_| MnemeError::ZkProofInvalid)?;
+        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::NonceEncodingRejected))?;
 
     let mut z_bytes = [0u8; 32];
     z_bytes.copy_from_slice(&proof.proof_bytes[64..96]);
-    let z = Option::<Scalar>::from(Scalar::from_canonical_bytes(z_bytes))
-        .ok_or(MnemeError::ZkProofInvalid)?;
+    let z = Option::<Scalar>::from(Scalar::from_canonical_bytes(z_bytes)).ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::ResponseScalarNonCanonical)
+    })?;
 
-    let c_e_point = c_e.decompress().ok_or(MnemeError::ZkProofInvalid)?;
-    let c_q_point = c_q.decompress().ok_or(MnemeError::ZkProofInvalid)?;
-    let nonce = nonce_point.decompress().ok_or(MnemeError::ZkProofInvalid)?;
+    let c_e_point = c_e.decompress().ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::EntryCommitDecompressionRejected)
+    })?;
+    let c_q_point = c_q.decompress().ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::QueryCommitDecompressionRejected)
+    })?;
+    let nonce = nonce_point.decompress().ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::NonceDecompressionRejected)
+    })?;
 
     // D = C_e - C_q. Verify z·H == R + c·D (Schnorr equality of committed values).
     let d = c_e_point - c_q_point;
@@ -235,7 +302,9 @@ pub fn verify_pedersen_schnorr(
     if lhs == rhs {
         Ok(())
     } else {
-        Err(MnemeError::ZkProofInvalid)
+        Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::SchnorrEquationFailed,
+        ))
     }
 }
 
@@ -248,13 +317,97 @@ mod tests {
         assert!(B3_DEFERRAL_STATUS.contains("12-month"));
         assert!(B3_DEFERRAL_STATUS.contains("NOT semantic truth"));
         assert!(B3_DEFERRAL_STATUS.contains("NOT exact-NN"));
+        assert_distance_caveat("B3_DEFERRAL_STATUS", B3_DEFERRAL_STATUS);
         assert!(B3_DEFERRAL_STATUS.contains("NOT Plonky2/FRI"));
         assert!(PEDERSEN_SCHNORR_HONESTY.contains("zero-knowledge"));
         assert!(PEDERSEN_SCHNORR_HONESTY.contains("NOT Plonky2"));
         assert!(PEDERSEN_SCHNORR_HONESTY.contains("not semantic truth"));
         assert!(PEDERSEN_SCHNORR_HONESTY.contains("not exact-NN"));
+        assert_distance_caveat("PEDERSEN_SCHNORR_HONESTY", PEDERSEN_SCHNORR_HONESTY);
         assert!(ZK_BACKEND.contains("pedersen-schnorr"));
         assert!(ZK_BACKEND.contains("no trusted setup"));
+    }
+
+    fn assert_distance_caveat(surface: &str, text: &str) {
+        for phrase in [
+            "not exact",
+            "membership/completeness",
+            "top-k over prover-asserted distances",
+            "top-k ranking is not proven",
+            "not top-k by true query-to-embedding distance",
+        ] {
+            assert!(
+                text.contains(phrase),
+                "{surface} missing required honesty phrase `{phrase}`: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn proof_failures_are_classified_not_zkproof_collapsed() {
+        let source = include_str!("pedersen_schnorr_zk.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("pedersen_schnorr_zk tests should follow production code");
+
+        for forbidden in [
+            "return Err(MnemeError::ZkProofInvalid",
+            ".map_err(|_| MnemeError::ZkProofInvalid",
+            ".ok_or(MnemeError::ZkProofInvalid",
+            "Err(MnemeError::ZkProofInvalid)",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "Pedersen-Schnorr proof path should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum PedersenSchnorrFailure",
+            "UnsatisfiableWitness",
+            "PublishedCommitLengthInvalid",
+            "PublishedCommitDoesNotMatchProof",
+            "ProofByteLengthInvalid",
+            "EntryCommitEncodingRejected",
+            "QueryCommitEncodingRejected",
+            "NonceEncodingRejected",
+            "ResponseScalarNonCanonical",
+            "EntryCommitDecompressionRejected",
+            "QueryCommitDecompressionRejected",
+            "NonceDecompressionRejected",
+            "SchnorrEquationFailed",
+            "fn pedersen_schnorr_failure_to_mneme(",
+            "fn pedersen_schnorr_error(",
+        ] {
+            assert!(
+                source.contains(required),
+                "Pedersen-Schnorr proof path should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn proof_failure_classifier_preserves_public_zkproof_invalid() {
+        for failure in [
+            PedersenSchnorrFailure::UnsatisfiableWitness,
+            PedersenSchnorrFailure::PublishedCommitLengthInvalid,
+            PedersenSchnorrFailure::PublishedCommitDoesNotMatchProof,
+            PedersenSchnorrFailure::ProofByteLengthInvalid,
+            PedersenSchnorrFailure::EntryCommitEncodingRejected,
+            PedersenSchnorrFailure::QueryCommitEncodingRejected,
+            PedersenSchnorrFailure::NonceEncodingRejected,
+            PedersenSchnorrFailure::ResponseScalarNonCanonical,
+            PedersenSchnorrFailure::EntryCommitDecompressionRejected,
+            PedersenSchnorrFailure::QueryCommitDecompressionRejected,
+            PedersenSchnorrFailure::NonceDecompressionRejected,
+            PedersenSchnorrFailure::SchnorrEquationFailed,
+        ] {
+            assert_eq!(
+                pedersen_schnorr_failure_to_mneme(failure),
+                MnemeError::ZkProofInvalid
+            );
+            assert_eq!(pedersen_schnorr_error(failure), MnemeError::ZkProofInvalid);
+        }
     }
 
     #[test]

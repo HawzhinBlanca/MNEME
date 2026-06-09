@@ -41,9 +41,7 @@ pub fn verify_recall(
 
     let record: ObjectRecord = from_bytes_strict(&recall.object_bytes)?;
     if record.version != OBJECT_VERSION {
-        return Err(MnemeError::UnsupportedVersion {
-            got: record.version,
-        });
+        return Err(unsupported_object_version_error(record.version));
     }
 
     verify_provenance(&record, ctx)?;
@@ -53,11 +51,10 @@ pub fn verify_recall(
     // F-6 layering contract: the TCB returns the integrity/provenance/authorization-
     // verified `ObjectRecord`. `Entry.plaintext` here is the AEAD *ciphertext* body
     // (`payload_enc.body`); AEAD-open against the per-key AAD is performed by the
-    // store layer (`Store::recall_verified` → `decrypt_entries`), which alone holds
-    // the key vault. Keeping decryption out of the verifier preserves the minimal
-    // TCB (§17.6) — the vault never enters the trusted line budget. A wholly-missing
-    // key (vs the tombstone gate above) likewise fails closed one layer out:
-    // `Store::recall` returns no receipt → `ReceiptRootMismatch`, never plaintext.
+    // store layer, which alone holds the key vault. Keeping decryption out preserves
+    // the minimal TCB (§17.6). A wholly-missing key (vs the tombstone gate above)
+    // likewise fails closed one layer out: no receipt → `ReceiptRootMismatch`,
+    // never plaintext.
     Ok(vec![Entry {
         id: ObjectId(computed_id),
         record: record.clone(),
@@ -77,6 +74,10 @@ fn verify_receipt_binding(receipt: &Receipt, root: &Root, query: &Query) -> Resu
         return Err(MnemeError::ReceiptRootMismatch);
     }
     Ok(())
+}
+
+pub(crate) fn unsupported_object_version_error(version: u16) -> MnemeError {
+    MnemeError::UnsupportedVersion { got: version }
 }
 
 fn verify_key_index_membership(receipt: &Receipt, root: &Root) -> Result<(), MnemeError> {

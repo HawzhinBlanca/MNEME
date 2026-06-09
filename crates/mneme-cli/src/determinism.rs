@@ -40,6 +40,12 @@ pub struct FoundationVerify {
     pub mismatches: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FoundationDeterminismFailure {
+    GateDigestMismatch,
+    VerifyDigestMismatch,
+}
+
 pub fn foundation_gate(
     out: &Path,
     timestamp: &str,
@@ -67,7 +73,7 @@ pub fn foundation_gate(
     .map_err(|e| io_err(&report_path, e))?;
 
     if !byte_identical {
-        return Err(MnemeError::SerializationNonCanonical);
+        return Err(foundation_gate_digest_mismatch_error());
     }
     Ok(report)
 }
@@ -114,9 +120,26 @@ pub fn foundation_verify(
     .map_err(|e| io_err(output, e))?;
 
     if !verified {
-        return Err(MnemeError::SerializationNonCanonical);
+        return Err(foundation_verify_digest_mismatch_error());
     }
     Ok(result)
+}
+
+fn foundation_determinism_failure_to_mneme(failure: FoundationDeterminismFailure) -> MnemeError {
+    match failure {
+        FoundationDeterminismFailure::GateDigestMismatch
+        | FoundationDeterminismFailure::VerifyDigestMismatch => {
+            MnemeError::SerializationNonCanonical
+        }
+    }
+}
+
+fn foundation_gate_digest_mismatch_error() -> MnemeError {
+    foundation_determinism_failure_to_mneme(FoundationDeterminismFailure::GateDigestMismatch)
+}
+
+fn foundation_verify_digest_mismatch_error() -> MnemeError {
+    foundation_determinism_failure_to_mneme(FoundationDeterminismFailure::VerifyDigestMismatch)
 }
 
 fn build_fixture_run(dir: &Path, operator_seed: [u8; 32]) -> Result<RunDigest, MnemeError> {
@@ -253,5 +276,90 @@ fn io_err(path: &Path, err: impl std::fmt::Display) -> MnemeError {
     MnemeError::IoFailed {
         path: path.display().to_string(),
         kind: err.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source_between_markers<'a>(
+        source: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+        context: &str,
+    ) -> &'a str {
+        let (_, after_start) = source
+            .split_once(start_marker)
+            .unwrap_or_else(|| panic!("{context} should contain start marker `{start_marker}`"));
+        let (section, _) = after_start
+            .split_once(end_marker)
+            .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
+        section
+    }
+
+    #[test]
+    fn foundation_determinism_failures_are_classified_not_serialization_collapsed() {
+        let source = include_str!("determinism.rs");
+        let sections = [
+            source_between_markers(
+                source,
+                "pub fn foundation_gate(",
+                "pub fn foundation_verify(",
+                "foundation_gate",
+            ),
+            source_between_markers(
+                source,
+                "pub fn foundation_verify(",
+                "fn build_fixture_run(",
+                "foundation_verify",
+            ),
+        ];
+
+        for section in sections {
+            for forbidden in [
+                "Err(MnemeError::SerializationNonCanonical)",
+                "return Err(MnemeError::SerializationNonCanonical)",
+            ] {
+                assert!(
+                    !section.contains(forbidden),
+                    "foundation determinism should route `{forbidden}` through named classifiers"
+                );
+            }
+        }
+
+        for required in [
+            "enum FoundationDeterminismFailure",
+            "fn foundation_determinism_failure_to_mneme(",
+            "fn foundation_gate_digest_mismatch_error(",
+            "fn foundation_verify_digest_mismatch_error(",
+            "FoundationDeterminismFailure::GateDigestMismatch",
+            "FoundationDeterminismFailure::VerifyDigestMismatch",
+        ] {
+            assert!(
+                source.contains(required),
+                "foundation determinism classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn foundation_determinism_failure_classifier_preserves_public_error() {
+        for failure in [
+            FoundationDeterminismFailure::GateDigestMismatch,
+            FoundationDeterminismFailure::VerifyDigestMismatch,
+        ] {
+            assert_eq!(
+                foundation_determinism_failure_to_mneme(failure),
+                MnemeError::SerializationNonCanonical
+            );
+        }
+
+        for error in [
+            foundation_gate_digest_mismatch_error(),
+            foundation_verify_digest_mismatch_error(),
+        ] {
+            assert_eq!(error, MnemeError::SerializationNonCanonical);
+        }
     }
 }

@@ -24,7 +24,7 @@ pub fn verify_root(
     let mut verified = false;
     for pk_bytes in &trust.operator_keys {
         let pk = public_key_from_bytes(pk_bytes)?;
-        if verify_signature_bytes(&pk, &root.preimage_hash, &root.signature).is_ok() {
+        if let Ok(()) = verify_signature_bytes(&pk, &root.preimage_hash, &root.signature) {
             verified = true;
             break;
         }

@@ -85,9 +85,8 @@ impl ActionReceipt {
 /// Proof that a target was forgotten: crypto-shred witness plus proof-of-absence
 /// under a signed root (Phase III P3-2, verifiable forgetting).
 ///
-/// **Skeleton:** `shred_commit` and `absence_path` are placeholders for the real
-/// key-destruction witness and SMT non-membership path; nothing populates or
-/// verifies them yet.
+/// `shred_commit` and `absence_path` are populated by `mneme-account` forget minting
+/// (`forget.rs`) and verified offline (`verify.rs`) for shred-mode proofs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForgetProof {
     /// Wire version; equals [`FORGET_PROOF_VERSION`].
@@ -96,16 +95,71 @@ pub struct ForgetProof {
     pub target_commit: [u8; 32],
     /// Forget mode applied — shred vs accountable chameleon redaction (§13.3).
     pub mode: ForgetMode,
-    /// Crypto-shred witness commit (destruction of the wrapping key). Deferred.
+    /// Crypto-shred witness commit (destruction of the wrapping key).
     pub shred_commit: [u8; 32],
-    /// Proof-of-absence: SMT non-membership path against `root_bound`'s key
-    /// index. Empty in the skeleton.
+    /// Proof-of-absence: SMT non-membership path against `root_bound`'s key index.
     pub absence_path: Vec<[u8; 32]>,
     /// Signed root the absence proof is bound to (A-REPLAY safe at the gate).
     pub root_bound: [u8; 32],
     /// OPTIONAL cognition-certificate ("cert v2") commit witnessing
     /// not-used-after. `None` until cert v2 is finalized — never fabricated.
     pub cognition_cert_commit: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActionReceiptWireFailure {
+    EncodeUnsupportedVersion { got: u16 },
+    DuplicateVersion,
+    DuplicateActionCommit,
+    DuplicateCapabilityCommit,
+    DuplicateSanctioner,
+    DuplicateRootBound,
+    DuplicateHlc,
+    DuplicateCognitionCertCommit,
+    DuplicateSignature,
+    UnknownField { field: u16 },
+    MissingVersion,
+    DecodeUnsupportedVersion { got: u16 },
+    MissingActionCommit,
+    MissingCapabilityCommit,
+    MissingSanctioner,
+    MissingRootBound,
+    MissingHlc,
+    MissingCognitionCertCommit,
+    MissingSignature,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ForgetProofWireFailure {
+    EncodeUnsupportedVersion { got: u16 },
+    DuplicateVersion,
+    DuplicateTargetCommit,
+    DuplicateMode,
+    DuplicateShredCommit,
+    DuplicateAbsencePath,
+    DuplicateRootBound,
+    DuplicateCognitionCertCommit,
+    UnknownField { field: u16 },
+    MissingVersion,
+    DecodeUnsupportedVersion { got: u16 },
+    MissingTargetCommit,
+    MissingMode,
+    MissingShredCommit,
+    MissingAbsencePath,
+    MissingRootBound,
+    MissingCognitionCertCommit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AccountabilityParseFailure {
+    FieldKey,
+    U16Value,
+    Fixed14,
+    Fixed32,
+    Bytes,
+    ModeTag,
+    UnknownModeTag,
+    AbsencePathArray,
 }
 
 impl ForgetProof {
@@ -143,6 +197,245 @@ impl ForgetProof {
     }
 }
 
+fn action_receipt_wire_failure_to_mneme(failure: ActionReceiptWireFailure) -> MnemeError {
+    match failure {
+        ActionReceiptWireFailure::EncodeUnsupportedVersion { got }
+        | ActionReceiptWireFailure::DecodeUnsupportedVersion { got } => {
+            MnemeError::UnsupportedVersion { got }
+        }
+        ActionReceiptWireFailure::UnknownField { field } => MnemeError::UnknownField { field },
+        ActionReceiptWireFailure::DuplicateVersion
+        | ActionReceiptWireFailure::DuplicateActionCommit
+        | ActionReceiptWireFailure::DuplicateCapabilityCommit
+        | ActionReceiptWireFailure::DuplicateSanctioner
+        | ActionReceiptWireFailure::DuplicateRootBound
+        | ActionReceiptWireFailure::DuplicateHlc
+        | ActionReceiptWireFailure::DuplicateCognitionCertCommit
+        | ActionReceiptWireFailure::DuplicateSignature
+        | ActionReceiptWireFailure::MissingVersion
+        | ActionReceiptWireFailure::MissingActionCommit
+        | ActionReceiptWireFailure::MissingCapabilityCommit
+        | ActionReceiptWireFailure::MissingSanctioner
+        | ActionReceiptWireFailure::MissingRootBound
+        | ActionReceiptWireFailure::MissingHlc
+        | ActionReceiptWireFailure::MissingCognitionCertCommit
+        | ActionReceiptWireFailure::MissingSignature => MnemeError::SchemaDrift,
+    }
+}
+
+fn action_receipt_encode_unsupported_version_error(got: u16) -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::EncodeUnsupportedVersion { got })
+}
+
+fn action_receipt_decode_unsupported_version_error(got: u16) -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DecodeUnsupportedVersion { got })
+}
+
+fn action_receipt_unknown_field_error(field: u16) -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::UnknownField { field })
+}
+
+fn duplicate_action_receipt_version_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateVersion)
+}
+
+fn duplicate_action_receipt_action_commit_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateActionCommit)
+}
+
+fn duplicate_action_receipt_capability_commit_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateCapabilityCommit)
+}
+
+fn duplicate_action_receipt_sanctioner_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateSanctioner)
+}
+
+fn duplicate_action_receipt_root_bound_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateRootBound)
+}
+
+fn duplicate_action_receipt_hlc_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateHlc)
+}
+
+fn duplicate_action_receipt_cognition_cert_commit_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateCognitionCertCommit)
+}
+
+fn duplicate_action_receipt_signature_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::DuplicateSignature)
+}
+
+fn missing_action_receipt_version_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingVersion)
+}
+
+fn missing_action_receipt_action_commit_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingActionCommit)
+}
+
+fn missing_action_receipt_capability_commit_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingCapabilityCommit)
+}
+
+fn missing_action_receipt_sanctioner_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingSanctioner)
+}
+
+fn missing_action_receipt_root_bound_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingRootBound)
+}
+
+fn missing_action_receipt_hlc_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingHlc)
+}
+
+fn missing_action_receipt_cognition_cert_commit_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingCognitionCertCommit)
+}
+
+fn missing_action_receipt_signature_error() -> MnemeError {
+    action_receipt_wire_failure_to_mneme(ActionReceiptWireFailure::MissingSignature)
+}
+
+fn forget_proof_wire_failure_to_mneme(failure: ForgetProofWireFailure) -> MnemeError {
+    match failure {
+        ForgetProofWireFailure::EncodeUnsupportedVersion { got }
+        | ForgetProofWireFailure::DecodeUnsupportedVersion { got } => {
+            MnemeError::UnsupportedVersion { got }
+        }
+        ForgetProofWireFailure::UnknownField { field } => MnemeError::UnknownField { field },
+        ForgetProofWireFailure::DuplicateVersion
+        | ForgetProofWireFailure::DuplicateTargetCommit
+        | ForgetProofWireFailure::DuplicateMode
+        | ForgetProofWireFailure::DuplicateShredCommit
+        | ForgetProofWireFailure::DuplicateAbsencePath
+        | ForgetProofWireFailure::DuplicateRootBound
+        | ForgetProofWireFailure::DuplicateCognitionCertCommit
+        | ForgetProofWireFailure::MissingVersion
+        | ForgetProofWireFailure::MissingTargetCommit
+        | ForgetProofWireFailure::MissingMode
+        | ForgetProofWireFailure::MissingShredCommit
+        | ForgetProofWireFailure::MissingAbsencePath
+        | ForgetProofWireFailure::MissingRootBound
+        | ForgetProofWireFailure::MissingCognitionCertCommit => MnemeError::SchemaDrift,
+    }
+}
+
+fn forget_proof_encode_unsupported_version_error(got: u16) -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::EncodeUnsupportedVersion { got })
+}
+
+fn forget_proof_decode_unsupported_version_error(got: u16) -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DecodeUnsupportedVersion { got })
+}
+
+fn forget_proof_unknown_field_error(field: u16) -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::UnknownField { field })
+}
+
+fn duplicate_forget_proof_version_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateVersion)
+}
+
+fn duplicate_forget_proof_target_commit_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateTargetCommit)
+}
+
+fn duplicate_forget_proof_mode_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateMode)
+}
+
+fn duplicate_forget_proof_shred_commit_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateShredCommit)
+}
+
+fn duplicate_forget_proof_absence_path_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateAbsencePath)
+}
+
+fn duplicate_forget_proof_root_bound_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateRootBound)
+}
+
+fn duplicate_forget_proof_cognition_cert_commit_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::DuplicateCognitionCertCommit)
+}
+
+fn missing_forget_proof_version_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingVersion)
+}
+
+fn missing_forget_proof_target_commit_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingTargetCommit)
+}
+
+fn missing_forget_proof_mode_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingMode)
+}
+
+fn missing_forget_proof_shred_commit_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingShredCommit)
+}
+
+fn missing_forget_proof_absence_path_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingAbsencePath)
+}
+
+fn missing_forget_proof_root_bound_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingRootBound)
+}
+
+fn missing_forget_proof_cognition_cert_commit_error() -> MnemeError {
+    forget_proof_wire_failure_to_mneme(ForgetProofWireFailure::MissingCognitionCertCommit)
+}
+
+fn accountability_parse_failure_to_mneme(failure: AccountabilityParseFailure) -> MnemeError {
+    match failure {
+        AccountabilityParseFailure::FieldKey
+        | AccountabilityParseFailure::U16Value
+        | AccountabilityParseFailure::Fixed14
+        | AccountabilityParseFailure::Fixed32
+        | AccountabilityParseFailure::Bytes
+        | AccountabilityParseFailure::ModeTag
+        | AccountabilityParseFailure::UnknownModeTag
+        | AccountabilityParseFailure::AbsencePathArray => MnemeError::SchemaDrift,
+    }
+}
+
+fn field_key_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::FieldKey)
+}
+
+fn u16_value_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::U16Value)
+}
+
+fn fixed14_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::Fixed14)
+}
+
+fn fixed32_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::Fixed32)
+}
+
+fn bytes_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::Bytes)
+}
+
+fn mode_tag_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::ModeTag)
+}
+
+fn unknown_mode_tag_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::UnknownModeTag)
+}
+
+fn absence_path_array_error() -> MnemeError {
+    accountability_parse_failure_to_mneme(AccountabilityParseFailure::AbsencePathArray)
+}
+
 /// Canonical dCBOR wire for [`ActionReceipt`]. Version-gated: refuses to emit
 /// anything but the current [`ACTION_RECEIPT_VERSION`].
 ///
@@ -153,9 +446,9 @@ impl ForgetProof {
 /// 8 → signature (opaque bytes).
 pub fn encode_action_receipt(receipt: &ActionReceipt) -> Result<Vec<u8>, MnemeError> {
     if receipt.version != ACTION_RECEIPT_VERSION {
-        return Err(MnemeError::UnsupportedVersion {
-            got: receipt.version,
-        });
+        return Err(action_receipt_encode_unsupported_version_error(
+            receipt.version,
+        ));
     }
 
     let mut enc = Encoder::new();
@@ -211,70 +504,72 @@ pub fn decode_action_receipt(bytes: &[u8]) -> Result<ActionReceipt, MnemeError> 
         match field {
             1 => {
                 if version.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_version_error());
                 }
                 version = Some(parse_u16(&value)?);
             }
             2 => {
                 if action_commit.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_action_commit_error());
                 }
                 action_commit = Some(parse_fixed32(&value)?);
             }
             3 => {
                 if capability_commit.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_capability_commit_error());
                 }
                 capability_commit = Some(parse_fixed32(&value)?);
             }
             4 => {
                 if sanctioner.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_sanctioner_error());
                 }
                 sanctioner = Some(parse_fixed32(&value)?);
             }
             5 => {
                 if root_bound.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_root_bound_error());
                 }
                 root_bound = Some(parse_fixed32(&value)?);
             }
             6 => {
                 if hlc.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_hlc_error());
                 }
                 hlc = Some(parse_fixed14(&value)?);
             }
             7 => {
                 if cognition_cert_commit.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_cognition_cert_commit_error());
                 }
                 cognition_cert_commit = Some(parse_optional_commit(&value)?);
             }
             8 => {
                 if signature.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_action_receipt_signature_error());
                 }
                 signature = Some(parse_bytes(&value)?);
             }
-            _ => return Err(MnemeError::UnknownField { field }),
+            _ => return Err(action_receipt_unknown_field_error(field)),
         }
     }
 
-    let version = version.ok_or(MnemeError::SchemaDrift)?;
+    let version = version.ok_or_else(missing_action_receipt_version_error)?;
     if version != ACTION_RECEIPT_VERSION {
-        return Err(MnemeError::UnsupportedVersion { got: version });
+        return Err(action_receipt_decode_unsupported_version_error(version));
     }
 
     Ok(ActionReceipt {
         version,
-        action_commit: action_commit.ok_or(MnemeError::SchemaDrift)?,
-        capability_commit: capability_commit.ok_or(MnemeError::SchemaDrift)?,
-        sanctioner: sanctioner.ok_or(MnemeError::SchemaDrift)?,
-        root_bound: root_bound.ok_or(MnemeError::SchemaDrift)?,
-        hlc: hlc.ok_or(MnemeError::SchemaDrift)?,
-        cognition_cert_commit: cognition_cert_commit.ok_or(MnemeError::SchemaDrift)?,
-        signature: signature.ok_or(MnemeError::SchemaDrift)?,
+        action_commit: action_commit.ok_or_else(missing_action_receipt_action_commit_error)?,
+        capability_commit: capability_commit
+            .ok_or_else(missing_action_receipt_capability_commit_error)?,
+        sanctioner: sanctioner.ok_or_else(missing_action_receipt_sanctioner_error)?,
+        root_bound: root_bound.ok_or_else(missing_action_receipt_root_bound_error)?,
+        hlc: hlc.ok_or_else(missing_action_receipt_hlc_error)?,
+        cognition_cert_commit: cognition_cert_commit
+            .ok_or_else(missing_action_receipt_cognition_cert_commit_error)?,
+        signature: signature.ok_or_else(missing_action_receipt_signature_error)?,
     })
 }
 
@@ -288,7 +583,7 @@ pub fn decode_action_receipt(bytes: &[u8]) -> Result<ActionReceipt, MnemeError> 
 /// absent).
 pub fn encode_forget_proof(proof: &ForgetProof) -> Result<Vec<u8>, MnemeError> {
     if proof.version != FORGET_PROOF_VERSION {
-        return Err(MnemeError::UnsupportedVersion { got: proof.version });
+        return Err(forget_proof_encode_unsupported_version_error(proof.version));
     }
 
     let mut enc = Encoder::new();
@@ -343,63 +638,64 @@ pub fn decode_forget_proof(bytes: &[u8]) -> Result<ForgetProof, MnemeError> {
         match field {
             1 => {
                 if version.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_version_error());
                 }
                 version = Some(parse_u16(&value)?);
             }
             2 => {
                 if target_commit.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_target_commit_error());
                 }
                 target_commit = Some(parse_fixed32(&value)?);
             }
             3 => {
                 if mode.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_mode_error());
                 }
                 mode = Some(parse_mode(&value)?);
             }
             4 => {
                 if shred_commit.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_shred_commit_error());
                 }
                 shred_commit = Some(parse_fixed32(&value)?);
             }
             5 => {
                 if absence_path.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_absence_path_error());
                 }
                 absence_path = Some(parse_absence_path(&value)?);
             }
             6 => {
                 if root_bound.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_root_bound_error());
                 }
                 root_bound = Some(parse_fixed32(&value)?);
             }
             7 => {
                 if cognition_cert_commit.is_some() {
-                    return Err(MnemeError::SchemaDrift);
+                    return Err(duplicate_forget_proof_cognition_cert_commit_error());
                 }
                 cognition_cert_commit = Some(parse_optional_commit(&value)?);
             }
-            _ => return Err(MnemeError::UnknownField { field }),
+            _ => return Err(forget_proof_unknown_field_error(field)),
         }
     }
 
-    let version = version.ok_or(MnemeError::SchemaDrift)?;
+    let version = version.ok_or_else(missing_forget_proof_version_error)?;
     if version != FORGET_PROOF_VERSION {
-        return Err(MnemeError::UnsupportedVersion { got: version });
+        return Err(forget_proof_decode_unsupported_version_error(version));
     }
 
     Ok(ForgetProof {
         version,
-        target_commit: target_commit.ok_or(MnemeError::SchemaDrift)?,
-        mode: mode.ok_or(MnemeError::SchemaDrift)?,
-        shred_commit: shred_commit.ok_or(MnemeError::SchemaDrift)?,
-        absence_path: absence_path.ok_or(MnemeError::SchemaDrift)?,
-        root_bound: root_bound.ok_or(MnemeError::SchemaDrift)?,
-        cognition_cert_commit: cognition_cert_commit.ok_or(MnemeError::SchemaDrift)?,
+        target_commit: target_commit.ok_or_else(missing_forget_proof_target_commit_error)?,
+        mode: mode.ok_or_else(missing_forget_proof_mode_error)?,
+        shred_commit: shred_commit.ok_or_else(missing_forget_proof_shred_commit_error)?,
+        absence_path: absence_path.ok_or_else(missing_forget_proof_absence_path_error)?,
+        root_bound: root_bound.ok_or_else(missing_forget_proof_root_bound_error)?,
+        cognition_cert_commit: cognition_cert_commit
+            .ok_or_else(missing_forget_proof_cognition_cert_commit_error)?,
     })
 }
 
@@ -407,14 +703,14 @@ fn parse_field_key(value: &CborValue) -> Result<u16, MnemeError> {
     value
         .as_u64()
         .and_then(|v| u16::try_from(v).ok())
-        .ok_or(MnemeError::SchemaDrift)
+        .ok_or_else(field_key_error)
 }
 
 fn parse_u16(value: &CborValue) -> Result<u16, MnemeError> {
     value
         .as_u64()
         .and_then(|v| u16::try_from(v).ok())
-        .ok_or(MnemeError::SchemaDrift)
+        .ok_or_else(u16_value_error)
 }
 
 fn parse_fixed14(value: &CborValue) -> Result<[u8; 14], MnemeError> {
@@ -424,7 +720,7 @@ fn parse_fixed14(value: &CborValue) -> Result<[u8; 14], MnemeError> {
             out.copy_from_slice(bytes);
             Ok(out)
         }
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(fixed14_error()),
     }
 }
 
@@ -435,7 +731,7 @@ fn parse_fixed32(value: &CborValue) -> Result<[u8; 32], MnemeError> {
             out.copy_from_slice(bytes);
             Ok(out)
         }
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(fixed32_error()),
     }
 }
 
@@ -447,26 +743,23 @@ fn parse_optional_commit(value: &CborValue) -> Result<Option<[u8; 32]>, MnemeErr
 }
 
 fn parse_bytes(value: &CborValue) -> Result<Vec<u8>, MnemeError> {
-    value
-        .as_bytes()
-        .map(|b| b.to_vec())
-        .ok_or(MnemeError::SchemaDrift)
+    value.as_bytes().map(|b| b.to_vec()).ok_or_else(bytes_error)
 }
 
 fn parse_mode(value: &CborValue) -> Result<ForgetMode, MnemeError> {
     let tag = value
         .as_u64()
         .and_then(|v| u8::try_from(v).ok())
-        .ok_or(MnemeError::SchemaDrift)?;
+        .ok_or_else(mode_tag_error)?;
     match tag {
         0 => Ok(ForgetMode::Shred),
         1 => Ok(ForgetMode::Redact),
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(unknown_mode_tag_error()),
     }
 }
 
 fn parse_absence_path(value: &CborValue) -> Result<Vec<[u8; 32]>, MnemeError> {
-    let arr = value.as_array().ok_or(MnemeError::SchemaDrift)?;
+    let arr = value.as_array().ok_or_else(absence_path_array_error)?;
     let mut out = Vec::with_capacity(arr.len());
     for node in arr {
         out.push(parse_fixed32(node)?);
@@ -478,6 +771,277 @@ fn parse_absence_path(value: &CborValue) -> Result<Vec<[u8; 32]>, MnemeError> {
 mod tests {
     use super::*;
     use hex;
+
+    fn source_between_markers<'a>(
+        source: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+        context: &str,
+    ) -> &'a str {
+        let (_, after_start) = source
+            .split_once(start_marker)
+            .unwrap_or_else(|| panic!("{context} should contain start marker `{start_marker}`"));
+        let (section, _) = after_start
+            .split_once(end_marker)
+            .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
+        section
+    }
+
+    #[test]
+    fn action_receipt_wire_errors_are_classified_not_directly_returned() {
+        let source = include_str!("accountability.rs");
+        let sections = [
+            source_between_markers(
+                source,
+                "pub fn encode_action_receipt",
+                "/// Parse a canonical [`ActionReceipt`] wire",
+                "ActionReceipt encode",
+            ),
+            source_between_markers(
+                source,
+                "pub fn decode_action_receipt",
+                "/// Canonical dCBOR wire for [`ForgetProof`]",
+                "ActionReceipt decode",
+            ),
+        ];
+
+        for section in sections {
+            for forbidden in [
+                "return Err(MnemeError::SchemaDrift)",
+                "ok_or(MnemeError::SchemaDrift)",
+                "return Err(MnemeError::UnknownField",
+                "return Err(MnemeError::UnsupportedVersion",
+            ] {
+                assert!(
+                    !section.contains(forbidden),
+                    "ActionReceipt wire paths should route `{forbidden}` through named classifiers"
+                );
+            }
+        }
+
+        for required in [
+            "enum ActionReceiptWireFailure",
+            "fn action_receipt_wire_failure_to_mneme(",
+            "fn action_receipt_encode_unsupported_version_error(",
+            "fn duplicate_action_receipt_version_error(",
+            "fn action_receipt_unknown_field_error(",
+            "fn missing_action_receipt_version_error(",
+            "fn action_receipt_decode_unsupported_version_error(",
+            "fn missing_action_receipt_signature_error(",
+            "ActionReceiptWireFailure::EncodeUnsupportedVersion",
+            "ActionReceiptWireFailure::DuplicateVersion",
+            "ActionReceiptWireFailure::UnknownField",
+            "ActionReceiptWireFailure::MissingVersion",
+            "ActionReceiptWireFailure::DecodeUnsupportedVersion",
+            "ActionReceiptWireFailure::MissingSignature",
+        ] {
+            assert!(
+                source.contains(required),
+                "ActionReceipt wire classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn action_receipt_wire_classifier_preserves_public_errors() {
+        assert_eq!(
+            action_receipt_encode_unsupported_version_error(9),
+            MnemeError::UnsupportedVersion { got: 9 }
+        );
+        assert_eq!(
+            action_receipt_decode_unsupported_version_error(10),
+            MnemeError::UnsupportedVersion { got: 10 }
+        );
+        assert_eq!(
+            action_receipt_unknown_field_error(99),
+            MnemeError::UnknownField { field: 99 }
+        );
+
+        for failure in [
+            ActionReceiptWireFailure::DuplicateVersion,
+            ActionReceiptWireFailure::DuplicateActionCommit,
+            ActionReceiptWireFailure::DuplicateCapabilityCommit,
+            ActionReceiptWireFailure::DuplicateSanctioner,
+            ActionReceiptWireFailure::DuplicateRootBound,
+            ActionReceiptWireFailure::DuplicateHlc,
+            ActionReceiptWireFailure::DuplicateCognitionCertCommit,
+            ActionReceiptWireFailure::DuplicateSignature,
+            ActionReceiptWireFailure::MissingVersion,
+            ActionReceiptWireFailure::MissingActionCommit,
+            ActionReceiptWireFailure::MissingCapabilityCommit,
+            ActionReceiptWireFailure::MissingSanctioner,
+            ActionReceiptWireFailure::MissingRootBound,
+            ActionReceiptWireFailure::MissingHlc,
+            ActionReceiptWireFailure::MissingCognitionCertCommit,
+            ActionReceiptWireFailure::MissingSignature,
+        ] {
+            assert_eq!(
+                action_receipt_wire_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
+
+    #[test]
+    fn forget_proof_wire_errors_are_classified_not_directly_returned() {
+        let source = include_str!("accountability.rs");
+        let sections = [
+            source_between_markers(
+                source,
+                "pub fn encode_forget_proof",
+                "/// Parse a canonical [`ForgetProof`] wire",
+                "ForgetProof encode",
+            ),
+            source_between_markers(
+                source,
+                "pub fn decode_forget_proof",
+                "fn parse_field_key",
+                "ForgetProof decode",
+            ),
+        ];
+
+        for section in sections {
+            for forbidden in [
+                "return Err(MnemeError::SchemaDrift)",
+                "ok_or(MnemeError::SchemaDrift)",
+                "return Err(MnemeError::UnknownField",
+                "return Err(MnemeError::UnsupportedVersion",
+            ] {
+                assert!(
+                    !section.contains(forbidden),
+                    "ForgetProof wire paths should route `{forbidden}` through named classifiers"
+                );
+            }
+        }
+
+        for required in [
+            "enum ForgetProofWireFailure",
+            "fn forget_proof_wire_failure_to_mneme(",
+            "fn forget_proof_encode_unsupported_version_error(",
+            "fn duplicate_forget_proof_version_error(",
+            "fn forget_proof_unknown_field_error(",
+            "fn missing_forget_proof_version_error(",
+            "fn forget_proof_decode_unsupported_version_error(",
+            "fn missing_forget_proof_cognition_cert_commit_error(",
+            "ForgetProofWireFailure::EncodeUnsupportedVersion",
+            "ForgetProofWireFailure::DuplicateVersion",
+            "ForgetProofWireFailure::UnknownField",
+            "ForgetProofWireFailure::MissingVersion",
+            "ForgetProofWireFailure::DecodeUnsupportedVersion",
+            "ForgetProofWireFailure::MissingCognitionCertCommit",
+        ] {
+            assert!(
+                source.contains(required),
+                "ForgetProof wire classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn forget_proof_wire_classifier_preserves_public_errors() {
+        assert_eq!(
+            forget_proof_encode_unsupported_version_error(11),
+            MnemeError::UnsupportedVersion { got: 11 }
+        );
+        assert_eq!(
+            forget_proof_decode_unsupported_version_error(12),
+            MnemeError::UnsupportedVersion { got: 12 }
+        );
+        assert_eq!(
+            forget_proof_unknown_field_error(98),
+            MnemeError::UnknownField { field: 98 }
+        );
+
+        for failure in [
+            ForgetProofWireFailure::DuplicateVersion,
+            ForgetProofWireFailure::DuplicateTargetCommit,
+            ForgetProofWireFailure::DuplicateMode,
+            ForgetProofWireFailure::DuplicateShredCommit,
+            ForgetProofWireFailure::DuplicateAbsencePath,
+            ForgetProofWireFailure::DuplicateRootBound,
+            ForgetProofWireFailure::DuplicateCognitionCertCommit,
+            ForgetProofWireFailure::MissingVersion,
+            ForgetProofWireFailure::MissingTargetCommit,
+            ForgetProofWireFailure::MissingMode,
+            ForgetProofWireFailure::MissingShredCommit,
+            ForgetProofWireFailure::MissingAbsencePath,
+            ForgetProofWireFailure::MissingRootBound,
+            ForgetProofWireFailure::MissingCognitionCertCommit,
+        ] {
+            assert_eq!(
+                forget_proof_wire_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
+
+    #[test]
+    fn accountability_parse_helpers_are_classified_not_schema_drift_collapsed() {
+        let source = include_str!("accountability.rs");
+        let section = source_between_markers(
+            source,
+            "fn parse_field_key",
+            "#[cfg(test)]",
+            "accountability parse helpers",
+        );
+
+        for forbidden in [
+            "ok_or(MnemeError::SchemaDrift)",
+            "Err(MnemeError::SchemaDrift)",
+            "return Err(MnemeError::SchemaDrift)",
+            "map_err(|_| MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "accountability parse helpers should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum AccountabilityParseFailure",
+            "fn accountability_parse_failure_to_mneme(",
+            "fn field_key_error(",
+            "fn u16_value_error(",
+            "fn fixed14_error(",
+            "fn fixed32_error(",
+            "fn bytes_error(",
+            "fn mode_tag_error(",
+            "fn unknown_mode_tag_error(",
+            "fn absence_path_array_error(",
+            "AccountabilityParseFailure::FieldKey",
+            "AccountabilityParseFailure::U16Value",
+            "AccountabilityParseFailure::Fixed14",
+            "AccountabilityParseFailure::Fixed32",
+            "AccountabilityParseFailure::Bytes",
+            "AccountabilityParseFailure::ModeTag",
+            "AccountabilityParseFailure::UnknownModeTag",
+            "AccountabilityParseFailure::AbsencePathArray",
+        ] {
+            assert!(
+                source.contains(required),
+                "accountability parse helper classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn accountability_parse_failure_classifier_preserves_schema_drift() {
+        for failure in [
+            AccountabilityParseFailure::FieldKey,
+            AccountabilityParseFailure::U16Value,
+            AccountabilityParseFailure::Fixed14,
+            AccountabilityParseFailure::Fixed32,
+            AccountabilityParseFailure::Bytes,
+            AccountabilityParseFailure::ModeTag,
+            AccountabilityParseFailure::UnknownModeTag,
+            AccountabilityParseFailure::AbsencePathArray,
+        ] {
+            assert_eq!(
+                accountability_parse_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
 
     #[test]
     fn phase_iii_wire_versions_are_provisionally_three() {

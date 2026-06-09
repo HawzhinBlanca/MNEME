@@ -31,6 +31,75 @@ const F_MERGE_HEAD: u64 = 5;
 
 const FED_MERGE_HEAD_DOMAIN: &[u8] = b"MNEME-FED-MERGE-HEAD-v1";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FederationCertFailure {
+    PhaseGateClosed { version: u16 },
+    UnsupportedWireVersion { version: u16 },
+    UnknownWireField { field: u16 },
+    MalformedWire,
+    MergeHeadDigestMismatch,
+    UnexpectedDraftStatus,
+    EmbeddedCognitionCertEmpty,
+    EmbeddedCognitionCertOversized,
+    IssuerOrgAllZero,
+    MergeHeadDigestAllZero,
+    MissingVersion,
+    MissingStatus,
+    MissingIssuerOrg,
+    MissingCognitionCertBytes,
+    MissingMergeHeadDigest,
+    FieldKeyType,
+    U16OutOfRange,
+    UnsignedValueType,
+    TextValueType,
+    BytesValueType,
+    Fixed32Length,
+}
+
+fn federation_cert_failure_to_mneme(failure: FederationCertFailure) -> MnemeError {
+    match failure {
+        FederationCertFailure::PhaseGateClosed { version }
+        | FederationCertFailure::UnsupportedWireVersion { version } => {
+            MnemeError::UnsupportedVersion { got: version }
+        }
+        FederationCertFailure::UnknownWireField { field } => MnemeError::UnknownField { field },
+        FederationCertFailure::MalformedWire
+        | FederationCertFailure::MergeHeadDigestMismatch
+        | FederationCertFailure::UnexpectedDraftStatus
+        | FederationCertFailure::EmbeddedCognitionCertEmpty
+        | FederationCertFailure::EmbeddedCognitionCertOversized
+        | FederationCertFailure::IssuerOrgAllZero
+        | FederationCertFailure::MergeHeadDigestAllZero
+        | FederationCertFailure::MissingVersion
+        | FederationCertFailure::MissingStatus
+        | FederationCertFailure::MissingIssuerOrg
+        | FederationCertFailure::MissingCognitionCertBytes
+        | FederationCertFailure::MissingMergeHeadDigest
+        | FederationCertFailure::FieldKeyType
+        | FederationCertFailure::U16OutOfRange
+        | FederationCertFailure::UnsignedValueType
+        | FederationCertFailure::TextValueType
+        | FederationCertFailure::BytesValueType
+        | FederationCertFailure::Fixed32Length => MnemeError::CertificateInvalid,
+    }
+}
+
+fn federation_cert_gate_closed_error(version: u16) -> MnemeError {
+    federation_cert_failure_to_mneme(FederationCertFailure::PhaseGateClosed { version })
+}
+
+fn unsupported_federation_cert_wire_version_error(version: u16) -> MnemeError {
+    federation_cert_failure_to_mneme(FederationCertFailure::UnsupportedWireVersion { version })
+}
+
+fn unknown_federation_cert_field_error(field: u16) -> MnemeError {
+    federation_cert_failure_to_mneme(FederationCertFailure::UnknownWireField { field })
+}
+
+fn federation_cert_invalid_error(failure: FederationCertFailure) -> MnemeError {
+    federation_cert_failure_to_mneme(failure)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FederationMergeHeadSketch {
     pub key_index_root: [u8; 32],
@@ -64,7 +133,8 @@ pub struct FederationCognitionCertWire {
 pub fn decode_federation_cognition_cert_wire(
     bytes: &[u8],
 ) -> Result<FederationCognitionCertWire, MnemeError> {
-    from_bytes_strict(bytes).map_err(|_| MnemeError::CertificateInvalid)
+    from_bytes_strict(bytes)
+        .map_err(|_| federation_cert_invalid_error(FederationCertFailure::MalformedWire))
 }
 
 pub fn verify_federation_cognition_cert_wire(bytes: &[u8]) -> Result<(), MnemeError> {
@@ -78,11 +148,13 @@ pub fn verify_federation_cognition_cert_wire_with_merge_head(
     let wire = verify_federation_cognition_cert_structural(bytes)?;
     if let Some(sketch) = expected_merge_head {
         if wire.merge_head_digest != digest_federation_merge_head_sketch(sketch) {
-            return Err(MnemeError::CertificateInvalid);
+            return Err(federation_cert_invalid_error(
+                FederationCertFailure::MergeHeadDigestMismatch,
+            ));
         }
     }
     if !PHASE_IV_FEDERATION_GATE_OPEN {
-        return Err(MnemeError::UnsupportedVersion { got: wire.version });
+        return Err(federation_cert_gate_closed_error(wire.version));
     }
     Ok(())
 }
@@ -92,21 +164,32 @@ fn verify_federation_cognition_cert_structural(
 ) -> Result<FederationCognitionCertWire, MnemeError> {
     let wire = decode_federation_cognition_cert_wire(bytes)?;
     if wire.version != FEDERATION_COGNITION_CERT_VERSION {
-        return Err(MnemeError::UnsupportedVersion { got: wire.version });
+        return Err(unsupported_federation_cert_wire_version_error(wire.version));
     }
     if wire.status != FEDERATION_CERT_DRAFT_STATUS {
-        return Err(MnemeError::CertificateInvalid);
+        return Err(federation_cert_invalid_error(
+            FederationCertFailure::UnexpectedDraftStatus,
+        ));
     }
-    if wire.cognition_cert_bytes.is_empty()
-        || wire.cognition_cert_bytes.len() > FEDERATION_MAX_COGNITION_CERT_BYTES
-    {
-        return Err(MnemeError::CertificateInvalid);
+    if wire.cognition_cert_bytes.is_empty() {
+        return Err(federation_cert_invalid_error(
+            FederationCertFailure::EmbeddedCognitionCertEmpty,
+        ));
+    }
+    if wire.cognition_cert_bytes.len() > FEDERATION_MAX_COGNITION_CERT_BYTES {
+        return Err(federation_cert_invalid_error(
+            FederationCertFailure::EmbeddedCognitionCertOversized,
+        ));
     }
     if wire.issuer_org_id == [0u8; 32] {
-        return Err(MnemeError::CertificateInvalid);
+        return Err(federation_cert_invalid_error(
+            FederationCertFailure::IssuerOrgAllZero,
+        ));
     }
     if wire.merge_head_digest == [0u8; 32] {
-        return Err(MnemeError::CertificateInvalid);
+        return Err(federation_cert_invalid_error(
+            FederationCertFailure::MergeHeadDigestAllZero,
+        ));
     }
     Ok(wire)
 }
@@ -156,56 +239,200 @@ impl DcborDecode for FederationCognitionCertWire {
                 F_MERGE_HEAD => merge_head_digest = Some(parse_fixed32(&value)?),
                 _ => {
                     let field_id = u16::try_from(field).unwrap_or(u16::MAX);
-                    return Err(MnemeError::UnknownField { field: field_id });
+                    return Err(unknown_federation_cert_field_error(field_id));
                 }
             }
         }
         Ok(Self {
-            version: version.ok_or(MnemeError::CertificateInvalid)?,
-            status: status.ok_or(MnemeError::CertificateInvalid)?,
-            issuer_org_id: issuer_org_id.ok_or(MnemeError::CertificateInvalid)?,
-            cognition_cert_bytes: cognition_cert_bytes.ok_or(MnemeError::CertificateInvalid)?,
-            merge_head_digest: merge_head_digest.ok_or(MnemeError::CertificateInvalid)?,
+            version: version.ok_or_else(|| {
+                federation_cert_invalid_error(FederationCertFailure::MissingVersion)
+            })?,
+            status: status.ok_or_else(|| {
+                federation_cert_invalid_error(FederationCertFailure::MissingStatus)
+            })?,
+            issuer_org_id: issuer_org_id.ok_or_else(|| {
+                federation_cert_invalid_error(FederationCertFailure::MissingIssuerOrg)
+            })?,
+            cognition_cert_bytes: cognition_cert_bytes.ok_or_else(|| {
+                federation_cert_invalid_error(FederationCertFailure::MissingCognitionCertBytes)
+            })?,
+            merge_head_digest: merge_head_digest.ok_or_else(|| {
+                federation_cert_invalid_error(FederationCertFailure::MissingMergeHeadDigest)
+            })?,
         })
     }
 }
 
 fn parse_u64_field_key(key: &CborValue) -> Result<u64, MnemeError> {
-    key.as_u64().ok_or(MnemeError::CertificateInvalid)
+    key.as_u64()
+        .ok_or_else(|| federation_cert_invalid_error(FederationCertFailure::FieldKeyType))
 }
 
 fn parse_u16(value: &CborValue) -> Result<u16, MnemeError> {
     let n = parse_u64(value)?;
-    u16::try_from(n).map_err(|_| MnemeError::CertificateInvalid)
+    u16::try_from(n)
+        .map_err(|_| federation_cert_invalid_error(FederationCertFailure::U16OutOfRange))
 }
 
 fn parse_u64(value: &CborValue) -> Result<u64, MnemeError> {
-    value.as_u64().ok_or(MnemeError::CertificateInvalid)
+    value
+        .as_u64()
+        .ok_or_else(|| federation_cert_invalid_error(FederationCertFailure::UnsignedValueType))
 }
 
 fn parse_text(value: &CborValue) -> Result<String, MnemeError> {
     value
         .as_text()
         .map(str::to_owned)
-        .ok_or(MnemeError::CertificateInvalid)
+        .ok_or_else(|| federation_cert_invalid_error(FederationCertFailure::TextValueType))
 }
 
 fn parse_bytes(value: &CborValue) -> Result<Vec<u8>, MnemeError> {
     value
         .as_bytes()
         .map(|b| b.to_vec())
-        .ok_or(MnemeError::CertificateInvalid)
+        .ok_or_else(|| federation_cert_invalid_error(FederationCertFailure::BytesValueType))
 }
 
 fn parse_fixed32(value: &CborValue) -> Result<[u8; 32], MnemeError> {
     let b = parse_bytes(value)?;
-    b.try_into().map_err(|_| MnemeError::CertificateInvalid)
+    b.try_into()
+        .map_err(|_| federation_cert_invalid_error(FederationCertFailure::Fixed32Length))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use mneme_core::to_bytes_canonical;
+
+    fn federation_cert_production_source() -> &'static str {
+        include_str!("federation_cert.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("federation_cert.rs should keep tests after production code")
+    }
+
+    #[test]
+    fn federation_cert_failures_are_classified_not_error_collapsed() {
+        let production = federation_cert_production_source();
+
+        for forbidden in [
+            "return Err(MnemeError::CertificateInvalid",
+            "Err(MnemeError::CertificateInvalid",
+            ".ok_or(MnemeError::CertificateInvalid",
+            "map_err(|_| MnemeError::CertificateInvalid",
+            "return Err(MnemeError::UnsupportedVersion",
+            "Err(MnemeError::UnsupportedVersion",
+            "return Err(MnemeError::UnknownField",
+            "Err(MnemeError::UnknownField",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "federation cert production code still collapses directly through {forbidden}"
+            );
+        }
+
+        for required in [
+            "enum FederationCertFailure",
+            "fn federation_cert_failure_to_mneme(",
+            "fn federation_cert_gate_closed_error(",
+            "fn unsupported_federation_cert_wire_version_error(",
+            "fn unknown_federation_cert_field_error(",
+            "fn federation_cert_invalid_error(",
+            "FederationCertFailure::PhaseGateClosed",
+            "FederationCertFailure::UnsupportedWireVersion",
+            "FederationCertFailure::UnknownWireField",
+            "FederationCertFailure::MalformedWire",
+            "FederationCertFailure::MergeHeadDigestMismatch",
+            "FederationCertFailure::UnexpectedDraftStatus",
+            "FederationCertFailure::EmbeddedCognitionCertEmpty",
+            "FederationCertFailure::EmbeddedCognitionCertOversized",
+            "FederationCertFailure::IssuerOrgAllZero",
+            "FederationCertFailure::MergeHeadDigestAllZero",
+            "FederationCertFailure::MissingVersion",
+            "FederationCertFailure::MissingStatus",
+            "FederationCertFailure::MissingIssuerOrg",
+            "FederationCertFailure::MissingCognitionCertBytes",
+            "FederationCertFailure::MissingMergeHeadDigest",
+            "FederationCertFailure::FieldKeyType",
+            "FederationCertFailure::U16OutOfRange",
+            "FederationCertFailure::UnsignedValueType",
+            "FederationCertFailure::TextValueType",
+            "FederationCertFailure::BytesValueType",
+            "FederationCertFailure::Fixed32Length",
+        ] {
+            assert!(
+                production.contains(required),
+                "federation cert production code is missing typed classifier marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn federation_cert_failure_classifier_preserves_public_errors() {
+        assert_eq!(
+            federation_cert_failure_to_mneme(FederationCertFailure::PhaseGateClosed {
+                version: FEDERATION_COGNITION_CERT_VERSION
+            }),
+            MnemeError::UnsupportedVersion {
+                got: FEDERATION_COGNITION_CERT_VERSION
+            }
+        );
+        assert_eq!(
+            federation_cert_gate_closed_error(FEDERATION_COGNITION_CERT_VERSION),
+            MnemeError::UnsupportedVersion {
+                got: FEDERATION_COGNITION_CERT_VERSION
+            }
+        );
+        assert_eq!(
+            federation_cert_failure_to_mneme(FederationCertFailure::UnsupportedWireVersion {
+                version: 99
+            }),
+            MnemeError::UnsupportedVersion { got: 99 }
+        );
+        assert_eq!(
+            unsupported_federation_cert_wire_version_error(99),
+            MnemeError::UnsupportedVersion { got: 99 }
+        );
+        assert_eq!(
+            federation_cert_failure_to_mneme(FederationCertFailure::UnknownWireField { field: 42 }),
+            MnemeError::UnknownField { field: 42 }
+        );
+        assert_eq!(
+            unknown_federation_cert_field_error(42),
+            MnemeError::UnknownField { field: 42 }
+        );
+
+        for failure in [
+            FederationCertFailure::MalformedWire,
+            FederationCertFailure::MergeHeadDigestMismatch,
+            FederationCertFailure::UnexpectedDraftStatus,
+            FederationCertFailure::EmbeddedCognitionCertEmpty,
+            FederationCertFailure::EmbeddedCognitionCertOversized,
+            FederationCertFailure::IssuerOrgAllZero,
+            FederationCertFailure::MergeHeadDigestAllZero,
+            FederationCertFailure::MissingVersion,
+            FederationCertFailure::MissingStatus,
+            FederationCertFailure::MissingIssuerOrg,
+            FederationCertFailure::MissingCognitionCertBytes,
+            FederationCertFailure::MissingMergeHeadDigest,
+            FederationCertFailure::FieldKeyType,
+            FederationCertFailure::U16OutOfRange,
+            FederationCertFailure::UnsignedValueType,
+            FederationCertFailure::TextValueType,
+            FederationCertFailure::BytesValueType,
+            FederationCertFailure::Fixed32Length,
+        ] {
+            assert_eq!(
+                federation_cert_failure_to_mneme(failure),
+                MnemeError::CertificateInvalid
+            );
+            assert_eq!(
+                federation_cert_invalid_error(failure),
+                MnemeError::CertificateInvalid
+            );
+        }
+    }
 
     #[test]
     fn roundtrip_wire_decode() {

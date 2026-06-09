@@ -18,7 +18,7 @@ MNEME makes two limits explicit everywhere this project speaks to users:
 
 1. **Authenticated ≠ true.** A correctly signed entry from an authorized writer verifies even when its *content* is false. MNEME proves integrity, provenance, and authorization — not truth.
 
-2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. It does **not** prove the returned items are the true nearest neighbors.
+2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven, and returned items are not proven to be the true nearest neighbors.
 
 These limits appear in `MnemeError` messages (e.g. `ProcedureMismatch`, `BelowTierPolicy`, `ZkProofInvalid`), MCP tool descriptions (`mneme-mcp/src/honesty.rs`), and verifier exports (`HONESTY_PROCEDURE`, `BINDING_HONESTY`).
 

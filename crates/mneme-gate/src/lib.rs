@@ -18,6 +18,39 @@ pub const PHASE_II_GATE_OPEN: bool = false;
 pub const CONTEXT_GATE_STATUS: &str =
     "context gate attestation verifier stub - gate closed until remote attestation ships";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GateFailure {
+    ConsumptionProfile,
+    StrictConsumptionProfile,
+    OutputModelIdentity,
+    StrictOutputModelIdentity,
+}
+
+fn gate_failure_to_mneme(failure: GateFailure) -> MnemeError {
+    match failure {
+        GateFailure::ConsumptionProfile
+        | GateFailure::StrictConsumptionProfile
+        | GateFailure::OutputModelIdentity
+        | GateFailure::StrictOutputModelIdentity => MnemeError::SchemaDrift,
+    }
+}
+
+fn consumption_profile_mismatch_error() -> MnemeError {
+    gate_failure_to_mneme(GateFailure::ConsumptionProfile)
+}
+
+fn strict_consumption_profile_mismatch_error() -> MnemeError {
+    gate_failure_to_mneme(GateFailure::StrictConsumptionProfile)
+}
+
+fn output_model_identity_mismatch_error() -> MnemeError {
+    gate_failure_to_mneme(GateFailure::OutputModelIdentity)
+}
+
+fn strict_output_model_identity_mismatch_error() -> MnemeError {
+    gate_failure_to_mneme(GateFailure::StrictOutputModelIdentity)
+}
+
 /// Bind a CCA to caller-supplied `assembled_context` + `certified_memory_set_payload` bytes
 /// (digest consistency only).
 ///
@@ -35,7 +68,7 @@ pub fn verify_consumption_attestation(
 ) -> Result<(), MnemeError> {
     let _ = PHASE_II_GATE_OPEN;
     if &attestation.assembly_profile != expected_profile {
-        return Err(MnemeError::SchemaDrift);
+        return Err(consumption_profile_mismatch_error());
     }
     let context_hash = hash_context_assembled(assembled_context);
     if attestation.context_hash != context_hash {
@@ -68,7 +101,7 @@ pub fn verify_consumption_attestation_strict(
     expected_profile: &AssemblyProfile,
 ) -> Result<(), MnemeError> {
     if &attestation.assembly_profile != expected_profile {
-        return Err(MnemeError::SchemaDrift);
+        return Err(strict_consumption_profile_mismatch_error());
     }
     let outcome = assemble_verified_context(result_ids, entries, *expected_profile)?;
     if attestation.context_hash != outcome.context_hash
@@ -97,7 +130,7 @@ pub fn verify_output_binding(
         return Err(MnemeError::ProvenanceBroken);
     }
     if binding.model_identity != *model_identity {
-        return Err(MnemeError::SchemaDrift);
+        return Err(output_model_identity_mismatch_error());
     }
     Ok(())
 }
@@ -120,7 +153,7 @@ pub fn verify_output_binding_strict(
         return Err(MnemeError::ProvenanceBroken);
     }
     if binding.model_identity != *model_identity {
-        return Err(MnemeError::SchemaDrift);
+        return Err(strict_output_model_identity_mismatch_error());
     }
     Ok(())
 }
@@ -160,15 +193,120 @@ mod tests {
         (assembled, certified, profile, attestation)
     }
 
+    fn source_between_markers<'a>(
+        source: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+        context: &str,
+    ) -> &'a str {
+        let start = source
+            .find(start_marker)
+            .unwrap_or_else(|| panic!("{context} should contain start marker `{start_marker}`"));
+        let end_offset = source[start..]
+            .find(end_marker)
+            .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
+        &source[start..start + end_offset]
+    }
+
+    #[test]
+    fn gate_failures_are_classified_not_schema_drift_collapsed() {
+        let source = include_str!("lib.rs");
+        let section = source_between_markers(
+            source,
+            "pub const CONTEXT_GATE_STATUS",
+            "#[cfg(test)]",
+            "context gate verifier section",
+        );
+
+        for forbidden in [
+            "return Err(MnemeError::SchemaDrift)",
+            "Err(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "context gate verifier should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum GateFailure",
+            "fn gate_failure_to_mneme(",
+            "fn consumption_profile_mismatch_error(",
+            "fn strict_consumption_profile_mismatch_error(",
+            "fn output_model_identity_mismatch_error(",
+            "fn strict_output_model_identity_mismatch_error(",
+            "GateFailure::ConsumptionProfile",
+            "GateFailure::StrictConsumptionProfile",
+            "GateFailure::OutputModelIdentity",
+            "GateFailure::StrictOutputModelIdentity",
+        ] {
+            assert!(
+                section.contains(required),
+                "context gate failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn gate_failure_classifier_preserves_public_schema_drift() {
+        for failure in [
+            GateFailure::ConsumptionProfile,
+            GateFailure::StrictConsumptionProfile,
+            GateFailure::OutputModelIdentity,
+            GateFailure::StrictOutputModelIdentity,
+        ] {
+            assert_eq!(gate_failure_to_mneme(failure), MnemeError::SchemaDrift);
+        }
+
+        assert_eq!(
+            consumption_profile_mismatch_error(),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            strict_consumption_profile_mismatch_error(),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            output_model_identity_mismatch_error(),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            strict_output_model_identity_mismatch_error(),
+            MnemeError::SchemaDrift
+        );
+    }
+
     #[test]
     fn gate_closed_by_default() {
-        assert!(!PHASE_II_GATE_OPEN);
+        assert!(!std::hint::black_box(PHASE_II_GATE_OPEN));
     }
 
     #[test]
     fn consumption_attestation_accepts_matching_hashes() {
         let (a, c, p, att) = sample_attestation();
         verify_consumption_attestation(&att, &a, &c, &p).unwrap();
+    }
+
+    #[test]
+    fn consumption_attestation_profile_mismatch_fails_closed() {
+        let (assembled, certified, _profile, attestation) = sample_attestation();
+        let other_profile = AssemblyProfile { id: [0x99; 32] };
+
+        assert_eq!(
+            verify_consumption_attestation(&attestation, &assembled, &certified, &other_profile,),
+            Err(MnemeError::SchemaDrift)
+        );
+    }
+
+    #[test]
+    fn strict_consumption_attestation_profile_mismatch_fails_closed() {
+        let (_assembled, _certified, _profile, attestation) = sample_attestation();
+        let other_profile = AssemblyProfile { id: [0x99; 32] };
+
+        assert_eq!(
+            verify_consumption_attestation_strict(&attestation, &[], &[], &other_profile),
+            Err(MnemeError::SchemaDrift)
+        );
     }
 
     #[test]
@@ -244,6 +382,32 @@ mod tests {
         let binding = honest_binding(assembled, out, forged_id);
         assert_eq!(
             verify_output_binding(&binding, assembled, out, &honest_id),
+            Err(MnemeError::SchemaDrift)
+        );
+    }
+
+    #[test]
+    fn strict_output_binding_model_identity_mismatch_rejects() {
+        let outcome =
+            assemble_verified_context(&[], &[], mneme_context::ASSEMBLY_PROFILE_V1).unwrap();
+        let out = b"out";
+        let honest_id = [0x11; 32];
+        let forged_id = [0x22; 32];
+        let binding = OutputBinding {
+            context_hash: outcome.context_hash,
+            output_hash: hash_model_output(out),
+            model_identity: forged_id,
+        };
+
+        assert_eq!(
+            verify_output_binding_strict(
+                &binding,
+                &[],
+                &[],
+                out,
+                &honest_id,
+                &mneme_context::ASSEMBLY_PROFILE_V1,
+            ),
             Err(MnemeError::SchemaDrift)
         );
     }

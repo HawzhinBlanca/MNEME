@@ -79,6 +79,7 @@ Toolchain: Rust **1.86.0** (see `rust-toolchain.toml`; `rustfmt` and `clippy` co
 
 - **INV-5**: Agent-facing reads use only `Store::recall_verified` / `recall_verified_default`. The untrusted index path (`Store::recall`) is `pub(crate)`.
 - **INV-6**: Cold open rejects if any on-disk signed checkpoint has a higher sequence than `HEAD` (`RootReplayed` error). This closes the A-REPLAY rollback vector.
+- **Single-writer store**: `Store::open` / `Store::create` take an advisory `flock` on `<store>/.mneme.lock` for the process lifetime; a second opener gets `LockHeld`. One live writer process per store directory.
 - **Fail-closed default**: every error path rejects rather than guesses. `MnemeError` variants are the typed rejection surface.
 - **TCB budget**: `mneme-verify` must stay under 500 lines. Adding logic there requires explicit invariant justification.
 - **Interface freeze**: types in `mneme-core/src/interface.rs` are normative seams. Field layout, enum variants, and hashing rules must not change without a formal interface-change request.
@@ -101,6 +102,11 @@ The `mneme-crossref` crate is an independent reimplementation of the Appendix B 
 
 1. **Authenticated ≠ true.** Signed entries verify even when content is false. MNEME proves integrity, provenance, authorization — not truth.
 2. **Verifiable retrieval proves procedure-faithfulness, not exact nearest neighbors.**
+   For Phase I `ExactDominance`, the current v1 verification object proves
+   membership/completeness plus top-k over prover-asserted distances for the
+   authenticated candidate set; true top-k ranking is not proven and it is not
+   top-k by true query-to-embedding distance until verifiers recompute candidate
+   distances from carried embeddings.
 3. The `commitment_binding` feature is a **tagged BLAKE3 envelope only** — not zero-knowledge, not a SNARK. (A legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it implied zero-knowledge, which the BLAKE3 envelope is not.) The `pedersen_schnorr_zk` feature (12-month milestone B3, off by default; previously mis-named `plonky2_prover` and renamed for honesty) is a **real transparent zero-knowledge proof**: Pedersen commitments + a Schnorr equality-of-openings NIZK over Ristretto (Fiat–Shamir, no trusted setup). It proves *faithful execution of a committed retrieval-match with witness privacy* — it is **not** Plonky2 and **not** a FRI/PLONK SNARK (Plonky2 1.x is nightly-only; the repo pins stable 1.86.0), and it still does **not** prove semantic truth or exact nearest neighbors. The `B3_DEFERRAL_STATUS` string in `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
 
 These limits appear in `MnemeError` messages, MCP tool descriptions, and verifier exports. Never weaken or remove them.

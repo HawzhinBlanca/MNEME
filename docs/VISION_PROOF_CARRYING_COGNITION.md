@@ -102,7 +102,7 @@ month moonshot.
 | # | Process | What it proves | Seed in MNEME today |
 |---|---|---|---|
 | 1 | **Verifiable memory** | integrity / provenance / authorization of each stored memory | ✅ shipped (signed root, receipts, fail-closed) |
-| 2 | **Proven-correct retrieval (zkANN)** | the returned k *are* the true top-k of the committed index — upgrades *procedure-faithful → retrieval-correct* | seam exists (`pedersen_schnorr_zk` — renamed from `plonky2_prover` for honesty); needs [zkRAG/V3DB-style HNSW PIOP](https://eprint.iacr.org/2026/709) |
+| 2 | **Proven-correct retrieval (zkANN)** | future target: the returned k *are* the true top-k of the committed index — upgrades *procedure-faithful → retrieval-correct* | Phase I ships authenticated dominance evidence; true distance-recomputed top-k still needs [zkRAG/V3DB-style HNSW PIOP](https://eprint.iacr.org/2026/709) |
 | 3 | **Attested execution** | the genuine model weights ran unmodified in a sealed enclave | new: NVIDIA CC + Remote Attestation |
 | 4 | **Context-consumption proof** | the model ingested *exactly* the certified memory set, nothing injected | **new — the kernel (§2)** |
 | 5 | **Capability-bound action + non-repudiation** | every external action was authorized and links to the sanctioning human | caps shipped; bind to action + identity ([NIST](https://csrc.nist.gov/pubs/other/2026/02/05/accelerating-the-adoption-of-software-and-ai-agent/ipd)) |
@@ -127,7 +127,7 @@ INGEST → CERTIFY → STORE → QUERY → PROVE-RETRIEVAL → ENCLAVE-VERIFY �
 1. **Ingest** — content enters at `Quarantine` tier with a write-provenance receipt (who/when/cap).
 2. **Certify & store** — atomic, `.incomplete`-guarded write; signed root (MNEME today).
 3. **Query** — agent issues a query + declared procedure + capability.
-4. **Prove-retrieval (zkANN)** — recall returns entries **plus a proof the top-k is correct** for the committed root.
+4. **Prove-retrieval (zkANN)** — recall returns entries plus authenticated dominance evidence for the committed root; future PIOP work upgrades this to true distance-recomputed top-k.
 5. **Enclave-verify** — the Context Gate, *inside the TEE*, re-checks every receipt + the zkANN proof against the signed root. Any failure → **fail closed**, no context assembled.
 6. **Assemble-context** — deterministic prompt build from only verified entries; emit `H(context)`.
 7. **Attest-infer** — the GPU TEE produces a fresh attestation report binding (enclave, model id, `H(context)`); model runs.
@@ -165,10 +165,10 @@ discipline — `TCB_LINE_BUDGET`, fail-closed — scaled to cognition.)
 ## 6. Program plan — 3 phases, ~12 months
 
 **Phase I (months 0–3): Verifiable Retrieval + Certificate v1**
-- Cryptography: ship **zkANN** correctness proof over the existing HNSW (procedure-faithful → retrieval-correct). *Exit:* forged top-k rejected with a typed error; <X ms prove at 10k.
+- Cryptography: ship **zkANN** authenticated dominance evidence over the existing HNSW/flat paths; true distance-recomputed top-k remains a later PIOP target. *Exit:* forged reordered/truncated candidate sets fail closed with typed errors; <X ms prove at 10k.
 - Kernel: bi-temporal ledger + `recall_verified_at`; poison-evidence provenance-scoped recall.
 - Verifier: **Cognition Certificate v1** schema (memory + retrieval + time), offline verifier SDK.
-- *Milestone:* "prove what was recalled, that it was the true match, that it wasn't poisoned, and when" — already beyond anything shipping in 2026.
+- *Milestone:* "prove what was recalled, which authenticated procedure selected it, that it wasn't poisoned, and when" — already beyond anything shipping in 2026.
 
 **Phase II (months 3–8): The Context Gate (the kernel)**
 - Confidential Computing: TEE-resident Context Gate — in-enclave receipt + zkANN verification, deterministic assembly, Context-Consumption Attestation. Integrate NVIDIA Remote Attestation.

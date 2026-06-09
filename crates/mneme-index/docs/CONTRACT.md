@@ -35,6 +35,10 @@ PEDERSEN_SCHNORR_HONESTY, B3_DEFERRAL_STATUS
 - **INV-10** Deterministic procedure P (ObjectId asc traversal, integer distance, tie-break by ObjectId)
 - Semantic Merkle commitment under `semantic_commit` (§5.6, §5.7)
 - **§3 honesty**: receipts prove procedure-faithfulness, not exact-NN optimality
+  or semantic truth; Phase I `ExactDominance` proves membership/completeness plus
+  top-k over prover-asserted distances; true top-k ranking is not proven and it is
+  not top-k by true query-to-embedding distance until verifiers recompute candidate
+  distances from carried embeddings
 - **§9.2 honesty**: `commitment_binding` proves leaf commitment only; `BINDING_ENVELOPE_TAG` must never claim Plonky2 or SNARK; `ZkProofInvalid` on this path means binding verification failed — not SNARK verification
 
 ## Proof obligations
@@ -48,7 +52,7 @@ PEDERSEN_SCHNORR_HONESTY, B3_DEFERRAL_STATUS
 | `ads_vo_verifies_against_semantic_commit` | ADS VO Merkle + replay |
 | `ads_vo_rejects_wrong_semantic_commit` | Tamper fail-closed |
 | `ads_vo_rejects_tampered_candidate_distance` | ProcedureMismatch on tamper |
-| `honesty_message_is_non_empty` | §3 boundary documented |
+| `honesty_message_preserves_distance_caveat` | §3 exported honesty string, including the distance-recompute caveat |
 | `semantic_recall_returns_receipt_bound_results` | Stub removed; receipt path live |
 | `commitment_binding` feature tests (when enabled) | Binding roundtrip + forgery rejection (BLAKE3 only) |
 | `forgery_vectors_reject_typed` | `proof/vectors/receipts/zk/forgery_expectations.json` |

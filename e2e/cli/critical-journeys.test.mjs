@@ -12,15 +12,25 @@ import { test, describe } from "node:test";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const defaultBin = path.join(repoRoot, "target/debug/mneme");
 const mnemeBin = process.env.MNEME_BIN ?? defaultBin;
+// Matches crates/mneme-cli/tests/cli_e2e.rs — init/verify/recall need sealed operator custody.
+const TEST_KMS_MASTER_HEX =
+  "5555555555555555555555555555555555555555555555555555555555555555";
 
-function runMneme(args, cwd = repoRoot) {
+function runMneme(args, cwd = repoRoot, { custody = false } = {}) {
   if (!existsSync(mnemeBin)) {
     return {
       skipped: true,
       reason: `mneme binary missing at ${mnemeBin}; run: cargo build -p mneme-cli`,
     };
   }
-  const result = spawnSync(mnemeBin, args, { encoding: "utf8", cwd });
+  const env = { ...process.env };
+  if (custody) {
+    env.MNEME_KMS_MASTER_KEY_HEX = TEST_KMS_MASTER_HEX;
+  } else {
+    delete env.MNEME_OPERATOR_SEED;
+    delete env.MNEME_KMS_MASTER_KEY_HEX;
+  }
+  const result = spawnSync(mnemeBin, args, { encoding: "utf8", cwd, env });
   return {
     skipped: false,
     status: result.status,
@@ -54,10 +64,10 @@ describe("mneme CLI critical journeys", () => {
     const base = mkdtempSync(path.join(tmpdir(), "mneme-e2e-"));
     const store = path.join(base, "store");
     try {
-      const init = runMneme(["init", store]);
+      const init = runMneme(["init", store], repoRoot, { custody: true });
       assertNotSkipped(init);
       assert.equal(init.status, 0, init.stderr);
-      const verify = runMneme(["verify", store]);
+      const verify = runMneme(["verify", store], repoRoot, { custody: true });
       assertNotSkipped(verify);
       assert.equal(verify.status, 0, verify.stderr);
       assert.match(verify.stdout, /verify ok/i);
@@ -70,17 +80,21 @@ describe("mneme CLI critical journeys", () => {
     const base = mkdtempSync(path.join(tmpdir(), "mneme-e2e-"));
     const store = path.join(base, "store");
     try {
-      runMneme(["init", store]);
-      const out = runMneme([
-        "recall",
-        store,
-        "-q",
-        "theme",
-        "--key",
-        "theme",
-        "--min-tier",
-        "working",
-      ]);
+      runMneme(["init", store], repoRoot, { custody: true });
+      const out = runMneme(
+        [
+          "recall",
+          store,
+          "-q",
+          "theme",
+          "--key",
+          "theme",
+          "--min-tier",
+          "working",
+        ],
+        repoRoot,
+        { custody: true },
+      );
       assertNotSkipped(out);
       assert.notEqual(out.status, 0);
     } finally {

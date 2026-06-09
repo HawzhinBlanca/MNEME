@@ -6,6 +6,21 @@ use mneme_crypto::{
 };
 use mneme_smt::{SparseMerkleTree, TOMBSTONE};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShredPayloadFailure {
+    PayloadStillDecrypts,
+}
+
+fn shred_payload_failure_to_mneme(failure: ShredPayloadFailure) -> MnemeError {
+    match failure {
+        ShredPayloadFailure::PayloadStillDecrypts => MnemeError::SchemaDrift,
+    }
+}
+
+fn payload_still_decrypts_after_shred_error() -> MnemeError {
+    shred_payload_failure_to_mneme(ShredPayloadFailure::PayloadStillDecrypts)
+}
+
 /// Inputs for a single logical-key shred forget (store kernel calls inside INV-8 txn).
 pub struct ShredForgetInput<'a> {
     pub logical_key: &'a LogicalKey,
@@ -26,9 +41,11 @@ pub fn shred_witness_commit(outcome: &ShredOutcome) -> [u8; 32] {
     h.update(&outcome.key_hash);
     h.update(&outcome.object_id);
     if let Some(id) = outcome.shredded_key_id {
+        h.update(b"vault-tombstone-v1\x00");
         h.update(&[1u8]);
         h.update(&id);
     } else {
+        h.update(b"vault-tombstone-v1\x00");
         h.update(&[0u8]);
     }
     *h.finalize().as_bytes()
@@ -79,7 +96,7 @@ pub fn payload_unreadable(
     let aad = payload_aad(logical_key);
     match open_payload(vault, &record.payload_enc, &aad) {
         Err(MnemeError::Forgotten) => Ok(()),
-        Ok(_) => Err(MnemeError::SchemaDrift),
+        Ok(_) => Err(payload_still_decrypts_after_shred_error()),
         Err(e) => Err(e),
     }
 }
@@ -123,4 +140,96 @@ fn shred_encrypted_payload_key(
     }
     let key_id = shred_payload_key(vault, &record.payload_enc)?;
     Ok(Some(key_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_core::{MemoryKind, to_bytes_canonical};
+    use mneme_crypto::{MemoryKeyVault, seal_payload};
+
+    fn source_between_markers<'a>(
+        source: &'a str,
+        start_marker: &str,
+        end_marker: &str,
+        context: &str,
+    ) -> &'a str {
+        let start = source
+            .find(start_marker)
+            .unwrap_or_else(|| panic!("{context} should contain start marker `{start_marker}`"));
+        let end_offset = source[start..]
+            .find(end_marker)
+            .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
+        &source[start..start + end_offset]
+    }
+
+    fn encrypted_record(body_plain: &[u8], vault: &mut MemoryKeyVault) -> (Vec<u8>, LogicalKey) {
+        let key = LogicalKey {
+            namespace: "gdpr".into(),
+            name: "email".into(),
+        };
+        let aad = payload_aad(&key);
+        let mut record = ObjectRecord::fixture(MemoryKind::Semantic);
+        record.payload_enc = seal_payload(vault, body_plain, &aad).expect("seal");
+        let bytes = to_bytes_canonical(&record).expect("canonical");
+        from_bytes_strict::<ObjectRecord>(&bytes).expect("roundtrip");
+        (bytes, key)
+    }
+
+    #[test]
+    fn shred_payload_failures_are_classified_not_schema_drift_collapsed() {
+        let source = include_str!("shred.rs");
+        let section = source_between_markers(
+            source,
+            "use mneme_core",
+            "#[cfg(test)]",
+            "shred production section",
+        );
+
+        for forbidden in [
+            "Ok(_) => Err(MnemeError::SchemaDrift)",
+            "Err(MnemeError::SchemaDrift)",
+            "return Err(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !section.contains(forbidden),
+                "shred payload checks should route `{forbidden}` through named classifiers"
+            );
+        }
+
+        for required in [
+            "enum ShredPayloadFailure",
+            "fn shred_payload_failure_to_mneme(",
+            "fn payload_still_decrypts_after_shred_error(",
+            "ShredPayloadFailure::PayloadStillDecrypts",
+        ] {
+            assert!(
+                section.contains(required),
+                "shred payload failure classification should include `{required}`"
+            );
+        }
+    }
+
+    #[test]
+    fn shred_payload_failure_classifier_preserves_public_schema_drift() {
+        assert_eq!(
+            shred_payload_failure_to_mneme(ShredPayloadFailure::PayloadStillDecrypts),
+            MnemeError::SchemaDrift
+        );
+        assert_eq!(
+            payload_still_decrypts_after_shred_error(),
+            MnemeError::SchemaDrift
+        );
+    }
+
+    #[test]
+    fn payload_unreadable_rejects_still_decryptable_payload() {
+        let mut vault = MemoryKeyVault::new();
+        let (bytes, key) = encrypted_record(b"still live", &mut vault);
+
+        assert_eq!(
+            payload_unreadable(&vault, &bytes, &key),
+            Err(MnemeError::SchemaDrift)
+        );
+    }
 }

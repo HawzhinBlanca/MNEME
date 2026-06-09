@@ -1,7 +1,10 @@
 //! gRPC MemoryService (tonic) mirroring HTTP kernel API.
 
 use crate::state::{ApiError, AppState, check_rate_limit, parse_capability_b64, verify_cap};
-use mneme_core::{Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier};
+use axum::http::StatusCode;
+use mneme_core::{
+    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, Query, TrustTier,
+};
 use tonic::{Request, Response, Status};
 
 pub mod pb {
@@ -15,8 +18,12 @@ use pb::{
     RememberRequest, RememberResponse,
 };
 
+pub const GRPC_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+
 pub fn service(state: AppState) -> MemoryServiceServer<GrpcMemoryService> {
     MemoryServiceServer::new(GrpcMemoryService { state })
+        .max_decoding_message_size(GRPC_MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(GRPC_MAX_MESSAGE_BYTES)
 }
 
 pub struct GrpcMemoryService {
@@ -57,6 +64,7 @@ impl MemoryService for GrpcMemoryService {
         let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
         let kind = parse_kind_grpc(&req.kind)?;
         let mut store = self.state.store.lock().map_err(grpc_internal)?;
         let draft = Draft {
@@ -85,6 +93,7 @@ impl MemoryService for GrpcMemoryService {
         let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
         let min_tier = parse_tier_grpc(&req.min_tier)?;
         let store = self.state.store.lock().map_err(grpc_internal)?;
         let query = Query {
@@ -98,16 +107,11 @@ impl MemoryService for GrpcMemoryService {
         let entries = store
             .recall_verified_default(&query, &cap)
             .map_err(grpc_status_mneme)?;
-        Ok(Response::new(RecallResponse {
-            entries: entries
-                .into_iter()
-                .map(|e| RecallEntry {
-                    object_id_hex: hex::encode(e.id.as_bytes()),
-                    body: e.plaintext,
-                    trust_tier: e.record.trust_tier as u32,
-                })
-                .collect(),
-        }))
+        let entries = entries
+            .into_iter()
+            .map(recall_entry_grpc)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Response::new(RecallResponse { entries }))
     }
 
     async fn forget(
@@ -118,6 +122,7 @@ impl MemoryService for GrpcMemoryService {
         let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
         check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
         let mut store = self.state.store.lock().map_err(grpc_internal)?;
         let (_tomb, root) = store
             .forget(
@@ -139,6 +144,16 @@ impl MemoryService for GrpcMemoryService {
         request: Request<ProveAbsentRequest>,
     ) -> Result<Response<ProveAbsentResponse>, Status> {
         let req = request.into_inner();
+        if req.capability_b64.trim().is_empty() {
+            return Err(Status::unauthenticated("missing capability"));
+        }
+        let cap = parse_capability_b64(&req.capability_b64).map_err(grpc_status)?;
+        check_rate_limit(&self.state, &cap).map_err(grpc_status)?;
+        verify_cap(&self.state, &cap).map_err(grpc_status)?;
+        validate_logical_key_grpc(&req.namespace, &req.name)?;
+        if !cap.permits_read(&req.namespace, TrustTier::Quarantine) {
+            return Err(grpc_status_mneme(mneme_core::MnemeError::CapDenied));
+        }
         let store = self.state.store.lock().map_err(grpc_internal)?;
         let key = LogicalKey {
             namespace: req.namespace,
@@ -152,15 +167,23 @@ impl MemoryService for GrpcMemoryService {
     }
 }
 
+fn recall_entry_grpc(entry: Entry) -> Result<RecallEntry, Status> {
+    let trust_tier = TrustTier::from_u8(entry.record.trust_tier).map_err(grpc_status_mneme)?;
+    Ok(RecallEntry {
+        object_id_hex: hex::encode(entry.id.as_bytes()),
+        body: entry.plaintext,
+        trust_tier: u32::from(trust_tier.as_u8()),
+    })
+}
+
 fn grpc_status(err: ApiError) -> Status {
     Status::new(
         match err.status {
-            400 => tonic::Code::InvalidArgument,
-            401 => tonic::Code::Unauthenticated,
-            403 => tonic::Code::PermissionDenied,
-            404 => tonic::Code::NotFound,
-            410 => tonic::Code::NotFound,
-            429 => tonic::Code::ResourceExhausted,
+            StatusCode::BAD_REQUEST => tonic::Code::InvalidArgument,
+            StatusCode::UNAUTHORIZED => tonic::Code::Unauthenticated,
+            StatusCode::FORBIDDEN => tonic::Code::PermissionDenied,
+            StatusCode::NOT_FOUND | StatusCode::GONE => tonic::Code::NotFound,
+            StatusCode::TOO_MANY_REQUESTS => tonic::Code::ResourceExhausted,
             _ => tonic::Code::Internal,
         },
         err.message,
@@ -175,6 +198,13 @@ fn grpc_internal(_: impl std::fmt::Display) -> Status {
     Status::internal("store lock poisoned")
 }
 
+fn validate_logical_key_grpc(namespace: &str, name: &str) -> Result<(), Status> {
+    if namespace.trim().is_empty() || name.trim().is_empty() {
+        return Err(Status::invalid_argument("namespace and name required"));
+    }
+    Ok(())
+}
+
 fn parse_kind_grpc(s: &str) -> Result<MemoryKind, Status> {
     match s.to_lowercase().as_str() {
         "episodic" => Ok(MemoryKind::Episodic),
@@ -187,14 +217,13 @@ fn parse_kind_grpc(s: &str) -> Result<MemoryKind, Status> {
 }
 
 fn parse_tier_grpc(s: &str) -> Result<TrustTier, Status> {
-    TrustTier::from_u8(match s.to_lowercase().as_str() {
-        "quarantine" => 0,
-        "working" => 1,
-        "trusted" => 2,
-        "identity" => 3,
-        _ => return Err(Status::invalid_argument("invalid trust tier")),
-    })
-    .map_err(grpc_status_mneme)
+    match s.to_lowercase().as_str() {
+        "quarantine" => Ok(TrustTier::Quarantine),
+        "working" => Ok(TrustTier::Working),
+        "trusted" => Ok(TrustTier::Trusted),
+        "identity" => Ok(TrustTier::Identity),
+        _ => Err(Status::invalid_argument("invalid trust tier")),
+    }
 }
 
 pub async fn serve_grpc(
@@ -206,6 +235,63 @@ pub async fn serve_grpc(
         .serve(addr)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_core::{HlcWire, OBJECT_VERSION, ObjectId, ObjectRecord, PayloadEnc};
+
+    fn test_recall_entry_with_trust_tier(trust_tier: u8) -> Entry {
+        Entry {
+            id: ObjectId::from_bytes([0x11; 32]),
+            record: ObjectRecord {
+                version: OBJECT_VERSION,
+                kind: MemoryKind::Semantic as u8,
+                parent_ids: vec![],
+                writer: [0x22; 32],
+                session: [0x33; 16],
+                hlc: HlcWire {
+                    wall_ms: 1,
+                    counter: 0,
+                    node_id: [0x44; 16],
+                },
+                trust_tier,
+                payload_enc: PayloadEnc {
+                    alg: 0,
+                    key_id: None,
+                    nonce: None,
+                    body: b"hello".to_vec(),
+                },
+                embedding_commit: None,
+                redaction_slot: None,
+                ext: None,
+            },
+            plaintext: b"hello".to_vec(),
+        }
+    }
+
+    #[test]
+    fn recall_entry_grpc_preserves_valid_trust_tier() {
+        let entry = test_recall_entry_with_trust_tier(TrustTier::Working.as_u8());
+        let recalled =
+            recall_entry_grpc(entry).unwrap_or_else(|err| panic!("valid tier rejected: {err}"));
+
+        assert_eq!(recalled.body, b"hello");
+        assert_eq!(recalled.trust_tier, u32::from(TrustTier::Working.as_u8()));
+    }
+
+    #[test]
+    fn recall_entry_grpc_rejects_invalid_trust_tier() {
+        let entry = test_recall_entry_with_trust_tier(7);
+        let err = match recall_entry_grpc(entry) {
+            Ok(_) => panic!("invalid trust tier unexpectedly serialized"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert_eq!(err.message(), "schema drift");
+    }
 }
 
 // silence unused Arc if not needed - actually remove Arc import

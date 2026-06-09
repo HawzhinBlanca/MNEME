@@ -29,7 +29,7 @@ fn setup() -> (TempDir, Store, Capability) {
 
 #[test]
 fn forget_with_proof_emits_and_binds_post_commit_root() {
-    assert!(PHASE_III_PROVE_FORGET_OPEN);
+    assert!(std::hint::black_box(PHASE_III_PROVE_FORGET_OPEN));
     let (_dir, mut store, cap) = setup();
     let key = LogicalKey {
         namespace: "gdpr".into(),

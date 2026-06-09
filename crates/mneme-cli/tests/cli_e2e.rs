@@ -12,8 +12,20 @@ use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 use walkdir::WalkDir;
 
+const TEST_OPERATOR_MASTER_HEX: &str =
+    "5555555555555555555555555555555555555555555555555555555555555555";
+
+fn raw_mneme() -> Command {
+    let mut cmd = Command::cargo_bin("mneme").unwrap();
+    cmd.env_remove("MNEME_OPERATOR_SEED")
+        .env_remove("MNEME_KMS_MASTER_KEY_HEX");
+    cmd
+}
+
 fn mneme() -> Command {
-    Command::cargo_bin("mneme").unwrap()
+    let mut cmd = raw_mneme();
+    cmd.env("MNEME_KMS_MASTER_KEY_HEX", TEST_OPERATOR_MASTER_HEX);
+    cmd
 }
 
 #[test]
@@ -34,6 +46,22 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("sync"))
         .stdout(predicate::str::contains("--vault"));
+}
+
+#[test]
+fn init_without_seed_or_master_rejects_without_plaintext_operator_seed() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+
+    raw_mneme()
+        .args(["init", store.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("operator seed custody missing"))
+        .stderr(predicate::str::contains("invalid usage"));
+
+    assert!(!store.join(".operator_seed").exists());
 }
 
 #[test]
@@ -316,7 +344,22 @@ fn audit_missing_root_is_usage_error() {
         .args(["audit", "/no/such/root.cbor"])
         .assert()
         .failure()
-        .code(2);
+        .code(2)
+        .stderr(predicate::str::contains("root checkpoint not found"));
+}
+
+#[test]
+fn audit_stub_returns_store_unavailable_without_fake_path_check() {
+    let dir = tempdir().unwrap();
+    let root_path = dir.path().join("checkpoint.cbor");
+    fs::write(&root_path, b"").unwrap();
+    mneme()
+        .args(["audit", root_path.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(3)
+        .stderr(predicate::str::contains("audit is not yet implemented"))
+        .stderr(predicate::str::contains("store kernel not available"));
 }
 
 #[test]
@@ -622,5 +665,16 @@ fn attest_emits_sigstore_statement() {
         .arg(&root)
         .assert()
         .success()
-        .stdout(predicate::str::contains("in-toto.io/Statement"));
+        .stdout(predicate::str::contains("in-toto.io/Statement"))
+        .stdout(predicate::str::contains("authenticated"))
+        .stdout(predicate::str::contains("not truth"))
+        .stdout(predicate::str::contains("not exact"))
+        .stdout(predicate::str::contains(
+            "top-k over prover-asserted distances",
+        ))
+        .stdout(predicate::str::contains("membership/completeness"))
+        .stdout(predicate::str::contains("top-k ranking is not proven"))
+        .stdout(predicate::str::contains(
+            "not top-k by true query-to-embedding distance",
+        ));
 }

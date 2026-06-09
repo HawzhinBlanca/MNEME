@@ -13,7 +13,7 @@ use tempfile::TempDir;
 
 #[test]
 fn gate_open_when_context_gate_feature_enabled() {
-    assert!(PHASE_II_GATE_OPEN);
+    assert!(std::hint::black_box(PHASE_II_GATE_OPEN));
 }
 
 #[test]

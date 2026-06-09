@@ -7,15 +7,23 @@ use mneme_core::{
 };
 use mneme_store::{ContextGateRecallOpts, Store};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContextGateDecodeFailure {
+    ContextAttestationBase64,
+    OutputBindingBase64,
+    EmbeddingBase64,
+    ModelOutputBase64,
+    ModelIdentityBase64,
+    ModelIdentityLength,
+}
+
 pub fn decode_cca_b64(b64: &str) -> Result<ContextConsumptionAttestation, MnemeError> {
-    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
-        .map_err(|_| MnemeError::SchemaDrift)?;
+    let bytes = decode_context_attestation_b64_bytes(b64)?;
     decode_context_consumption_attestation(&bytes)
 }
 
 pub fn decode_output_binding_b64(b64: &str) -> Result<OutputBinding, MnemeError> {
-    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
-        .map_err(|_| MnemeError::SchemaDrift)?;
+    let bytes = decode_output_binding_b64_bytes(b64)?;
     decode_output_binding(&bytes)
 }
 
@@ -43,26 +51,14 @@ pub fn recall_verified_context_gated_from_b64(
         Some(b64) => Some(decode_output_binding_b64(b64)?),
         None => None,
     };
-    let emb_bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        input.embedding_b64.trim(),
-    )
-    .map_err(|_| MnemeError::SchemaDrift)?;
+    let emb_bytes = decode_context_embedding_b64_bytes(input.embedding_b64)?;
     let embedding = FixedPointEmbedding::from_bytes(&emb_bytes)?;
     let model_output = match input.model_output_b64 {
-        Some(b64) => Some(
-            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
-                .map_err(|_| MnemeError::SchemaDrift)?,
-        ),
+        Some(b64) => Some(decode_context_model_output_b64_bytes(b64)?),
         None => None,
     };
     let model_identity = match input.model_identity_b64 {
-        Some(b64) => {
-            let bytes =
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
-                    .map_err(|_| MnemeError::SchemaDrift)?;
-            Some(<[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| MnemeError::SchemaDrift)?)
-        }
+        Some(b64) => Some(decode_context_model_identity_b64(b64)?),
         None => None,
     };
     let mut semantic_query = query.clone();
@@ -82,4 +78,68 @@ pub fn recall_verified_context_gated_from_b64(
         model_identity: model_identity.as_ref(),
     };
     store.recall_verified_context_gated(&semantic_query, &proc, cap, &opts)
+}
+
+fn context_gate_decode_failure_to_mneme(failure: ContextGateDecodeFailure) -> MnemeError {
+    match failure {
+        ContextGateDecodeFailure::ContextAttestationBase64
+        | ContextGateDecodeFailure::OutputBindingBase64
+        | ContextGateDecodeFailure::EmbeddingBase64
+        | ContextGateDecodeFailure::ModelOutputBase64
+        | ContextGateDecodeFailure::ModelIdentityBase64
+        | ContextGateDecodeFailure::ModelIdentityLength => MnemeError::SchemaDrift,
+    }
+}
+
+fn decode_context_gate_b64_bytes(
+    b64: &str,
+    failure: ContextGateDecodeFailure,
+) -> Result<Vec<u8>, MnemeError> {
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64.trim())
+        .map_err(|_| context_gate_decode_failure_to_mneme(failure))
+}
+
+fn decode_context_attestation_b64_bytes(b64: &str) -> Result<Vec<u8>, MnemeError> {
+    decode_context_gate_b64_bytes(b64, ContextGateDecodeFailure::ContextAttestationBase64)
+}
+
+fn decode_output_binding_b64_bytes(b64: &str) -> Result<Vec<u8>, MnemeError> {
+    decode_context_gate_b64_bytes(b64, ContextGateDecodeFailure::OutputBindingBase64)
+}
+
+fn decode_context_embedding_b64_bytes(b64: &str) -> Result<Vec<u8>, MnemeError> {
+    decode_context_gate_b64_bytes(b64, ContextGateDecodeFailure::EmbeddingBase64)
+}
+
+fn decode_context_model_output_b64_bytes(b64: &str) -> Result<Vec<u8>, MnemeError> {
+    decode_context_gate_b64_bytes(b64, ContextGateDecodeFailure::ModelOutputBase64)
+}
+
+fn decode_context_model_identity_b64(b64: &str) -> Result<[u8; 32], MnemeError> {
+    let bytes = decode_context_gate_b64_bytes(b64, ContextGateDecodeFailure::ModelIdentityBase64)?;
+    <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| {
+        context_gate_decode_failure_to_mneme(ContextGateDecodeFailure::ModelIdentityLength)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_gate_decode_failure_classifier_preserves_schema_failures() {
+        for failure in [
+            ContextGateDecodeFailure::ContextAttestationBase64,
+            ContextGateDecodeFailure::OutputBindingBase64,
+            ContextGateDecodeFailure::EmbeddingBase64,
+            ContextGateDecodeFailure::ModelOutputBase64,
+            ContextGateDecodeFailure::ModelIdentityBase64,
+            ContextGateDecodeFailure::ModelIdentityLength,
+        ] {
+            assert_eq!(
+                context_gate_decode_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+    }
 }

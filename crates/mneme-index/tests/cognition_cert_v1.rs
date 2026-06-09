@@ -1,21 +1,21 @@
 //! Cognition Certificate v1 assemble + offline verify (Phase I P1-4).
 
 use mneme_core::{
-    DistanceMetric, FixedPointEmbedding, MnemeError, ObjectId, Procedure, ProcedureAlgo,
-    RetrievalProofLevel,
+    CborValue, Decoder, DistanceMetric, Encoder, FixedPointEmbedding, MnemeError, ObjectId,
+    Procedure, ProcedureAlgo, RetrievalProofLevel, to_bytes_canonical,
 };
-use mneme_crypto::TrustConfig;
+use mneme_crypto::{KeyPair, TrustConfig};
 use mneme_index::{
     SemanticIndex, assemble_cognition_certificate_v1, verify_cognition_certificate_v1,
 };
 use mneme_root::StoredRoot;
 
 #[cfg(feature = "context_gate")]
-use mneme_core::{Decoder, Encoder};
+use mneme_core::{AssemblyProfile, ContextConsumptionAttestation};
 #[cfg(feature = "context_gate")]
 use mneme_index::{
     ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
-    verify_cognition_certificate_v2_draft,
+    verify_cognition_certificate_v2_draft, verify_cognition_certificate_v2_draft_strict,
 };
 
 fn oid(b: u8) -> ObjectId {
@@ -46,6 +46,342 @@ fn fixture_root(semantic_commit: [u8; 32]) -> StoredRoot {
     }
 }
 
+fn retrieval_level_tag(level: RetrievalProofLevel) -> u64 {
+    match level {
+        RetrievalProofLevel::ExactDominance => 0,
+        RetrievalProofLevel::HnswAuditOnDemand => 1,
+    }
+}
+
+fn forge_v1_outer_level(
+    bytes: &[u8],
+    original_level: RetrievalProofLevel,
+    forged_level: RetrievalProofLevel,
+) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v1 cognition certificate field {other}"),
+        }
+    }
+    assert_eq!(level_tag, Some(retrieval_level_tag(original_level)));
+
+    let mut enc = Encoder::new();
+    let mut map_len = 4u64;
+    if as_of_seq.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(retrieval_level_tag(forged_level))
+        .unwrap();
+    if let Some(seq) = as_of_seq {
+        enc.encode_unsigned(3).unwrap();
+        enc.encode_unsigned(seq).unwrap();
+    }
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&receipt_bytes.expect("receipt field"))
+        .unwrap();
+    enc.finish()
+}
+
+fn strip_zkann_from_semantic_receipt_bytes(receipt_bytes: &[u8]) -> Vec<u8> {
+    let mut dec = Decoder::new(receipt_bytes);
+    let map = dec.decode_map().unwrap();
+    let mut removed_zkann = false;
+    let stripped_entries: Vec<_> = map
+        .into_iter()
+        .filter(|(key, _value)| {
+            if key.as_u64() == Some(7) {
+                removed_zkann = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    assert!(
+        removed_zkann,
+        "fixture receipt must include a zkANN attachment"
+    );
+    to_bytes_canonical(&CborValue::Map(stripped_entries)).unwrap()
+}
+
+fn forge_semantic_receipt_root_bound(receipt_bytes: &[u8], forged_root_bound: [u8; 32]) -> Vec<u8> {
+    let mut dec = Decoder::new(receipt_bytes);
+    let map = dec.decode_map().unwrap();
+    let mut replaced_root_bound = false;
+    let forged_entries: Vec<_> = map
+        .into_iter()
+        .map(|(key, value)| {
+            if key.as_u64() == Some(1) {
+                replaced_root_bound = true;
+                (key, CborValue::Bytes(forged_root_bound.to_vec()))
+            } else {
+                (key, value)
+            }
+        })
+        .collect();
+    assert!(
+        replaced_root_bound,
+        "fixture receipt must include root_bound"
+    );
+    to_bytes_canonical(&CborValue::Map(forged_entries)).unwrap()
+}
+
+fn forge_semantic_receipt_commit(
+    receipt_bytes: &[u8],
+    forged_semantic_commit: [u8; 32],
+) -> Vec<u8> {
+    let mut dec = Decoder::new(receipt_bytes);
+    let map = dec.decode_map().unwrap();
+    let mut replaced_semantic_commit = false;
+    let forged_entries: Vec<_> = map
+        .into_iter()
+        .map(|(key, value)| {
+            if key.as_u64() == Some(2) {
+                replaced_semantic_commit = true;
+                (key, CborValue::Bytes(forged_semantic_commit.to_vec()))
+            } else {
+                (key, value)
+            }
+        })
+        .collect();
+    assert!(
+        replaced_semantic_commit,
+        "fixture receipt must include semantic_commit"
+    );
+    to_bytes_canonical(&CborValue::Map(forged_entries)).unwrap()
+}
+
+fn forge_v1_receipt_root_bound(bytes: &[u8], forged_root_bound: [u8; 32]) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v1 cognition certificate field {other}"),
+        }
+    }
+    let forged_receipt = forge_semantic_receipt_root_bound(
+        &receipt_bytes.expect("receipt field"),
+        forged_root_bound,
+    );
+
+    let mut enc = Encoder::new();
+    let mut map_len = 4u64;
+    if as_of_seq.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(level_tag.expect("level field"))
+        .unwrap();
+    if let Some(seq) = as_of_seq {
+        enc.encode_unsigned(3).unwrap();
+        enc.encode_unsigned(seq).unwrap();
+    }
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&forged_receipt).unwrap();
+    enc.finish()
+}
+
+fn forge_v1_receipt_semantic_commit(bytes: &[u8], forged_semantic_commit: [u8; 32]) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v1 cognition certificate field {other}"),
+        }
+    }
+    let forged_receipt = forge_semantic_receipt_commit(
+        &receipt_bytes.expect("receipt field"),
+        forged_semantic_commit,
+    );
+
+    let mut enc = Encoder::new();
+    let mut map_len = 4u64;
+    if as_of_seq.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(level_tag.expect("level field"))
+        .unwrap();
+    if let Some(seq) = as_of_seq {
+        enc.encode_unsigned(3).unwrap();
+        enc.encode_unsigned(seq).unwrap();
+    }
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&forged_receipt).unwrap();
+    enc.finish()
+}
+
+fn forge_v1_hnsw_wire_level_without_receipt_zkann(bytes: &[u8]) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v1 cognition certificate field {other}"),
+        }
+    }
+    assert_eq!(
+        level_tag,
+        Some(retrieval_level_tag(RetrievalProofLevel::HnswAuditOnDemand)),
+        "fixture must keep the outer wire level at HNSW audit-on-demand"
+    );
+    let stripped_receipt =
+        strip_zkann_from_semantic_receipt_bytes(&receipt_bytes.expect("receipt field"));
+
+    let mut enc = Encoder::new();
+    let mut map_len = 4u64;
+    if as_of_seq.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(level_tag.expect("level field"))
+        .unwrap();
+    if let Some(seq) = as_of_seq {
+        enc.encode_unsigned(3).unwrap();
+        enc.encode_unsigned(seq).unwrap();
+    }
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&stripped_receipt).unwrap();
+    enc.finish()
+}
+
+fn forge_v1_as_of_seq(bytes: &[u8], forged_seq: u64) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v1 cognition certificate field {other}"),
+        }
+    }
+    assert_eq!(as_of_seq, None, "fixture must not already carry as_of_seq");
+
+    let mut enc = Encoder::new();
+    enc.begin_map(5).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(level_tag.expect("level field"))
+        .unwrap();
+    enc.encode_unsigned(3).unwrap();
+    enc.encode_unsigned(forged_seq).unwrap();
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&receipt_bytes.expect("receipt field"))
+        .unwrap();
+    enc.finish()
+}
+
+fn signed_v1_fixture_with_receipt_level(level: RetrievalProofLevel) -> (Vec<u8>, TrustConfig) {
+    let operator = KeyPair::from_seed([0x51; 32]);
+    let mut index = SemanticIndex::new();
+    let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
+    index
+        .insert(
+            oid(0x51),
+            FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap(),
+        )
+        .unwrap();
+    let stored = StoredRoot::assemble(
+        [0x52; 32],
+        [0x53; 32],
+        index.semantic_commit(),
+        [0x54; 14],
+        [0x00; 32],
+        3,
+        &operator,
+    )
+    .unwrap();
+    let receipt = index
+        .recall_receipt_zkann(&proc(), &q, stored.preimage_hash, level)
+        .unwrap();
+    assert_eq!(receipt.zkann.as_ref().map(|z| z.level), Some(level));
+    let bytes = assemble_cognition_certificate_v1(&stored, &receipt, None).unwrap();
+    (bytes, TrustConfig::new(operator.public_key_bytes()))
+}
+
 #[test]
 fn cognition_cert_v1_roundtrip_offline() {
     let mut index = SemanticIndex::new();
@@ -62,6 +398,82 @@ fn cognition_cert_v1_roundtrip_offline() {
     let trust = TrustConfig::new([0u8; 32]);
     // Signature check fails with zero key — test wire + zkANN path only.
     assert!(verify_cognition_certificate_v1(&bytes, &trust, &proc()).is_err());
+}
+
+#[test]
+fn cognition_cert_v1_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::HnswAuditOnDemand);
+    let forged = forge_v1_outer_level(
+        &bytes,
+        RetrievalProofLevel::HnswAuditOnDemand,
+        RetrievalProofLevel::ExactDominance,
+    );
+
+    assert_eq!(
+        verify_cognition_certificate_v1(&forged, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[test]
+fn cognition_cert_v1_rejects_hnsw_wire_level_with_exact_receipt_zkann() {
+    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let forged = forge_v1_outer_level(
+        &bytes,
+        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::HnswAuditOnDemand,
+    );
+
+    assert_eq!(
+        verify_cognition_certificate_v1(&forged, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[test]
+fn cognition_cert_v1_rejects_hnsw_wire_level_without_receipt_zkann() {
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::HnswAuditOnDemand);
+    let forged = forge_v1_hnsw_wire_level_without_receipt_zkann(&bytes);
+
+    assert_eq!(
+        verify_cognition_certificate_v1(&forged, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[test]
+fn cognition_cert_v1_rejects_forged_as_of_sequence_mismatch() {
+    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let forged = forge_v1_as_of_seq(&bytes, 4);
+
+    assert_eq!(
+        verify_cognition_certificate_v1(&forged, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[test]
+fn cognition_cert_v1_rejects_forged_receipt_root_bound_mismatch() {
+    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let forged = forge_v1_receipt_root_bound(&bytes, [0x9a; 32]);
+
+    assert_eq!(
+        verify_cognition_certificate_v1(&forged, &trust, &proc()),
+        Err(MnemeError::ReceiptRootMismatch)
+    );
+}
+
+#[test]
+fn cognition_cert_v1_rejects_forged_receipt_semantic_commit_mismatch() {
+    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let forged = forge_v1_receipt_semantic_commit(&bytes, [0x9b; 32]);
+
+    assert_eq!(
+        verify_cognition_certificate_v1(&forged, &trust, &proc()),
+        Err(MnemeError::ReceiptRootMismatch)
+    );
 }
 
 #[test]
@@ -246,6 +658,281 @@ fn appendix_b_v2_fixture() -> (Vec<u8>, [u8; 32], [u8; 32]) {
     let bytes =
         assemble_cognition_certificate_v2_draft(&stored, &receipt, None, attestation).unwrap();
     (bytes, stored.preimage_hash, semantic_commit)
+}
+
+#[cfg(feature = "context_gate")]
+fn forge_v2_outer_level(
+    bytes: &[u8],
+    original_level: RetrievalProofLevel,
+    forged_level: RetrievalProofLevel,
+) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    let mut attestation_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            6 => attestation_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v2 cognition certificate field {other}"),
+        }
+    }
+    assert_eq!(level_tag, Some(retrieval_level_tag(original_level)));
+
+    let mut enc = Encoder::new();
+    let mut map_len = 5u64;
+    if as_of_seq.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(retrieval_level_tag(forged_level))
+        .unwrap();
+    if let Some(seq) = as_of_seq {
+        enc.encode_unsigned(3).unwrap();
+        enc.encode_unsigned(seq).unwrap();
+    }
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&receipt_bytes.expect("receipt field"))
+        .unwrap();
+    enc.encode_unsigned(6).unwrap();
+    enc.encode_bytes(&attestation_bytes.expect("attestation field"))
+        .unwrap();
+    enc.finish()
+}
+
+#[cfg(feature = "context_gate")]
+fn forge_v2_hnsw_wire_level_without_receipt_zkann(bytes: &[u8]) -> Vec<u8> {
+    let mut dec = Decoder::new(bytes);
+    let map = dec.decode_map().unwrap();
+    let mut version = None;
+    let mut level_tag = None;
+    let mut as_of_seq = None;
+    let mut stored_root_bytes = None;
+    let mut receipt_bytes = None;
+    let mut attestation_bytes = None;
+    for (k, v) in map {
+        match k.as_u64().unwrap() {
+            1 => version = Some(v.as_u64().unwrap()),
+            2 => level_tag = Some(v.as_u64().unwrap()),
+            3 => as_of_seq = v.as_u64(),
+            4 => stored_root_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            5 => receipt_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            6 => attestation_bytes = Some(v.as_bytes().unwrap().to_vec()),
+            other => panic!("unexpected v2 cognition certificate field {other}"),
+        }
+    }
+    assert_eq!(
+        level_tag,
+        Some(1),
+        "fixture must keep the outer wire level at HNSW audit-on-demand"
+    );
+    let stripped_receipt =
+        strip_zkann_from_semantic_receipt_bytes(&receipt_bytes.expect("receipt field"));
+
+    let mut enc = Encoder::new();
+    let mut map_len = 5u64;
+    if as_of_seq.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len).unwrap();
+    enc.encode_unsigned(1).unwrap();
+    enc.encode_unsigned(version.expect("version field"))
+        .unwrap();
+    enc.encode_unsigned(2).unwrap();
+    enc.encode_unsigned(level_tag.expect("level field"))
+        .unwrap();
+    if let Some(seq) = as_of_seq {
+        enc.encode_unsigned(3).unwrap();
+        enc.encode_unsigned(seq).unwrap();
+    }
+    enc.encode_unsigned(4).unwrap();
+    enc.encode_bytes(&stored_root_bytes.expect("stored root field"))
+        .unwrap();
+    enc.encode_unsigned(5).unwrap();
+    enc.encode_bytes(&stripped_receipt).unwrap();
+    enc.encode_unsigned(6).unwrap();
+    enc.encode_bytes(&attestation_bytes.expect("attestation field"))
+        .unwrap();
+    enc.finish()
+}
+
+#[cfg(feature = "context_gate")]
+fn v2_fixture_with_receipt_level(
+    attestation: ContextAttestationDraft,
+    receipt_level: RetrievalProofLevel,
+) -> (Vec<u8>, TrustConfig) {
+    use mneme_root::StoredRoot;
+
+    let mut index = SemanticIndex::new();
+    let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
+    index
+        .insert(
+            oid(0xcd),
+            FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap(),
+        )
+        .unwrap();
+    let operator = appendix_b_operator();
+    let stored = StoredRoot::assemble(
+        [0x20; 32],
+        [0x21; 32],
+        index.semantic_commit(),
+        [0x22; 14],
+        [0x00; 32],
+        2,
+        &operator,
+    )
+    .unwrap();
+    let receipt = index
+        .recall_receipt_zkann(&proc(), &q, stored.preimage_hash, receipt_level)
+        .unwrap();
+    assert_eq!(receipt.zkann.as_ref().map(|z| z.level), Some(receipt_level));
+    let bytes =
+        assemble_cognition_certificate_v2_draft(&stored, &receipt, None, attestation).unwrap();
+    (bytes, TrustConfig::new(operator.public_key_bytes()))
+}
+
+#[cfg(feature = "context_gate")]
+fn hnsw_v2_fixture_without_receipt_zkann(
+    attestation: ContextAttestationDraft,
+) -> (Vec<u8>, TrustConfig) {
+    let (bytes, trust) =
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::HnswAuditOnDemand);
+    (
+        forge_v2_hnsw_wire_level_without_receipt_zkann(&bytes),
+        trust,
+    )
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_draft_rejects_hnsw_wire_level_without_receipt_zkann() {
+    let attestation = ContextAttestationDraft::placeholder([0x44; 32]);
+    let (bytes, trust) = hnsw_v2_fixture_without_receipt_zkann(attestation);
+
+    assert_eq!(
+        verify_cognition_certificate_v2_draft(&bytes, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_strict_rejects_hnsw_wire_level_without_receipt_zkann() {
+    let attestation = ContextAttestationDraft::strict(
+        ContextConsumptionAttestation {
+            assembly_profile: AssemblyProfile { id: [0x45; 32] },
+            context_hash: [0x46; 32],
+            certified_memory_set_hash: [0x47; 32],
+        },
+        None,
+    );
+    let (bytes, trust) = hnsw_v2_fixture_without_receipt_zkann(attestation);
+
+    assert_eq!(
+        verify_cognition_certificate_v2_draft_strict(&bytes, &trust, &proc(), &[], None, None),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_draft_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
+    let attestation = ContextAttestationDraft::placeholder([0x48; 32]);
+    let (bytes, trust) =
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::HnswAuditOnDemand);
+    let forged = forge_v2_outer_level(
+        &bytes,
+        RetrievalProofLevel::HnswAuditOnDemand,
+        RetrievalProofLevel::ExactDominance,
+    );
+
+    assert_eq!(
+        verify_cognition_certificate_v2_draft(&forged, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_draft_rejects_hnsw_wire_level_with_exact_receipt_zkann() {
+    let attestation = ContextAttestationDraft::placeholder([0x49; 32]);
+    let (bytes, trust) =
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::ExactDominance);
+    let forged = forge_v2_outer_level(
+        &bytes,
+        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::HnswAuditOnDemand,
+    );
+
+    assert_eq!(
+        verify_cognition_certificate_v2_draft(&forged, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_strict_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
+    let attestation = ContextAttestationDraft::strict(
+        ContextConsumptionAttestation {
+            assembly_profile: AssemblyProfile { id: [0x4a; 32] },
+            context_hash: [0x4b; 32],
+            certified_memory_set_hash: [0x4c; 32],
+        },
+        None,
+    );
+    let (bytes, trust) =
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::HnswAuditOnDemand);
+    let forged = forge_v2_outer_level(
+        &bytes,
+        RetrievalProofLevel::HnswAuditOnDemand,
+        RetrievalProofLevel::ExactDominance,
+    );
+
+    assert_eq!(
+        verify_cognition_certificate_v2_draft_strict(&forged, &trust, &proc(), &[], None, None),
+        Err(MnemeError::CertificateInvalid)
+    );
+}
+
+#[cfg(feature = "context_gate")]
+#[test]
+fn cognition_cert_v2_strict_rejects_hnsw_wire_level_with_exact_receipt_zkann() {
+    let attestation = ContextAttestationDraft::strict(
+        ContextConsumptionAttestation {
+            assembly_profile: AssemblyProfile { id: [0x4d; 32] },
+            context_hash: [0x4e; 32],
+            certified_memory_set_hash: [0x4f; 32],
+        },
+        None,
+    );
+    let (bytes, trust) =
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::ExactDominance);
+    let forged = forge_v2_outer_level(
+        &bytes,
+        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::HnswAuditOnDemand,
+    );
+
+    assert_eq!(
+        verify_cognition_certificate_v2_draft_strict(&forged, &trust, &proc(), &[], None, None),
+        Err(MnemeError::CertificateInvalid)
+    );
 }
 
 #[cfg(feature = "context_gate")]

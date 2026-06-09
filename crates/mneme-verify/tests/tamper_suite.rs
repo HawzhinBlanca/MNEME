@@ -1,11 +1,17 @@
 //! Tamper suite for mneme-verify (§17.2, v0 ≥40 cases).
 
 mod helpers;
+#[path = "../../../tests/support/source_inventory.rs"]
+mod source_inventory;
 
 use helpers::{build_valid_recall, theme_key};
 use mneme_core::{MnemeError, Query, TrustTier};
 use mneme_verify::{
     RecallContext, verify_membership_proof, verify_recall, verify_root, verify_store,
+};
+use source_inventory::{
+    assert_no_local_source_inventory_helpers, source_contains_test_fn, test_function_names,
+    test_functions_with_prefixes, test_generator_macro_names,
 };
 
 macro_rules! tamper_case {
@@ -390,6 +396,81 @@ fn tamper_below_tier_policy() {
     assert!(err.to_string().contains("§3 honesty boundary"));
 }
 
+fn source_contains_tamper_case(source: &str, name: &str) -> bool {
+    let invocation_name = format!("{name},");
+    source.lines().any(|line| line.trim() == invocation_name)
+}
+
+#[test]
+fn inventory_source_scan_counts_only_test_functions() {
+    const SOURCE: &str = concat!(
+        "fn tamper_verify_root_helper() {}\n",
+        "\n",
+        "#[test]\n",
+        "fn tamper_verify_root_real_case() {}\n",
+        "\n",
+        "#[test]\n",
+        "#[ignore]\n",
+        "fn tamper_verify_root_ignored_but_compiled_case() {}\n",
+    );
+
+    assert_eq!(
+        test_functions_with_prefixes(SOURCE, &["tamper_verify_root_"]),
+        vec![
+            "tamper_verify_root_real_case".to_string(),
+            "tamper_verify_root_ignored_but_compiled_case".to_string(),
+        ]
+    );
+    assert!(source_contains_test_fn(
+        SOURCE,
+        "tamper_verify_root_real_case"
+    ));
+    assert!(!source_contains_test_fn(
+        SOURCE,
+        "tamper_verify_root_helper"
+    ));
+}
+
+#[test]
+fn inventory_source_scan_helpers_remain_shared() {
+    assert_no_local_source_inventory_helpers("tamper_suite.rs", include_str!("tamper_suite.rs"));
+}
+
+#[test]
+fn verify_root_direct_inventory_is_mapped() {
+    const TAMPER_SUITE: &str = include_str!("tamper_suite.rs");
+    const PARITY: &[(&str, &str)] = &[("tamper_verify_root_bad_sig", "tamper_root_signature")];
+
+    let direct_root_cases = test_functions_with_prefixes(TAMPER_SUITE, &["tamper_verify_root_"]);
+    assert!(
+        !direct_root_cases.is_empty(),
+        "expected direct verify_root tamper cases in tamper_suite.rs"
+    );
+
+    let mapped_direct: std::collections::BTreeSet<&str> =
+        PARITY.iter().map(|(direct_case, _)| *direct_case).collect();
+    let missing: Vec<_> = direct_root_cases
+        .iter()
+        .filter(|case| !mapped_direct.contains(case.as_str()))
+        .cloned()
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "direct verify_root tamper cases need explicit indirect root-tamper mapping: {missing:?}"
+    );
+
+    for (direct_case, indirect_case) in PARITY {
+        assert!(
+            source_contains_test_fn(TAMPER_SUITE, direct_case),
+            "mapped direct verify_root case is missing: {direct_case}"
+        );
+        assert!(
+            source_contains_tamper_case(TAMPER_SUITE, indirect_case),
+            "mapped indirect root tamper case is missing: {indirect_case}"
+        );
+    }
+}
+
 #[test]
 fn tamper_verify_root_bad_sig() {
     let f = build_valid_recall();
@@ -412,6 +493,46 @@ fn tamper_verify_store_incomplete_marker() {
 
 fn hex32(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn multibyte_hex_64_bytes(prefix: char) -> String {
+    let value = format!("\u{20AC}{}", "a".repeat(61));
+    assert_eq!(value.len(), 64, "{prefix}: fixture must hit byte len guard");
+    assert_ne!(
+        value.chars().count(),
+        64,
+        "{prefix}: fixture must contain multibyte UTF-8"
+    );
+    value
+}
+
+fn assert_verify_store_schema_drift_without_panic(
+    store: &std::path::Path,
+    trust: &mneme_crypto::TrustConfig,
+    context: &str,
+) {
+    assert_verify_store_error_without_panic(store, trust, MnemeError::SchemaDrift, context);
+}
+
+fn assert_verify_store_error_without_panic(
+    store: &std::path::Path,
+    trust: &mneme_crypto::TrustConfig,
+    expected: MnemeError,
+    context: &str,
+) {
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| verify_store(store, trust)));
+    assert!(result.is_ok(), "verify_store panicked on {context}");
+    match result.expect("panic checked") {
+        Err(err) => assert_eq!(err, expected, "unexpected verifier error for {context}"),
+        Ok(_) => panic!("verify_store accepted {context}"),
+    }
+}
+
+fn write_journal_line(path: &std::path::Path, value: serde_json::Value, context: &str) {
+    let mut line = serde_json::to_string(&value).expect(context);
+    line.push('\n');
+    std::fs::write(path, line).expect(context);
 }
 
 fn persist_recall_fixture_store(
@@ -484,8 +605,7 @@ fn tamper_verify_store_multibyte_key_index_schema_drift() {
     let fixture = build_valid_recall();
     persist_recall_fixture_store(dir.path(), &fixture);
 
-    let malicious_key = format!("\u{20AC}{}", "a".repeat(61));
-    assert_eq!(malicious_key.len(), 64, "64-byte key hits len guard");
+    let malicious_key = multibyte_hex_64_bytes('k');
     let payload = format!(
         "{{\"entries\":{{\"{}\":\"{}\"}},\"tombstones\":[]}}",
         malicious_key,
@@ -493,18 +613,11 @@ fn tamper_verify_store_multibyte_key_index_schema_drift() {
     );
     std::fs::write(dir.path().join("meta/key_index.json"), payload).expect("sidecar");
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        verify_store(dir.path(), &fixture.trust)
-    }));
-    assert!(
-        result.is_ok(),
-        "verify_store must not panic on attacker-controlled key_index.json"
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &fixture.trust,
+        "attacker-controlled key_index.json entry key",
     );
-    match result.unwrap() {
-        Err(MnemeError::SchemaDrift) => {}
-        Err(other) => panic!("expected SchemaDrift, got {other:?}"),
-        Ok(_) => panic!("expected SchemaDrift, verify_store succeeded"),
-    }
 }
 
 /// Tombstone entries with multibyte UTF-8 must also fail closed as `SchemaDrift`.
@@ -514,26 +627,574 @@ fn tamper_verify_store_multibyte_key_index_tombstone_schema_drift() {
     let fixture = build_valid_recall();
     persist_recall_fixture_store(dir.path(), &fixture);
 
-    let malicious_tombstone = format!("\u{20AC}{}", "b".repeat(61));
-    assert_eq!(malicious_tombstone.len(), 64);
+    let malicious_tombstone = multibyte_hex_64_bytes('t');
     let payload = format!(
         "{{\"entries\":{{}},\"tombstones\":[\"{}\"]}}",
         malicious_tombstone
     );
     std::fs::write(dir.path().join("meta/key_index.json"), payload).expect("sidecar");
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        verify_store(dir.path(), &fixture.trust)
-    }));
-    assert!(
-        result.is_ok(),
-        "verify_store must not panic on tombstone tamper"
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &fixture.trust,
+        "attacker-controlled key_index.json tombstone",
     );
-    match result.unwrap() {
-        Err(MnemeError::SchemaDrift) => {}
-        Err(other) => panic!("expected SchemaDrift, got {other:?}"),
-        Ok(_) => panic!("expected SchemaDrift, verify_store succeeded"),
-    }
+}
+
+/// Malformed key-index snapshots are canonicality failures for the SMT replay
+/// surface and must fail closed without panic.
+#[test]
+fn tamper_verify_store_key_index_snapshot_malformed_json_serialization_noncanonical() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/key_index.json"), b"{\n")
+        .expect("malformed key_index snapshot");
+
+    assert_verify_store_error_without_panic(
+        dir.path(),
+        &trust,
+        MnemeError::SerializationNonCanonical,
+        "malformed key_index.json",
+    );
+}
+
+/// Valid JSON with a missing required key-index snapshot field is still a
+/// canonicality failure, not an empty/default snapshot.
+#[test]
+fn tamper_verify_store_key_index_snapshot_missing_tombstones_serialization_noncanonical() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    std::fs::write(
+        dir.path().join("meta/key_index.json"),
+        serde_json::json!({ "entries": {} }).to_string(),
+    )
+    .expect("key_index snapshot missing tombstones");
+
+    assert_verify_store_error_without_panic(
+        dir.path(),
+        &trust,
+        MnemeError::SerializationNonCanonical,
+        "key_index.json missing tombstones field",
+    );
+}
+
+/// Object-key snapshot IDs with multibyte UTF-8 must fail closed as `SchemaDrift`,
+/// not panic or fall through to a later root/object-key consistency error.
+#[test]
+fn tamper_verify_store_multibyte_object_keys_snapshot_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    let malicious_object = multibyte_hex_64_bytes('o');
+    let payload = serde_json::json!({
+        "entries": {
+            malicious_object: {
+                "namespace": "sidecar",
+                "name": "obj",
+            }
+        }
+    });
+    std::fs::write(
+        dir.path().join("meta/object_keys.json"),
+        serde_json::to_string_pretty(&payload).expect("object_keys snapshot json"),
+    )
+    .expect("object_keys snapshot");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled object_keys.json object id",
+    );
+}
+
+/// Malformed object-key snapshots are schema drift because this sidecar is a
+/// plaintext reverse index, not the canonical SMT snapshot itself.
+#[test]
+fn tamper_verify_store_object_keys_snapshot_malformed_json_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/object_keys.json"), b"{\n")
+        .expect("malformed object_keys snapshot");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "malformed object_keys.json",
+    );
+}
+
+/// Object-key snapshots missing the required entries map must fail as typed
+/// schema drift and must not be interpreted as an empty sidecar.
+#[test]
+fn tamper_verify_store_object_keys_snapshot_missing_entries_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/object_keys.json"), "{}")
+        .expect("object_keys snapshot missing entries");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "object_keys.json missing entries field",
+    );
+}
+
+/// Embedding snapshot IDs with multibyte UTF-8 must fail closed as `SchemaDrift`,
+/// matching Store cold-open and the core fixed-width hex decoder behavior.
+#[test]
+fn tamper_verify_store_multibyte_embeddings_snapshot_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+
+    let malicious_object = multibyte_hex_64_bytes('e');
+    let payload = serde_json::json!({
+        "entries": {
+            malicious_object: {
+                "dim": 2,
+                "scale": 0,
+                "components": [3, 1],
+            }
+        }
+    });
+    std::fs::write(
+        dir.path().join("meta/embeddings.json"),
+        serde_json::to_string_pretty(&payload).expect("embeddings snapshot json"),
+    )
+    .expect("embeddings snapshot");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled embeddings.json object id",
+    );
+}
+
+/// Embedding snapshot entries whose declared dimension does not match the
+/// component count must fail closed as `SchemaDrift` before semantic replay.
+#[test]
+fn tamper_verify_store_embeddings_snapshot_shape_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+    let object_hex = sole_object_id_hex(dir.path());
+
+    let payload = serde_json::json!({
+        "entries": {
+            object_hex: {
+                "dim": 3,
+                "scale": 0,
+                "components": [3, 1],
+            }
+        }
+    });
+    std::fs::write(
+        dir.path().join("meta/embeddings.json"),
+        serde_json::to_string_pretty(&payload).expect("embeddings snapshot json"),
+    )
+    .expect("embeddings snapshot");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled embeddings.json shape",
+    );
+}
+
+/// Malformed embedding snapshots must fail closed as schema drift before any
+/// semantic commitment replay can treat them as meaningful index state.
+#[test]
+fn tamper_verify_store_embeddings_snapshot_malformed_json_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/embeddings.json"), b"{\n")
+        .expect("malformed embeddings snapshot");
+
+    assert_verify_store_schema_drift_without_panic(dir.path(), &trust, "malformed embeddings.json");
+}
+
+/// Embedding snapshots missing the required entries map must fail as typed
+/// schema drift and must not erase semantic state by becoming an empty map.
+#[test]
+fn tamper_verify_store_embeddings_snapshot_missing_entries_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/embeddings.json"), "{}")
+        .expect("embeddings snapshot missing entries");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "embeddings.json missing entries field",
+    );
+}
+
+/// Embedding journal upserts with mismatched dimensions/components must fail
+/// closed as `SchemaDrift`, not fall through as a semantic root mismatch.
+#[test]
+fn tamper_verify_store_embeddings_journal_upsert_shape_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+    let object_hex = sole_object_id_hex(dir.path());
+
+    write_journal_line(
+        &dir.path().join("meta/embeddings.journal"),
+        serde_json::json!({
+            "op": "upsert",
+            "id": object_hex,
+            "dim": 3,
+            "scale": 0,
+            "components": [3, 1],
+        }),
+        "embeddings journal upsert shape json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled embeddings.journal upsert shape",
+    );
+}
+
+/// Malformed object-key journal JSON must fail closed as `SchemaDrift`, before
+/// any later object-key/root consistency path can run.
+#[test]
+fn tamper_verify_store_object_keys_journal_malformed_json_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/object_keys.journal"), b"{\n")
+        .expect("malformed object_keys journal");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "malformed object_keys.journal JSON",
+    );
+}
+
+/// Syntactically valid object-key journal JSON that omits a required field is
+/// still schema drift and must not be normalized into an empty/default key.
+#[test]
+fn tamper_verify_store_object_keys_journal_missing_field_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+    let object_hex = sole_object_id_hex(dir.path());
+
+    write_journal_line(
+        &dir.path().join("meta/object_keys.journal"),
+        serde_json::json!({
+            "id": object_hex,
+            "namespace": "sidecar",
+        }),
+        "object_keys journal missing field json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "object_keys.journal missing name field",
+    );
+}
+
+/// Malformed embedding journal JSON must fail closed as `SchemaDrift`, before
+/// semantic commitment replay can interpret attacker-controlled state.
+#[test]
+fn tamper_verify_store_embeddings_journal_malformed_json_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/embeddings.journal"), b"{\n")
+        .expect("malformed embeddings journal");
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "malformed embeddings.journal JSON",
+    );
+}
+
+/// Syntactically valid embedding journal upserts that omit components must fail
+/// closed as `SchemaDrift`, not construct an empty or partial embedding.
+#[test]
+fn tamper_verify_store_embeddings_journal_missing_components_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+    let object_hex = sole_object_id_hex(dir.path());
+
+    write_journal_line(
+        &dir.path().join("meta/embeddings.journal"),
+        serde_json::json!({
+            "op": "upsert",
+            "id": object_hex,
+            "dim": 2,
+            "scale": 0,
+        }),
+        "embeddings journal missing components json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "embeddings.journal missing components field",
+    );
+}
+
+/// Malformed key-index journal JSON is a canonicality failure for the SMT replay
+/// surface, distinct from sidecar schema drift, and must still be no-panic.
+#[test]
+fn tamper_verify_store_key_index_journal_malformed_json_serialization_noncanonical() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    std::fs::write(dir.path().join("meta/key_index.journal"), b"{\n")
+        .expect("malformed key_index journal");
+
+    assert_verify_store_error_without_panic(
+        dir.path(),
+        &trust,
+        MnemeError::SerializationNonCanonical,
+        "malformed key_index.journal JSON",
+    );
+}
+
+/// Syntactically valid key-index journal JSON with the wrong tagged shape must
+/// also remain a typed canonicality failure, not get normalized into a no-op.
+#[test]
+fn tamper_verify_store_key_index_journal_missing_op_serialization_noncanonical() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    write_journal_line(
+        &dir.path().join("meta/key_index.journal"),
+        serde_json::json!({
+            "key": logical_key_hash_hex("sidecar", "obj"),
+            "object": sole_object_id_hex(dir.path()),
+        }),
+        "key_index journal missing op json",
+    );
+
+    assert_verify_store_error_without_panic(
+        dir.path(),
+        &trust,
+        MnemeError::SerializationNonCanonical,
+        "key_index.journal missing op field",
+    );
+}
+
+/// Object-key journal IDs with multibyte UTF-8 must fail closed as `SchemaDrift`,
+/// matching the snapshot path and store cold-open behavior.
+#[test]
+fn tamper_verify_store_multibyte_object_keys_journal_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    write_journal_line(
+        &dir.path().join("meta/object_keys.journal"),
+        serde_json::json!({
+            "id": multibyte_hex_64_bytes('j'),
+            "namespace": "sidecar",
+            "name": "obj",
+        }),
+        "object_keys journal json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled object_keys.journal object id",
+    );
+}
+
+/// Key-index journal upsert keys with multibyte UTF-8 must fail closed as
+/// `SchemaDrift`, not panic or degrade into a later SMT root mismatch.
+#[test]
+fn tamper_verify_store_multibyte_key_index_journal_upsert_key_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+    let object_hex = sole_object_id_hex(dir.path());
+
+    write_journal_line(
+        &dir.path().join("meta/key_index.journal"),
+        serde_json::json!({
+            "op": "upsert",
+            "key": multibyte_hex_64_bytes('u'),
+            "object": object_hex,
+        }),
+        "key_index journal upsert key json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled key_index.journal upsert key",
+    );
+}
+
+/// Key-index journal upsert object IDs with multibyte UTF-8 must fail closed as
+/// `SchemaDrift`, covering the value side of the journal replay surface.
+#[test]
+fn tamper_verify_store_multibyte_key_index_journal_upsert_object_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    write_journal_line(
+        &dir.path().join("meta/key_index.journal"),
+        serde_json::json!({
+            "op": "upsert",
+            "key": logical_key_hash_hex("sidecar", "obj"),
+            "object": multibyte_hex_64_bytes('v'),
+        }),
+        "key_index journal upsert object json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled key_index.journal upsert object",
+    );
+}
+
+/// Key-index journal tombstone keys with multibyte UTF-8 must fail closed as
+/// `SchemaDrift`, matching the snapshot tombstone boundary.
+#[test]
+fn tamper_verify_store_multibyte_key_index_journal_tombstone_schema_drift() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+
+    write_journal_line(
+        &dir.path().join("meta/key_index.journal"),
+        serde_json::json!({
+            "op": "tombstone",
+            "key": multibyte_hex_64_bytes('d'),
+        }),
+        "key_index journal tombstone json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled key_index.journal tombstone key",
+    );
+}
+
+/// Embedding journal upsert IDs with multibyte UTF-8 must fail closed as
+/// `SchemaDrift`, preserving the typed loader boundary before semantic replay.
+#[test]
+fn tamper_verify_store_multibyte_embeddings_journal_upsert_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+
+    write_journal_line(
+        &dir.path().join("meta/embeddings.journal"),
+        serde_json::json!({
+            "op": "upsert",
+            "id": multibyte_hex_64_bytes('p'),
+            "dim": 2,
+            "scale": 0,
+            "components": [3, 1],
+        }),
+        "embeddings journal upsert json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled embeddings.journal upsert id",
+    );
+}
+
+/// Embedding journal remove IDs with multibyte UTF-8 must fail closed as
+/// `SchemaDrift`, covering both semantic journal variants.
+#[test]
+fn tamper_verify_store_multibyte_embeddings_journal_remove_schema_drift() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+
+    write_journal_line(
+        &dir.path().join("meta/embeddings.journal"),
+        serde_json::json!({
+            "op": "remove",
+            "id": multibyte_hex_64_bytes('r'),
+        }),
+        "embeddings journal remove json",
+    );
+
+    assert_verify_store_schema_drift_without_panic(
+        dir.path(),
+        &trust,
+        "attacker-controlled embeddings.journal remove id",
+    );
 }
 
 #[test]
@@ -639,6 +1300,295 @@ fn persisted_store_with_entry() -> (tempfile::TempDir, mneme_crypto::TrustConfig
     (dir, trust)
 }
 
+fn persisted_store_with_semantic_entry() -> (tempfile::TempDir, mneme_crypto::TrustConfig) {
+    use mneme_cap::agent_cap;
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x24; 32]);
+    let agent = KeyPair::from_seed([0x25; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let trust = store.trust().clone();
+    store
+        .remember(
+            mneme_core::Draft {
+                namespace: "semantic-sidecar".into(),
+                logical_name: "semantic-live".into(),
+                kind: mneme_core::MemoryKind::Semantic,
+                body: b"semantic sidecar body".to_vec(),
+                parent_ids: vec![],
+                session: [0x26; 16],
+                trust_tier: None,
+                embedding: Some(
+                    mneme_core::FixedPointEmbedding::new(2, 0, vec![3, 1])
+                        .expect("semantic embedding"),
+                ),
+                valid_time_ms: None,
+            },
+            &cap,
+        )
+        .expect("remember semantic");
+    drop(store);
+    (dir, trust)
+}
+
+fn persisted_store_after_shred_forget() -> (tempfile::TempDir, mneme_crypto::TrustConfig) {
+    use mneme_cap::agent_cap;
+    use mneme_core::{ForgetMode, ForgetTarget, LogicalKey};
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x31; 32]);
+    let agent = KeyPair::from_seed([0x32; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let logical_key = LogicalKey {
+        namespace: "sidecar".into(),
+        name: "forgotten-obj".into(),
+    };
+    store
+        .remember(
+            mneme_core::Draft {
+                namespace: logical_key.namespace.clone(),
+                logical_name: logical_key.name.clone(),
+                kind: mneme_core::MemoryKind::Semantic,
+                body: b"forgotten sidecar body".to_vec(),
+                parent_ids: vec![],
+                session: [0x33; 16],
+                trust_tier: None,
+                embedding: None,
+                valid_time_ms: None,
+            },
+            &cap,
+        )
+        .expect("remember");
+    store
+        .forget(
+            ForgetTarget::LogicalKey(logical_key),
+            &cap,
+            ForgetMode::Shred,
+        )
+        .expect("shred forget");
+    let trust = store.trust().clone();
+    drop(store);
+    (dir, trust)
+}
+
+fn persisted_store_with_two_entries() -> (tempfile::TempDir, mneme_crypto::TrustConfig) {
+    use mneme_cap::agent_cap;
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x41; 32]);
+    let agent = KeyPair::from_seed([0x42; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    let trust = store.trust().clone();
+    for (name, body, session) in [
+        ("obj-a", b"sidecar-body-a".as_slice(), [0x43; 16]),
+        ("obj-b", b"sidecar-body-b".as_slice(), [0x44; 16]),
+    ] {
+        store
+            .remember(
+                mneme_core::Draft {
+                    namespace: "sidecar".into(),
+                    logical_name: name.into(),
+                    kind: mneme_core::MemoryKind::Semantic,
+                    body: body.to_vec(),
+                    parent_ids: vec![],
+                    session,
+                    trust_tier: None,
+                    embedding: None,
+                    valid_time_ms: None,
+                },
+                &cap,
+            )
+            .expect("remember");
+    }
+    drop(store);
+    (dir, trust)
+}
+
+fn swap_object_key_journal_logical_names(store: &std::path::Path) {
+    let journal = store.join("meta/object_keys.journal");
+    let data = std::fs::read_to_string(&journal).expect("read object_keys.journal");
+    let mut entries = data
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("journal json"))
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 2, "expected two object-key journal entries");
+
+    let first_namespace = entries[0]["namespace"].clone();
+    let first_name = entries[0]["name"].clone();
+    entries[0]["namespace"] = entries[1]["namespace"].clone();
+    entries[0]["name"] = entries[1]["name"].clone();
+    entries[1]["namespace"] = first_namespace;
+    entries[1]["name"] = first_name;
+
+    let mut rewritten = String::new();
+    for entry in entries {
+        rewritten.push_str(&serde_json::to_string(&entry).expect("journal json encode"));
+        rewritten.push('\n');
+    }
+    std::fs::write(&journal, rewritten).expect("write swapped object_keys.journal");
+}
+
+fn persisted_store_with_live_and_tombstoned_entry() -> (tempfile::TempDir, mneme_crypto::TrustConfig)
+{
+    use mneme_cap::agent_cap;
+    use mneme_core::{ForgetMode, ForgetTarget, LogicalKey};
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x51; 32]);
+    let agent = KeyPair::from_seed([0x52; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    for (name, session) in [("live-obj", [0x53; 16]), ("forgotten-obj", [0x54; 16])] {
+        store
+            .remember(
+                mneme_core::Draft {
+                    namespace: "sidecar".into(),
+                    logical_name: name.into(),
+                    kind: mneme_core::MemoryKind::Semantic,
+                    body: format!("body-{name}").into_bytes(),
+                    parent_ids: vec![],
+                    session,
+                    trust_tier: None,
+                    embedding: None,
+                    valid_time_ms: None,
+                },
+                &cap,
+            )
+            .expect("remember");
+    }
+    store
+        .forget(
+            ForgetTarget::LogicalKey(LogicalKey {
+                namespace: "sidecar".into(),
+                name: "forgotten-obj".into(),
+            }),
+            &cap,
+            ForgetMode::Shred,
+        )
+        .expect("shred forget");
+    let trust = store.trust().clone();
+    drop(store);
+    (dir, trust)
+}
+
+fn persisted_store_after_logical_key_overwrite() -> (tempfile::TempDir, mneme_crypto::TrustConfig) {
+    use mneme_cap::agent_cap;
+    use mneme_crypto::KeyPair;
+    use mneme_store::Store;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let operator = KeyPair::from_seed([0x61; 32]);
+    let agent = KeyPair::from_seed([0x62; 32]);
+    let cap = agent_cap(&operator, agent.public_key_bytes()).expect("cap");
+    let mut store = Store::create(dir.path(), operator).expect("create");
+    store.trust_mut().authorized_writers.push(cap.subject);
+    for (body, session) in [
+        (b"first body".as_slice(), [0x63; 16]),
+        (b"second body", [0x64; 16]),
+    ] {
+        store
+            .remember(
+                mneme_core::Draft {
+                    namespace: "sidecar".into(),
+                    logical_name: "rewritten-key".into(),
+                    kind: mneme_core::MemoryKind::Semantic,
+                    body: body.to_vec(),
+                    parent_ids: vec![],
+                    session,
+                    trust_tier: None,
+                    embedding: None,
+                    valid_time_ms: None,
+                },
+                &cap,
+            )
+            .expect("remember");
+    }
+    let trust = store.trust().clone();
+    drop(store);
+    (dir, trust)
+}
+
+fn rebind_live_object_key_to_tombstoned_logical_key(store: &std::path::Path) {
+    let journal = store.join("meta/object_keys.journal");
+    let data = std::fs::read_to_string(&journal).expect("read object_keys.journal");
+    let mut entries = data
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("journal json"))
+        .collect::<Vec<_>>();
+    let live = entries
+        .iter_mut()
+        .find(|entry| entry["name"] == "live-obj")
+        .expect("live object-key entry");
+    live["name"] = serde_json::Value::String("forgotten-obj".into());
+
+    let mut rewritten = String::new();
+    for entry in entries {
+        rewritten.push_str(&serde_json::to_string(&entry).expect("journal json encode"));
+        rewritten.push('\n');
+    }
+    std::fs::write(&journal, rewritten).expect("write rebound object_keys.journal");
+}
+
+fn write_stale_object_key_snapshot_for_sole_object(
+    store: &std::path::Path,
+    namespace: &str,
+    name: &str,
+) {
+    let id = sole_object_id_hex(store);
+    let payload = serde_json::json!({
+        "entries": {
+            id: {
+                "namespace": namespace,
+                "name": name,
+            }
+        }
+    });
+    std::fs::write(
+        store.join("meta/object_keys.json"),
+        serde_json::to_string_pretty(&payload).expect("object_keys snapshot json"),
+    )
+    .expect("write stale object_keys snapshot");
+}
+
+fn logical_key_hash_hex(namespace: &str, name: &str) -> String {
+    hex32(
+        &mneme_core::LogicalKey {
+            namespace: namespace.into(),
+            name: name.into(),
+        }
+        .hash(),
+    )
+}
+
+fn write_stale_key_index_snapshot(store: &std::path::Path, key_hex: &str, object_hex: &str) {
+    let payload = serde_json::json!({
+        "entries": {
+            key_hex: object_hex,
+        },
+        "tombstones": [],
+    });
+    std::fs::write(
+        store.join("meta/key_index.json"),
+        serde_json::to_string_pretty(&payload).expect("key_index snapshot json"),
+    )
+    .expect("write stale key_index snapshot");
+}
+
 /// B-1: a byte flip in the persisted object-keys sidecar (the `object_keys.journal`
 /// holds the single-`remember` mapping) must now make `verify_store` itself fail
 /// closed (typed Err, no panic) — previously caught only by `Store::open`.
@@ -734,6 +1684,138 @@ fn tamper_verify_store_object_keys_namespace_rebind() {
     }
 }
 
+/// B-1: semantic sidecar replay is signed via `root.semantic_commit`; verifier
+/// must reject a store whose embeddings journal no longer reconstructs that commit.
+#[test]
+fn tamper_verify_store_semantic_state_below_signed_head_fails_closed() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    let journal = dir.path().join("meta/embeddings.journal");
+    assert_eq!(
+        std::fs::read_to_string(&journal)
+            .expect("embeddings journal")
+            .lines()
+            .count(),
+        1
+    );
+    std::fs::write(&journal, b"").expect("tamper embeddings journal below signed head");
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(e, MnemeError::RootInconsistent),
+        Ok(_) => panic!("verify_store accepted semantic state below the signed HEAD"),
+    }
+}
+
+/// B-1: swapping two valid live object-key mappings must still fail closed. A
+/// weaker check that only asks "does this id exist?" and "does this key exist?"
+/// misses this, because both sides are present while the binding is wrong.
+#[test]
+fn tamper_verify_store_object_keys_swapped_live_bindings() {
+    let (dir, trust) = persisted_store_with_two_entries();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline two-entry store must verify clean"
+    );
+    swap_object_key_journal_logical_names(dir.path());
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(e, MnemeError::RootInconsistent),
+        Ok(_) => panic!("swapped live object-key bindings must fail closed as RootInconsistent"),
+    }
+}
+
+/// B-1: object-key sidecars may retain the AAD mapping for a legitimately
+/// tombstoned key after shred-forget. Verifier strictness must not turn that valid
+/// lifecycle transition into a false-positive store rejection.
+#[test]
+fn verify_store_accepts_object_keys_for_tombstoned_key_after_shred_forget() {
+    let (dir, trust) = persisted_store_after_shred_forget();
+    match verify_store(dir.path(), &trust) {
+        Ok(_) => {}
+        Err(e) => panic!("valid post-shred-forget store must verify, got {e:?}"),
+    }
+}
+
+/// B-1: a live object's object-key AAD cannot be rebound to an unrelated
+/// tombstoned logical key. Tombstoned AAD may linger for its own object, but every
+/// live key-index leaf must still have the exact reverse mapping.
+#[test]
+fn tamper_verify_store_object_keys_live_rebound_to_tombstone_fails_closed() {
+    let (dir, trust) = persisted_store_with_live_and_tombstoned_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline live+tombstone store must verify clean"
+    );
+    rebind_live_object_key_to_tombstoned_logical_key(dir.path());
+    match verify_store(dir.path(), &trust) {
+        Err(e) => assert_eq!(e, MnemeError::RootInconsistent),
+        Ok(_) => panic!("live object rebound to tombstoned object-key AAD must fail closed"),
+    }
+}
+
+/// B-1: repeated writes to the same logical key leave an older object-key journal
+/// entry for the superseded object. That stale AAD is legitimate only because the
+/// current live key-index leaf still has an exact reverse mapping to the newest object.
+#[test]
+fn verify_store_accepts_superseded_object_key_after_logical_key_overwrite() {
+    let (dir, trust) = persisted_store_after_logical_key_overwrite();
+    match verify_store(dir.path(), &trust) {
+        Ok(_) => {}
+        Err(e) => panic!("valid logical-key overwrite must verify, got {e:?}"),
+    }
+}
+
+/// B-1: key-index journal upserts must be replayed after the snapshot. A stale
+/// snapshot value for the same logical-key hash would otherwise rebuild the wrong
+/// SMT root and reject a valid signed head.
+#[test]
+fn verify_store_applies_key_index_journal_upsert_after_stale_snapshot_for_same_key() {
+    let (dir, trust) = persisted_store_with_entry();
+    write_stale_key_index_snapshot(
+        dir.path(),
+        &logical_key_hash_hex("sidecar", "obj"),
+        &"a".repeat(64),
+    );
+    match verify_store(dir.path(), &trust) {
+        Ok(_) => {}
+        Err(e) => {
+            panic!("verify_store ignored the key-index journal upsert over a stale snapshot: {e:?}")
+        }
+    }
+}
+
+/// B-1: key-index journal tombstones must also be replayed after the snapshot. A
+/// stale snapshot live entry for the same key would resurrect forgotten state.
+#[test]
+fn verify_store_applies_key_index_journal_tombstone_after_stale_snapshot_for_same_key() {
+    let (dir, trust) = persisted_store_after_shred_forget();
+    write_stale_key_index_snapshot(
+        dir.path(),
+        &logical_key_hash_hex("sidecar", "forgotten-obj"),
+        &sole_object_id_hex(dir.path()),
+    );
+    match verify_store(dir.path(), &trust) {
+        Ok(_) => {}
+        Err(e) => {
+            panic!(
+                "verify_store ignored the key-index journal tombstone over a stale snapshot: {e:?}"
+            )
+        }
+    }
+}
+
+/// B-1: when an older `object_keys.json` snapshot and a newer journal both bind
+/// the same object id, the journal must be replayed last. If the verifier trusts
+/// the stale snapshot entry, the logical-key hash no longer matches the signed key-index.
+#[test]
+fn verify_store_applies_object_key_journal_after_stale_snapshot_for_same_object() {
+    let (dir, trust) = persisted_store_with_entry();
+    write_stale_object_key_snapshot_for_sole_object(dir.path(), "sidecar", "stale-snapshot-obj");
+    match verify_store(dir.path(), &trust) {
+        Ok(_) => {}
+        Err(e) => {
+            panic!("verify_store ignored the journal override for object_keys snapshot: {e:?}")
+        }
+    }
+}
+
 /// B-1: an entry whose object id is absent from the verified object set is rejected
 /// as `RootInconsistent` (exercises the `object_keys.json` snapshot path too).
 #[test]
@@ -755,7 +1837,7 @@ fn tamper_verify_store_object_keys_unknown_object_id() {
 /// the genuine `RootSigInvalid` path (not the `schema drift` that a raw byte flip in
 /// the CBOR framing produces).
 #[test]
-fn tamper_verify_store_head_signature_only_rootsiginvalid() {
+fn tamper_verify_signed_head_only_signature_only_rootsiginvalid() {
     use mneme_root::StoredRoot;
     let (dir, trust) = persisted_store_with_entry();
     let head = dir.path().join("roots/HEAD");
@@ -891,21 +1973,61 @@ fn tamper_verify_store_missing_head_checkpoint_fails_closed() {
 
 /// F-C: the tamper count is derived **dynamically from the test sources**, never a
 /// hand-typed constant that can silently drift from reality. For each `tamper_*.rs`
-/// file we count its generated `#[test]`s as: literal `#[test]` attributes, minus
-/// one phantom per `macro_rules!` definition (the `#[test]` inside the macro body),
-/// plus one per invocation of that file's locally-defined generator macro. This
-/// auto-adapts to macro renames/additions; the assertion is the real §19/§17.2
-/// guarantee (≥150 tamper cases that actually compile into the test binary).
+/// file we count adversarial cases only: literal tamper-classified `#[test]`
+/// functions plus invocations of locally-defined macros that emit `#[test]`.
+/// Self-audit inventory tests and positive controls are deliberately excluded so
+/// the §19/§17.2 floor means ≥150 real tamper cases.
 #[test]
 fn tamper_suite_meets_150_floor_counted_from_source() {
     let counts = tamper_counts_by_file();
     let total: usize = counts.values().sum();
     assert!(
         total >= 150,
-        "§19/§17.2 tamper floor: need ≥150 verify tamper cases compiled into the \
+        "§19/§17.2 tamper floor: need ≥150 source-counted adversarial verify cases in the \
          test binary, source scan found {total}: {counts:?}"
     );
     eprintln!("verify tamper cases (counted from source): {total} {counts:?}");
+}
+
+#[test]
+fn source_counter_excludes_inventory_and_positive_controls() {
+    const SOURCE: &str = concat!(
+        "macro_rules! generated_tamper {\n",
+        "    ($name:ident) => {\n",
+        "        #[test]\n",
+        "        fn $name() {}\n",
+        "    };\n",
+        "}\n",
+        "macro_rules! helper_macro {\n",
+        "    ($name:ident) => {\n",
+        "        fn $name() {}\n",
+        "    };\n",
+        "}\n",
+        "generated_tamper!(tamper_generated_case);\n",
+        "helper_macro!(tamper_helper_not_a_test);\n",
+        "#[test]\n",
+        "fn tamper_literal_case() {}\n",
+        "#[test]\n",
+        "fn cap_expired_not_after() {}\n",
+        "#[test]\n",
+        "fn ckpt_verify_wrong_previous_checkpoint() {}\n",
+        "#[test]\n",
+        "fn sem_honesty_on_procedure_mismatch() {}\n",
+        "#[test]\n",
+        "fn sem_valid_roundtrip() {}\n",
+        "#[test]\n",
+        "fn inventory_source_scan_counts_only_test_functions() {}\n",
+        "#[test]\n",
+        "fn verify_root_direct_inventory_is_mapped() {}\n",
+        "#[test]\n",
+        "fn verify_store_accepts_positive_control() {}\n",
+        "#[test]\n",
+        "fn verify_store_applies_positive_control() {}\n",
+        "#[test]\n",
+        "fn tamper_suite_meets_150_floor_counted_from_source() {}\n",
+    );
+
+    assert_eq!(tamper_count_from_source(SOURCE), 5);
 }
 
 /// Scan the verify `tests/` dir and count generated tamper `#[test]`s per
@@ -925,22 +2047,42 @@ pub fn tamper_counts_by_file() -> std::collections::BTreeMap<String, usize> {
             continue;
         }
         let src = std::fs::read_to_string(&path).expect("read source");
-        let test_attrs = src.matches("#[test]").count();
-        let macro_defs = src.matches("macro_rules!").count();
-        // Sum invocations of every macro this file defines (e.g. `cap_tamper!(`).
-        let mut invocations = 0usize;
-        for line in src.lines() {
-            if let Some(rest) = line.trim_start().strip_prefix("macro_rules!") {
-                let macro_name = rest.trim().trim_end_matches('{').trim();
-                if !macro_name.is_empty() {
-                    invocations += src.matches(&format!("{macro_name}!(")).count();
-                }
-            }
-        }
-        let generated = test_attrs.saturating_sub(macro_defs) + invocations;
-        m.insert(name, generated);
+        m.insert(name, tamper_count_from_source(&src));
     }
     m
+}
+
+fn tamper_count_from_source(source: &str) -> usize {
+    let literal_cases = test_function_names(source)
+        .iter()
+        .filter(|name| is_tamper_case_name(name))
+        .count();
+    literal_cases + test_generator_invocation_count(source)
+}
+
+fn is_tamper_case_name(name: &str) -> bool {
+    if name == "sem_valid_roundtrip"
+        || name.starts_with("inventory_")
+        || name.starts_with("tamper_suite_")
+        || name.ends_with("_inventory_is_mapped")
+        || name.starts_with("verify_store_accepts_")
+        || name.starts_with("verify_store_applies_")
+    {
+        return false;
+    }
+
+    name.starts_with("tamper_")
+        || name.starts_with("cap_")
+        || name.starts_with("ckpt_")
+        || name.starts_with("sem_")
+        || name.starts_with("tomb_")
+}
+
+fn test_generator_invocation_count(source: &str) -> usize {
+    test_generator_macro_names(source)
+        .iter()
+        .map(|macro_name| source.matches(&format!("{macro_name}!(")).count())
+        .sum()
 }
 
 #[allow(clippy::ptr_arg)]

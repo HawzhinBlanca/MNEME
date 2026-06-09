@@ -137,7 +137,9 @@ pub enum DistanceMetric {
 /// Phase I: level of retrieval proof bundled in a Cognition Certificate (§5 honesty).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetrievalProofLevel {
-    /// True top-k dominance over the full committed vector set (flat / full-scan path).
+    /// membership/completeness for the complete authenticated member set plus top-k dominance over
+    /// prover-asserted distances; true top-k ranking is not proven and this is not top-k by true query-to-embedding distance
+    /// until verifiers recompute candidate distances.
     ExactDominance = 0,
     /// Dominance over a prover-asserted set of authenticated members (`visited_order`); not graph replay.
     HnswAuditOnDemand = 1,
@@ -414,5 +416,58 @@ mod tests {
     fn mneme_error_has_no_stringly_other_variant() {
         // Compile-time seam: MnemeError must remain a closed enum (INV-9).
         let _ = MnemeError::SchemaDrift;
+    }
+
+    #[test]
+    fn retrieval_proof_level_docs_preserve_distance_honesty() {
+        let source = include_str!("interface.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("interface tests should follow production code");
+
+        assert!(
+            !source.contains("True top-k"),
+            "ExactDominance docs must not claim true top-k until candidate distances are verifier-recomputed"
+        );
+        assert!(
+            source.contains("prover-asserted distances"),
+            "ExactDominance docs must state that current dominance is over prover-asserted distances"
+        );
+        assert!(
+            source.contains("membership/completeness"),
+            "ExactDominance docs must state that current proof is membership/completeness scoped"
+        );
+        assert!(
+            source.contains("top-k ranking is not proven"),
+            "ExactDominance docs must say top-k ranking is not proven"
+        );
+        assert!(
+            source.contains("not top-k by true query-to-embedding distance"),
+            "ExactDominance docs must keep the distance-binding caveat explicit"
+        );
+    }
+
+    #[test]
+    fn verification_object_v1_shape_stays_frozen_until_contract_bump() {
+        let source = include_str!("interface.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("interface tests should follow production code");
+        let (_, after_struct) = source
+            .split_once("pub struct VerificationObject {")
+            .expect("VerificationObject remains a frozen interface type");
+        let (verification_object, _) = after_struct
+            .split_once("/// Retrieval receipt binding recall")
+            .expect("VerificationObject remains before key-index Receipt");
+
+        assert_eq!(CONTRACT_VERSION, "mneme-core-v1.0.0");
+        assert!(
+            verification_object.contains("pub candidates: Vec<(ObjectId, [u8; 32], i64)>"),
+            "v1 VerificationObject candidate rows stay `(ObjectId, embedding_commit, distance)` until a formal interface-change request bumps CONTRACT_VERSION"
+        );
+        assert!(
+            !verification_object.contains("FixedPointEmbedding"),
+            "embedding-carrying semantic VO support must be additive v-next work, not a silent v1 shape mutation"
+        );
     }
 }

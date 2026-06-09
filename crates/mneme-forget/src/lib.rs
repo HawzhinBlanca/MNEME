@@ -10,7 +10,7 @@ mod shred;
 pub use absent::{prove_absent, verify_absence, verify_signed_root};
 pub use redact::{
     RedactForgetInput, RedactOutcome, RedactionRecord, forget_redact, verify_object_identity,
-    verify_redaction_record,
+    verify_redacted_object_identity, verify_redaction_record,
 };
 pub use shred::{
     ShredForgetInput, ShredOutcome, apply_shred_forget, forget_shred, object_id_for_key,

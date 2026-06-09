@@ -5,7 +5,8 @@ use mneme_core::{
 };
 use mneme_crypto::KeyPair;
 use mneme_forget::{
-    RedactForgetInput, forget_redact, verify_object_identity, verify_redaction_record,
+    RedactForgetInput, forget_redact, verify_object_identity, verify_redacted_object_identity,
+    verify_redaction_record,
 };
 use mneme_smt::SparseMerkleTree;
 
@@ -56,7 +57,14 @@ fn redact_preserves_object_id_and_root_verifies() {
     })
     .expect("redact");
     assert_eq!(outcome.object_id, object_id);
-    verify_object_identity(&outcome.redacted_bytes, &object_id).expect("identity");
+    verify_redacted_object_identity(
+        &outcome.redacted_bytes,
+        &object_id,
+        &key.hash(),
+        &operator.public_key_bytes(),
+    )
+    .expect("identity");
+    verify_object_identity(&outcome.redacted_bytes, &object_id).expect("structural");
     verify_redaction_record(&outcome.record).expect("signed record");
 }
 

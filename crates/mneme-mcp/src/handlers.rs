@@ -1,11 +1,40 @@
 //! Tool handlers — testable without MCP transport (blueprint §14.1).
 
+use base64::Engine;
 use mneme_cap::Capability;
 use mneme_core::{
-    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, TrustTier,
+    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, Root,
+    TrustTier, encode_forget_proof,
 };
 use mneme_store::Store;
 use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum McpHandlerFailure {
+    EmptyLogicalName,
+    UnknownMemoryKind,
+    UnknownTrustTier,
+}
+
+fn mcp_handler_failure_to_mneme(failure: McpHandlerFailure) -> MnemeError {
+    match failure {
+        McpHandlerFailure::EmptyLogicalName
+        | McpHandlerFailure::UnknownMemoryKind
+        | McpHandlerFailure::UnknownTrustTier => MnemeError::SchemaDrift,
+    }
+}
+
+fn empty_logical_name_error() -> MnemeError {
+    mcp_handler_failure_to_mneme(McpHandlerFailure::EmptyLogicalName)
+}
+
+fn unknown_memory_kind_error() -> MnemeError {
+    mcp_handler_failure_to_mneme(McpHandlerFailure::UnknownMemoryKind)
+}
+
+fn unknown_trust_tier_error() -> MnemeError {
+    mcp_handler_failure_to_mneme(McpHandlerFailure::UnknownTrustTier)
+}
 
 /// Tool-channel writes must live under `tools/` (§13.4 NamespacePrefix caveat).
 pub fn normalize_tool_namespace(namespace: &str) -> String {
@@ -59,7 +88,7 @@ impl MemoryHandlers {
         session: [u8; 16],
     ) -> Result<RememberResult, MnemeError> {
         if name.trim().is_empty() {
-            return Err(MnemeError::SchemaDrift);
+            return Err(empty_logical_name_error());
         }
         let namespace = normalize_tool_namespace(namespace);
         let draft = Draft {
@@ -126,6 +155,39 @@ impl MemoryHandlers {
         )?;
         Ok(ForgetResult {
             root_hash_hex: hex::encode(root.preimage_hash),
+        })
+    }
+
+    /// `memory.forget_proof` — shred + tombstone + canonical ForgetProof artifact.
+    pub fn forget_with_proof(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<ForgetProofResult, MnemeError> {
+        let target = ForgetTarget::LogicalKey(LogicalKey {
+            namespace: normalize_tool_namespace(namespace),
+            name: name.to_string(),
+        });
+        let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
+        let action_receipt = Self::optional_action_receipt_for_forget(
+            &store,
+            &target,
+            ForgetMode::Shred,
+            &self.read_cap,
+        )?;
+        let proven = store.forget_with_proof(
+            target,
+            &self.read_cap,
+            ForgetMode::Shred,
+            action_receipt.as_ref(),
+        )?;
+        let proof_bytes = encode_forget_proof(&proven.proof)?;
+        let proof_cbor_b64 = base64::engine::general_purpose::STANDARD.encode(proof_bytes);
+        Ok(ForgetProofResult {
+            root_hash_hex: hex::encode(proven.root.preimage_hash),
+            proof_version: proven.proof.version,
+            proof_cbor_b64,
+            root: SignedRootResult::from_root(&proven.root),
         })
     }
 
@@ -201,6 +263,43 @@ pub struct ForgetResult {
     pub root_hash_hex: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ForgetProofResult {
+    pub root_hash_hex: String,
+    pub proof_version: u16,
+    pub proof_cbor_b64: String,
+    pub root: SignedRootResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SignedRootResult {
+    pub version: u16,
+    pub preimage_hash_hex: String,
+    pub dag_head_root_hex: String,
+    pub key_index_root_hex: String,
+    pub semantic_commit_hex: String,
+    pub hlc_max_hex: String,
+    pub prev_root_hex: String,
+    pub signature_hex: String,
+    pub sequence: u64,
+}
+
+impl SignedRootResult {
+    fn from_root(root: &Root) -> Self {
+        Self {
+            version: root.version,
+            preimage_hash_hex: hex::encode(root.preimage_hash),
+            dag_head_root_hex: hex::encode(root.dag_head_root),
+            key_index_root_hex: hex::encode(root.key_index_root),
+            semantic_commit_hex: hex::encode(root.semantic_commit),
+            hlc_max_hex: hex::encode(root.hlc_max),
+            prev_root_hex: hex::encode(root.prev_root),
+            signature_hex: hex::encode(&root.signature),
+            sequence: root.sequence,
+        }
+    }
+}
+
 pub fn parse_kind(s: &str) -> Result<MemoryKind, MnemeError> {
     match s.to_ascii_lowercase().as_str() {
         "episodic" => Ok(MemoryKind::Episodic),
@@ -208,7 +307,7 @@ pub fn parse_kind(s: &str) -> Result<MemoryKind, MnemeError> {
         "procedural" => Ok(MemoryKind::Procedural),
         "working" => Ok(MemoryKind::Working),
         "identity" => Ok(MemoryKind::Identity),
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(unknown_memory_kind_error()),
     }
 }
 
@@ -218,6 +317,77 @@ pub fn parse_min_tier(s: &str) -> Result<TrustTier, MnemeError> {
         "working" => Ok(TrustTier::Working),
         "trusted" => Ok(TrustTier::Trusted),
         "identity" => Ok(TrustTier::Identity),
-        _ => Err(MnemeError::SchemaDrift),
+        _ => Err(unknown_trust_tier_error()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn handlers_production_source() -> &'static str {
+        include_str!("handlers.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("handlers.rs should keep tests after production code")
+    }
+
+    #[test]
+    fn mcp_handler_failures_are_classified_not_schema_drift_collapsed() {
+        let production = handlers_production_source();
+
+        for forbidden in [
+            "return Err(MnemeError::SchemaDrift)",
+            "_ => Err(MnemeError::SchemaDrift)",
+            "map_err(|_| MnemeError::SchemaDrift)",
+            "ok_or(MnemeError::SchemaDrift)",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "MCP handler production code still collapses directly through {forbidden}"
+            );
+        }
+
+        for required in [
+            "enum McpHandlerFailure",
+            "fn mcp_handler_failure_to_mneme(",
+            "fn empty_logical_name_error(",
+            "fn unknown_memory_kind_error(",
+            "fn unknown_trust_tier_error(",
+            "McpHandlerFailure::EmptyLogicalName",
+            "McpHandlerFailure::UnknownMemoryKind",
+            "McpHandlerFailure::UnknownTrustTier",
+        ] {
+            assert!(
+                production.contains(required),
+                "MCP handler production code is missing typed classifier marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn mcp_handler_failure_classifier_preserves_public_schema_drift() {
+        for failure in [
+            McpHandlerFailure::EmptyLogicalName,
+            McpHandlerFailure::UnknownMemoryKind,
+            McpHandlerFailure::UnknownTrustTier,
+        ] {
+            assert_eq!(
+                mcp_handler_failure_to_mneme(failure),
+                MnemeError::SchemaDrift
+            );
+        }
+        assert_eq!(empty_logical_name_error(), MnemeError::SchemaDrift);
+        assert_eq!(unknown_memory_kind_error(), MnemeError::SchemaDrift);
+        assert_eq!(unknown_trust_tier_error(), MnemeError::SchemaDrift);
+    }
+
+    #[test]
+    fn mcp_handler_parsers_reject_unknown_values_fail_closed() {
+        assert_eq!(parse_kind("archive").err(), Some(MnemeError::SchemaDrift));
+        assert_eq!(
+            parse_min_tier("superuser").err(),
+            Some(MnemeError::SchemaDrift)
+        );
     }
 }

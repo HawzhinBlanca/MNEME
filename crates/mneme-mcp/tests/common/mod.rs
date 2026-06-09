@@ -73,9 +73,17 @@ impl McpStdioClient {
         let mut line = String::new();
         reader.read_line(&mut line).expect("read response");
         let resp: Value = serde_json::from_str(line.trim()).expect("parse response");
-        resp["error"]["message"]
+        if let Some(msg) = resp["error"]["message"].as_str() {
+            return msg.to_string();
+        }
+        let result = resp["result"].as_object().expect("tool result");
+        assert_eq!(
+            result["isError"], true,
+            "expected tool error result: {resp}"
+        );
+        result["content"][0]["text"]
             .as_str()
-            .expect("error message")
+            .expect("tool error text")
             .to_string()
     }
 

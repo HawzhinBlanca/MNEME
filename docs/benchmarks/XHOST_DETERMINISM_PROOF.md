@@ -66,4 +66,7 @@ byte-identical after the fix).
 
 This proves *procedure-faithful, platform-independent reproduction of the signed root*. It
 does not weaken the standing limits: authenticated ≠ true; verifiable retrieval proves
-procedure-faithfulness, not exact nearest neighbors.
+procedure-faithfulness, not exact nearest neighbors. Phase I `ExactDominance`
+proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven
+and it is not top-k by true query-to-embedding distance
+until verifiers recompute candidate distances.

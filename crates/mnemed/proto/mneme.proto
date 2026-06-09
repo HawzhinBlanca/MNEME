@@ -68,6 +68,7 @@ message ForgetResponse {
 message ProveAbsentRequest {
   string namespace = 1;
   string name = 2;
+  string capability_b64 = 3;
 }
 
 message ProveAbsentResponse {

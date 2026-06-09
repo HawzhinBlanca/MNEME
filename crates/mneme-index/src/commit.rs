@@ -3,6 +3,23 @@
 use blake3::Hasher;
 use mneme_core::{DomainTag, MnemeError, ObjectId};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SemanticCommitFailure {
+    VerifyPathAtIndexRootMismatch,
+    VerifyPathWithIndexRootMismatch,
+}
+
+fn semantic_commit_failure_to_mneme(failure: SemanticCommitFailure) -> MnemeError {
+    match failure {
+        SemanticCommitFailure::VerifyPathAtIndexRootMismatch
+        | SemanticCommitFailure::VerifyPathWithIndexRootMismatch => MnemeError::IndexPathInvalid,
+    }
+}
+
+fn semantic_commit_error(failure: SemanticCommitFailure) -> MnemeError {
+    semantic_commit_failure_to_mneme(failure)
+}
+
 fn hash_sem_domain(payload: &[u8]) -> [u8; 32] {
     let mut h = Hasher::new();
     h.update(DomainTag::Sem.bytes());
@@ -20,18 +37,18 @@ const EMPTY_TAG: u8 = 0x12;
 /// `BLAKE3(SEM ‖ 0x10 ‖ object_id ‖ embedding_commit)`.
 pub fn hash_sem_leaf(object_id: &[u8; 32], embedding_commit: &[u8; 32]) -> [u8; 32] {
     let mut payload = [0u8; 65];
-    payload[0] = LEAF_TAG;
-    payload[1..33].copy_from_slice(object_id);
-    payload[33..65].copy_from_slice(embedding_commit);
+    payload[0] = LEAF_TAG; // tcb-index-ok fixed 65-byte semantic leaf payload layout
+    payload[1..33].copy_from_slice(object_id); // tcb-index-ok fixed 65-byte semantic leaf payload layout
+    payload[33..65].copy_from_slice(embedding_commit); // tcb-index-ok fixed 65-byte semantic leaf payload layout
     hash_sem_domain(&payload)
 }
 
 /// `BLAKE3(SEM ‖ 0x11 ‖ left ‖ right)`.
 pub fn hash_sem_internal(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
     let mut payload = [0u8; 65];
-    payload[0] = INT_TAG;
-    payload[1..33].copy_from_slice(left);
-    payload[33..65].copy_from_slice(right);
+    payload[0] = INT_TAG; // tcb-index-ok fixed 65-byte semantic internal-node payload layout
+    payload[1..33].copy_from_slice(left); // tcb-index-ok fixed 65-byte semantic internal-node payload layout
+    payload[33..65].copy_from_slice(right); // tcb-index-ok fixed 65-byte semantic internal-node payload layout
     hash_sem_domain(&payload)
 }
 
@@ -70,11 +87,12 @@ impl SemanticMerkleTree {
             let mut next = Vec::with_capacity(current.len().div_ceil(2));
             let mut idx = 0;
             while idx < current.len() {
-                let left = current[idx];
-                let right = if idx + 1 < current.len() {
-                    current[idx + 1]
-                } else {
-                    current[idx]
+                let Some(left) = current.get(idx).copied() else {
+                    break;
+                };
+                let right = match current.get(idx + 1).copied() {
+                    Some(right) => right,
+                    None => left,
                 };
                 next.push(hash_sem_internal(&left, &right));
                 idx += 2;
@@ -108,15 +126,14 @@ impl SemanticMerkleTree {
         let mut path = Vec::new();
         let mut idx = index;
         for level in 0..self.levels.len().saturating_sub(1) {
-            let lvl = &self.levels[level];
+            let lvl = self.levels.get(level)?;
             let sibling = if idx % 2 == 0 {
-                if idx + 1 < lvl.len() {
-                    lvl[idx + 1]
-                } else {
-                    lvl[idx]
+                match lvl.get(idx + 1).copied() {
+                    Some(right) => right,
+                    None => *lvl.get(idx)?,
                 }
             } else {
-                lvl[idx - 1]
+                *lvl.get(idx - 1)?
             };
             path.push(sibling);
             idx /= 2;
@@ -143,7 +160,9 @@ impl SemanticMerkleTree {
             idx /= 2;
         }
         if current != *root {
-            return Err(MnemeError::IndexPathInvalid);
+            return Err(semantic_commit_error(
+                SemanticCommitFailure::VerifyPathAtIndexRootMismatch,
+            ));
         }
         Ok(())
     }
@@ -166,7 +185,9 @@ impl SemanticMerkleTree {
             idx /= 2;
         }
         if current != *root {
-            return Err(MnemeError::IndexPathInvalid);
+            return Err(semantic_commit_error(
+                SemanticCommitFailure::VerifyPathWithIndexRootMismatch,
+            ));
         }
         Ok(())
     }
@@ -178,6 +199,47 @@ mod tests {
 
     fn oid(byte: u8) -> ObjectId {
         ObjectId([byte; 32])
+    }
+
+    #[test]
+    fn semantic_commit_failures_are_classified_not_error_collapsed() {
+        let production = include_str!("commit.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("commit.rs should keep tests after production code");
+
+        let forbidden = "return Err(MnemeError::IndexPathInvalid";
+        assert!(
+            !production.contains(forbidden),
+            "semantic commit production code still collapses directly through {forbidden}"
+        );
+
+        for required in [
+            "enum SemanticCommitFailure",
+            "VerifyPathAtIndexRootMismatch",
+            "VerifyPathWithIndexRootMismatch",
+            "fn semantic_commit_failure_to_mneme(",
+            "fn semantic_commit_error(",
+        ] {
+            assert!(
+                production.contains(required),
+                "semantic commit production code is missing typed classifier marker {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_commit_failure_classifier_preserves_public_error() {
+        for failure in [
+            SemanticCommitFailure::VerifyPathAtIndexRootMismatch,
+            SemanticCommitFailure::VerifyPathWithIndexRootMismatch,
+        ] {
+            assert_eq!(
+                semantic_commit_failure_to_mneme(failure),
+                MnemeError::IndexPathInvalid
+            );
+            assert_eq!(semantic_commit_error(failure), MnemeError::IndexPathInvalid);
+        }
     }
 
     #[test]

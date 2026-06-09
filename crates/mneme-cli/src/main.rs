@@ -10,8 +10,9 @@ use mneme_core::{
     DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
     ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
 };
+use mneme_core::{ForgetProof, encode_forget_proof};
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
-use mneme_store::Store;
+use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -28,7 +29,7 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; generated and stored on first use if absent
+    /// Operator seed as 32-byte hex (64 hex chars), e.g. `00..01`; required unless MNEME_KMS_MASTER_KEY_HEX is set to seal generated custody
     #[arg(long, global = true, env = "MNEME_OPERATOR_SEED")]
     operator_seed: Option<String>,
 
@@ -47,7 +48,7 @@ enum Commands {
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
     },
-    /// Print provenance, writers, tiers, tombstones for a root checkpoint
+    /// [Not yet implemented] Print provenance, writers, tiers, tombstones for a root checkpoint
     Audit { root: PathBuf },
     /// Key recall under min trust tier (verified)
     Recall {
@@ -87,7 +88,12 @@ enum Commands {
         key: String,
         #[arg(long, default_value = "shred")]
         mode: ForgetModeArg,
+        /// Write a self-contained ForgetProof CBOR to PATH (shred mode only)
+        #[arg(long = "emit-proof")]
+        emit_proof: Option<PathBuf>,
     },
+    /// Clear `.incomplete` when HEAD-consistent; sweep unreferenced object blobs
+    Repair { store: PathBuf },
     /// Deterministic MST merge of two stores
     Merge { store_a: PathBuf, store_b: PathBuf },
     /// Network anti-entropy over canonical §11 WebSocket sync (blueprint §11)
@@ -341,7 +347,22 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Forget { store, key, mode } => {
+        Commands::Repair { store } => {
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let report = repair_store(&store, &operator).map_err(CliErrorKind::Kernel)?;
+            println!(
+                "repair ok: cleared_incomplete={} orphans_removed={}",
+                report.cleared_incomplete, report.orphans_removed
+            );
+            Ok(())
+        }
+        Commands::Forget {
+            store,
+            key,
+            mode,
+            emit_proof,
+        } => {
             if key.trim().is_empty() {
                 eprintln!("mneme: forget --key must not be empty");
                 return Err(CliErrorKind::Usage);
@@ -356,10 +377,27 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 ForgetModeArg::Shred => ForgetMode::Shred,
                 ForgetModeArg::Redact => ForgetMode::Redact,
             };
-            mneme_store
-                .forget(ForgetTarget::LogicalKey(logical_key), &cap, forget_mode)
-                .map_err(CliErrorKind::Kernel)?;
-            println!("forgot key {key}");
+            if let Some(path) = emit_proof {
+                if !matches!(forget_mode, ForgetMode::Shred) {
+                    eprintln!("mneme: --emit-proof requires shred mode");
+                    return Err(CliErrorKind::Usage);
+                }
+                let proven = mneme_store
+                    .forget_with_proof(
+                        ForgetTarget::LogicalKey(logical_key),
+                        &cap,
+                        forget_mode,
+                        None,
+                    )
+                    .map_err(CliErrorKind::Kernel)?;
+                write_forget_proof(&path, &proven.proof)?;
+                println!("forgot key {key}; proof written to {}", path.display());
+            } else {
+                mneme_store
+                    .forget(ForgetTarget::LogicalKey(logical_key), &cap, forget_mode)
+                    .map_err(CliErrorKind::Kernel)?;
+                println!("forgot key {key}");
+            }
             Ok(())
         }
         Commands::Sync { command } => match command {
@@ -409,7 +447,19 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Audit { root } => require_path_exists(&root, "root checkpoint"),
+        Commands::Audit { root } => {
+            // Validate the argument before reporting non-implementation: a missing root path is a
+            // usage error (exit 2), matching `audit_missing_root_is_usage_error`. Only a present,
+            // well-formed argument reaches the not-yet-implemented surface (exit 3).
+            if !root.exists() {
+                eprintln!("mneme: root checkpoint not found: {}", root.display());
+                return Err(CliErrorKind::Usage);
+            }
+            eprintln!(
+                "mneme: audit is not yet implemented (provenance/writer/tier/tombstone dump deferred)"
+            );
+            Err(CliErrorKind::StoreUnavailable)
+        }
         Commands::Certify {
             store,
             out,
@@ -542,18 +592,25 @@ fn load_or_generate_operator(
     store: &Path,
     seed_hex: Option<&str>,
 ) -> Result<KeyPair, CliErrorKind> {
-    let seed_path = store.join(".operator_seed");
-    if let Some(hex) = seed_hex {
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex)?));
+    mneme_crypto::load_or_generate_operator(store, seed_hex).map_err(operator_seed_error_to_cli)
+}
+
+fn operator_seed_error_to_cli(err: MnemeError) -> CliErrorKind {
+    match err {
+        MnemeError::CapMalformed => CliErrorKind::Usage,
+        MnemeError::KeyVaultMissing => {
+            eprintln!(
+                "mneme: operator seed custody missing: provide --operator-seed/MNEME_OPERATOR_SEED or MNEME_KMS_MASTER_KEY_HEX"
+            );
+            CliErrorKind::Usage
+        }
+        other => CliErrorKind::Kernel(other),
     }
-    if seed_path.exists() {
-        let hex = std::fs::read_to_string(&seed_path).map_err(|_| CliErrorKind::Usage)?;
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex.trim())?));
-    }
-    let (operator, seed) = KeyPair::generate_with_seed();
-    std::fs::create_dir_all(store).ok();
-    std::fs::write(&seed_path, hex::encode(seed)).map_err(|_| CliErrorKind::Usage)?;
-    Ok(operator)
+}
+
+fn write_forget_proof(path: &Path, proof: &ForgetProof) -> Result<(), CliErrorKind> {
+    let bytes = encode_forget_proof(proof).map_err(CliErrorKind::Kernel)?;
+    std::fs::write(path, bytes).map_err(|_| CliErrorKind::Usage)
 }
 
 fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], CliErrorKind> {
@@ -573,11 +630,6 @@ fn parse_i16_list(s: &str) -> Result<Vec<i16>, CliErrorKind> {
     s.split(',')
         .map(|part| part.trim().parse::<i16>().map_err(|_| CliErrorKind::Usage))
         .collect()
-}
-
-fn require_path_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {
-    require_file_exists(path, label)?;
-    Err(CliErrorKind::StoreUnavailable)
 }
 
 fn require_file_exists(path: &Path, label: &str) -> Result<(), CliErrorKind> {

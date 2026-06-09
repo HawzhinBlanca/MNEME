@@ -38,7 +38,7 @@ as `mneme-core` / `mneme-index`, not wrappers around the store kernel.
 
 - CBOR/dCBOR decode helpers generated from the same field-number maps as Rust.
 - Fail-closed default: `UnsupportedVersion` when wire version > supported.
-- Honesty strings re-exported verbatim (`HONESTY_NOT_EXACT_NN`, `PIOP_RESEARCH_HONESTY`,
+- Honesty strings re-exported verbatim (`HONESTY_PROCEDURE`, `PIOP_RESEARCH_HONESTY`,
   `FEDERATION_CERT_DRAFT_STATUS`).
 
 ### 2.3 Federation wire (draft)
@@ -58,8 +58,11 @@ Decode success **does not** imply cross-org trust. See `docs/redteam/PHASE_IV_FE
 ## 3. Verification contract (all languages)
 
 1. **Authenticated ≠ true** — signatures prove integrity, not semantic truth.
-2. **Procedure-faithfulness ≠ exact-NN** — unless a future `retrieval_proof_level`
-   upgrade is present *and* verified by an out-of-TCB PIOP verifier (not shipped).
+2. **Procedure-faithfulness ≠ exact-NN** — Phase I `ExactDominance` proves
+   membership/completeness plus top-k over prover-asserted distances; true top-k
+   ranking is not proven, and this is not top-k by true query-to-embedding distance
+   unless a future `retrieval_proof_level` upgrade is present *and* verified by
+   an out-of-TCB PIOP verifier (not shipped).
 3. **Missing or invalid optional proofs fail closed** — never degrade into context.
 4. **Federation gate closed** — federated verify must reject with `UnsupportedVersion`
    until P4-2 merge binding and trust-surface work ships.

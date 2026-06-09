@@ -19,6 +19,7 @@ pub mod wire_cert;
 pub mod wire_root;
 
 pub use error::CrossrefError;
+pub use semantic_commit::HONESTY_PROCEDURE;
 
 pub fn vectors_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../proof/vectors")

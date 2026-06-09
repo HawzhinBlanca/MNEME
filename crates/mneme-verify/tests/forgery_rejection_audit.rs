@@ -24,7 +24,8 @@ use helpers::{
 };
 use mneme_cap::{Capability, Permissions, agent_cap};
 use mneme_core::{
-    Caveat, Hlc, MemoryKind, MnemeError, NodeId, ObjectId, Query, Root, RootPreimage, TrustTier,
+    Caveat, FixedPointEmbedding, Hlc, MemoryKind, MnemeError, NodeId, ObjectId, Query, Root,
+    RootPreimage, TrustTier,
 };
 use mneme_crypto::KeyPair;
 use mneme_root::StoredRoot;
@@ -557,6 +558,63 @@ fn semantic_recall_missing_query_embedding_fails_closed() {
     assert_eq!(
         verify_semantic_recall(&input, &sample_procedure(), &query, &f.trust, &ctx).unwrap_err(),
         MnemeError::ProcedureMismatch,
+    );
+}
+
+#[test]
+fn semantic_recall_query_commit_mismatch_fails_closed() {
+    let mut f = build_valid_semantic_recall();
+    f.receipt.verification_object.query_commit[0] ^= 0x01;
+    let query = Query {
+        logical_key: theme_key("semantic", "query"),
+        min_tier: TrustTier::Working,
+        embedding: Some(sample_query_embedding()),
+    };
+    let ctx = RecallContext {
+        key_index: &f.key_index,
+        dag: &f.dag,
+        objects: &f.objects,
+        previous_root: f.previous_root.as_ref(),
+    };
+    let input = SemanticRecallInput {
+        receipt: f.receipt.clone(),
+        root: f.root.clone(),
+    };
+
+    assert_eq!(
+        verify_semantic_recall(&input, &sample_procedure(), &query, &f.trust, &ctx).unwrap_err(),
+        MnemeError::ProcedureMismatch,
+    );
+}
+
+#[test]
+fn semantic_recall_zero_dim_query_embedding_fails_closed_even_when_query_commit_matches() {
+    let mut f = build_valid_semantic_recall();
+    let malformed = FixedPointEmbedding {
+        dim: 0,
+        scale: 0,
+        components: Vec::new(),
+    };
+    f.receipt.verification_object.query_commit = malformed.commit();
+    let query = Query {
+        logical_key: theme_key("semantic", "query"),
+        min_tier: TrustTier::Working,
+        embedding: Some(malformed),
+    };
+    let ctx = RecallContext {
+        key_index: &f.key_index,
+        dag: &f.dag,
+        objects: &f.objects,
+        previous_root: f.previous_root.as_ref(),
+    };
+    let input = SemanticRecallInput {
+        receipt: f.receipt.clone(),
+        root: f.root.clone(),
+    };
+
+    assert_eq!(
+        verify_semantic_recall(&input, &sample_procedure(), &query, &f.trust, &ctx).unwrap_err(),
+        MnemeError::SchemaDrift,
     );
 }
 

@@ -94,6 +94,7 @@ impl Store {
 fn index_err(e: mneme_index::IndexError) -> MnemeError {
     match e {
         mneme_index::IndexError::SemanticNotImplemented => MnemeError::ProcedureMismatch,
+        mneme_index::IndexError::EmbeddingShape => MnemeError::SchemaDrift,
         mneme_index::IndexError::DuplicateObject | mneme_index::IndexError::ObjectNotIndexed => {
             MnemeError::IndexPathInvalid
         }

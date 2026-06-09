@@ -1,11 +1,15 @@
 //! Handler harness — MCP tool logic without JSON-RPC transport (blueprint §14.1 tests).
 
+use base64::Engine;
 use mneme_cap::tool_channel_cap;
 use mneme_core::{MemoryKind, MnemeError, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_mcp::handlers::MemoryHandlers;
 use mneme_mcp::store_open::test_runtime;
-use mneme_mcp::{AINJ_MITIGATION, HONESTY_FOOTER, RECALL_DESCRIPTION, REMEMBER_DESCRIPTION};
+use mneme_mcp::{
+    AINJ_MITIGATION, FORGET_PROOF_DESCRIPTION, HONESTY_FOOTER, RECALL_DESCRIPTION,
+    REMEMBER_DESCRIPTION,
+};
 use mneme_store::Store;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
@@ -91,6 +95,23 @@ fn normalize_tool_namespace_maps_user_to_tools_prefix() {
 }
 
 #[test]
+fn forget_with_proof_returns_verifiable_cbor_bound_to_signed_root() {
+    let dir = tempdir().unwrap();
+    let rt = test_runtime(dir.path());
+    rt.handlers
+        .remember(b"x", MemoryKind::Semantic, "tools/mcp", "k", [0x05; 16])
+        .unwrap();
+    let out = rt.handlers.forget_with_proof("tools/mcp", "k").unwrap();
+    let proof_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&out.proof_cbor_b64)
+        .expect("decode proof");
+    let proof = mneme_core::decode_forget_proof(&proof_bytes).expect("parse proof");
+    assert_eq!(hex::encode(proof.root_bound), out.root.preimage_hash_hex);
+    assert_eq!(proof.version, mneme_core::FORGET_PROOF_VERSION);
+    assert!(out.root.signature_hex.len() >= 128);
+}
+
+#[test]
 fn forget_then_recall_fails_closed() {
     let dir = tempdir().unwrap();
     let rt = test_runtime(dir.path());
@@ -111,7 +132,10 @@ fn honesty_strings_present_in_tool_contract_constants() {
     assert!(RECALL_DESCRIPTION.contains("recall_verified"));
     assert!(HONESTY_FOOTER.contains("authenticated"));
     assert!(HONESTY_FOOTER.contains("procedure-faithfulness"));
+    assert!(HONESTY_FOOTER.contains("membership/completeness"));
+    assert!(HONESTY_FOOTER.contains("top-k ranking is not proven"));
     assert!(AINJ_MITIGATION.contains("quarantine"));
+    assert!(FORGET_PROOF_DESCRIPTION.contains("ForgetProof"));
     assert!(!AINJ_MITIGATION.to_ascii_lowercase().contains("anti-poison"));
 }
 

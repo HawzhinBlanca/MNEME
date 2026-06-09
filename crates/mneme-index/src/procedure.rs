@@ -2,7 +2,9 @@
 
 use crate::distance::integer_distance;
 use blake3::Hasher;
-use mneme_core::{DistanceMetric, FixedPointEmbedding, ObjectId, Procedure, ProcedureAlgo};
+use mneme_core::{
+    DistanceMetric, FixedPointEmbedding, MnemeError, ObjectId, Procedure, ProcedureAlgo,
+};
 
 /// Domain tag for procedure hashing (§6.1).
 pub const PROC_DOMAIN: &[u8] = b"MNEME-proc-v1\x00";
@@ -71,58 +73,85 @@ pub struct IndexedEntry {
 ///
 pub type CandidateRow = (ObjectId, [u8; 32], i64);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcedureFailure {
+    ProcedureBoundInvalid,
+}
+
+fn procedure_failure_to_mneme(failure: ProcedureFailure) -> MnemeError {
+    match failure {
+        ProcedureFailure::ProcedureBoundInvalid => MnemeError::SchemaDrift,
+    }
+}
+
+fn procedure_error(failure: ProcedureFailure) -> MnemeError {
+    procedure_failure_to_mneme(failure)
+}
+
+fn procedure_bound_to_usize(bound: u32) -> Result<usize, MnemeError> {
+    usize::try_from(bound.max(1))
+        .map_err(|_| procedure_error(ProcedureFailure::ProcedureBoundInvalid))
+}
+
+fn procedure_beam_bound(proc: &Procedure) -> Result<usize, MnemeError> {
+    procedure_bound_to_usize(proc.ef_search.max(proc.k))
+}
+
+fn procedure_k_bound(proc: &Procedure) -> Result<usize, MnemeError> {
+    procedure_bound_to_usize(proc.k)
+}
+
 /// Returns `(result_ids, all_candidates)` where `all_candidates` lists every indexed
 /// entry examined (ObjectId asc traversal order) with integer distances.
 pub fn execute_procedure_p(
     proc: &Procedure,
     query: &FixedPointEmbedding,
     entries: &[IndexedEntry],
-) -> (Vec<ObjectId>, Vec<CandidateRow>) {
+) -> Result<(Vec<ObjectId>, Vec<CandidateRow>), MnemeError> {
     let _ = proc.algo;
     let all_candidates: Vec<CandidateRow> = entries
         .iter()
-        .filter_map(|entry| {
+        .map(|entry| {
             integer_distance(proc.distance, query, &entry.embedding)
-                .ok()
                 .map(|dist| (entry.object_id, entry.embedding_commit, dist))
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     let mut ranked = all_candidates.clone();
     ranked.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
 
-    let beam = proc.ef_search.max(proc.k).max(1) as usize;
+    let beam = procedure_beam_bound(proc)?;
     if ranked.len() > beam {
         ranked.truncate(beam);
     }
     ranked.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
 
-    let k = proc.k.max(1) as usize;
+    let k = procedure_k_bound(proc)?;
     if ranked.len() > k {
         ranked.truncate(k);
     }
 
     let result_ids: Vec<ObjectId> = ranked.iter().map(|(id, _, _)| *id).collect();
-    (result_ids, all_candidates)
+    Ok((result_ids, all_candidates))
 }
 
 /// Replay procedure over VO candidates — must reproduce `result_ids`.
 pub fn replay_from_candidates(
     proc: &Procedure,
     candidates: &[(ObjectId, [u8; 32], i64)],
-) -> Vec<ObjectId> {
+) -> Result<Vec<ObjectId>, MnemeError> {
     let mut sorted = candidates.to_vec();
     sorted.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
-    let beam = proc.ef_search.max(proc.k).max(1) as usize;
+    let beam = procedure_beam_bound(proc)?;
     if sorted.len() > beam {
         sorted.truncate(beam);
     }
     sorted.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
-    let k = proc.k.max(1) as usize;
+    let k = procedure_k_bound(proc)?;
     if sorted.len() > k {
         sorted.truncate(k);
     }
-    sorted.iter().map(|(id, _, _)| *id).collect()
+    Ok(sorted.iter().map(|(id, _, _)| *id).collect())
 }
 
 #[cfg(test)]
@@ -154,10 +183,53 @@ mod tests {
             entry(0x01, vec![3, 4]),
             entry(0x03, vec![10, 0]),
         ];
-        let (results, _) = execute_procedure_p(&proc, &query, &entries);
+        let (results, _) = execute_procedure_p(&proc, &query, &entries).unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], ObjectId([0x01; 32]));
         assert_eq!(results[1], ObjectId([0x02; 32]));
+    }
+
+    #[test]
+    fn procedure_execution_does_not_silently_filter_malformed_entries() {
+        let proc = Procedure {
+            algo: ProcedureAlgo::Hnsw,
+            ef_search: 64,
+            k: 2,
+            distance: DistanceMetric::SquaredL2I64,
+            seed: 0,
+        };
+        let query = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
+        let malformed = FixedPointEmbedding {
+            dim: 2,
+            scale: 0,
+            components: vec![1],
+        };
+        let entries = vec![
+            entry(0x01, vec![1, 0]),
+            IndexedEntry {
+                object_id: ObjectId([0x02; 32]),
+                embedding_commit: malformed.commit(),
+                embedding: malformed,
+            },
+        ];
+
+        assert_eq!(
+            execute_procedure_p(&proc, &query, &entries),
+            Err(MnemeError::SchemaDrift)
+        );
+    }
+
+    #[test]
+    fn procedure_bounds_use_checked_usize_conversions() {
+        let production = include_str!("procedure.rs")
+            .split_once("#[cfg(test)]")
+            .map(|(production, _tests)| production)
+            .expect("procedure tests should follow production code");
+
+        assert!(
+            !production.contains(" as usize"),
+            "procedure replay bounds must use checked conversions, not raw `as usize` casts"
+        );
     }
 
     #[test]

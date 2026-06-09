@@ -86,6 +86,26 @@ impl Hlc {
     }
 }
 
+/// Compare two 14-byte HLC wire forms (§5.7) in numeric monotonic order.
+///
+/// `Root::hlc_max` is little-endian for `wall_ms`/`counter`; lexicographic
+/// `[u8;14]` compare is wrong across byte boundaries (e.g. 255 vs 256).
+pub fn cmp_wire(a: &[u8; 14], b: &[u8; 14]) -> std::cmp::Ordering {
+    let wall_a = u64::from_le_bytes(a[0..8].try_into().expect("hlc wall"));
+    let wall_b = u64::from_le_bytes(b[0..8].try_into().expect("hlc wall"));
+    match wall_a.cmp(&wall_b) {
+        std::cmp::Ordering::Equal => {}
+        ord => return ord,
+    }
+    let counter_a = u32::from_le_bytes(a[8..12].try_into().expect("hlc counter"));
+    let counter_b = u32::from_le_bytes(b[8..12].try_into().expect("hlc counter"));
+    match counter_a.cmp(&counter_b) {
+        std::cmp::Ordering::Equal => {}
+        ord => return ord,
+    }
+    a[12..14].cmp(&b[12..14])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +125,24 @@ mod tests {
         hlc.tick_local(200);
         assert_eq!(hlc.wall_ms, 200);
         assert_eq!(hlc.counter, 0);
+    }
+
+    #[test]
+    fn cmp_wire_orders_wall_ms_not_lexicographic() {
+        let low = Hlc {
+            wall_ms: 255,
+            counter: 0,
+            node_id: NodeId([0; 16]),
+        }
+        .to_bytes();
+        let high = Hlc {
+            wall_ms: 256,
+            counter: 0,
+            node_id: NodeId([0; 16]),
+        }
+        .to_bytes();
+        assert_eq!(cmp_wire(&low, &high), std::cmp::Ordering::Less);
+        assert_ne!(cmp_wire(&low, &high), low.cmp(&high));
     }
 
     #[test]
