@@ -4,8 +4,10 @@ use crate::Store;
 use mneme_cap::Capability;
 use mneme_core::{
     ActionReceipt, Draft, ForgetMode, ForgetTarget, LogicalKey, MnemeError, ObjectId, Root,
-    TrustTier, ACTION_RECEIPT_VERSION,
+    TrustTier,
 };
+#[cfg(not(feature = "phase_iii_bind"))]
+use mneme_core::ACTION_RECEIPT_VERSION;
 use mneme_crypto::KeyPair;
 
 fn target_commit(target: &ForgetTarget) -> [u8; 32] {
