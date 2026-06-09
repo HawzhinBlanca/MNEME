@@ -20,6 +20,11 @@ validation_lane_choices() {
   echo "${VALIDATION_LANES[*]}"
 }
 
+if [[ "${1:-}" == "--list" ]]; then
+  validation_lane_choices
+  exit 0
+fi
+
 LANE="${1:-quick}"
 mneme_ci_init "$ROOT" "$LANE"
 

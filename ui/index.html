@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MNEME — Verifiable Memory Substrate Console</title>
+  <meta name="description" content="Secure, authenticated, and verifiable memory substrate dashboard. Audit memory integrity and manage capabilities.">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Styles -->
+  <link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navigation Sidebar -->
+    <aside class="sidebar" role="complementary">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h1>MNEME</h1>
+      </div>
+      <nav class="nav-menu" role="navigation" aria-label="Main Navigation">
+        <a href="/" class="nav-item active" id="nav-dashboard">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="9"></rect>
+            <rect x="14" y="3" width="7" height="5"></rect>
+            <rect x="14" y="12" width="7" height="9"></rect>
+            <rect x="3" y="16" width="7" height="5"></rect>
+          </svg>
+          Dashboard
+        </a>
+        <a href="/settings" class="nav-item" id="nav-settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Settings
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="version">Version 2.0.0-Beta</div>
+        <div class="system-status">
+          <span class="status-dot online"></span>
+          Daemon Connected
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace Content -->
+    <main class="main-content" id="main-view" role="main">
+      <!-- DASHBOARD VIEW -->
+      <div id="view-dashboard" class="content-view active">
+        <header class="view-header">
+          <div>
+            <span class="breadcrumbs">MNEME / Dashboard</span>
+            <h2>Memory Substrate Status</h2>
+          </div>
+          <div class="actions">
+            <div class="capability-badge">
+              <span class="badge-label">Active Key:</span>
+              <span class="badge-value">Operator Key Loaded</span>
+            </div>
+          </div>
+        </header>
+
+        <!-- Status & Stats Grid -->
+        <div class="dashboard-grid">
+          <!-- Store Status Card -->
+          <section class="card status-card" aria-labelledby="store-status-title">
+            <h3 id="store-status-title" class="card-title">Store Initialization</h3>
+            <div class="status-indicator-container">
+              <div class="status-icon-wrapper" id="store-status-icon">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                </svg>
+              </div>
+              <div class="status-info">
+                <div class="status-label">Store State</div>
+                <div class="status-value" id="store-status-text">Store Closed</div>
+                <div class="status-badge" id="store-status" data-testid="store-status" data-verified="false">Unverified</div>
+              </div>
+            </div>
+            <div class="card-action">
+              <button class="btn btn-primary" id="btn-open-store">
+                <span class="btn-text">Open Store</span>
+                <span class="spinner" id="open-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+          </section>
+
+          <!-- System Invariant Status -->
+          <section class="card stats-card" aria-labelledby="invariants-title">
+            <h3 id="invariants-title" class="card-title">TCB Invariants</h3>
+            <div class="invariants-list">
+              <div class="invariant-item">
+                <div class="invariant-meta">
+                  <span class="invariant-name">HLC Replay Protection (INV-6)</span>
+                  <span class="invariant-status pass">Verified</span>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
+              </div>
+              <div class="invariant-item">
+                <div class="invariant-meta">
+                  <span class="invariant-name">SMT Root Consistency (INV-10)</span>
+                  <span class="invariant-status pass">Verified</span>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" style="width: 100%;"></div></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Memory Recall Console -->
+        <section class="card recall-card" aria-labelledby="recall-title">
+          <h3 id="recall-title" class="card-title">Verifiable Recall Console</h3>
+          <form class="recall-form" id="recall-form">
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="recall-query">Recall Query</label>
+                <div class="input-wrapper">
+                  <input type="search" id="recall-query" name="query" placeholder="Enter logical key name or exact SMT key path..." required>
+                  <svg class="input-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                </div>
+              </div>
+              <div class="form-group flex-1">
+                <label for="min-trust-tier">Minimum Trust Tier</label>
+                <select id="min-trust-tier" name="min_tier">
+                  <option value="trusted">Trusted</option>
+                  <option value="quarantine">Restricted</option>
+                </select>
+              </div>
+              <div class="form-group align-bottom">
+                <button type="submit" class="btn btn-secondary" id="btn-recall">
+                  <span class="btn-text">Recall</span>
+                  <span class="spinner" id="recall-spinner" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <!-- Recall Results Area -->
+          <div class="recall-results-container hidden" id="results-area">
+            <h4 class="results-heading">Recall Result Payload</h4>
+            <div class="results-grid" id="results-grid">
+              <!-- Result cards will be dynamically injected here -->
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- SETTINGS VIEW -->
+      <div id="view-settings" class="content-view">
+        <header class="view-header">
+          <div>
+            <span class="breadcrumbs">MNEME / Settings</span>
+            <h2>Security Policy Settings</h2>
+          </div>
+        </header>
+
+        <section class="card settings-card" aria-labelledby="policy-title">
+          <h3 id="policy-title" class="card-title">Memory Protection Policy</h3>
+          <div class="form-group max-w-md">
+            <label id="lbl-default-min-tier" for="default-min-tier">Default Min Tier</label>
+            <div class="settings-control-desc">
+              Determines the baseline security tier required for reading local memory keys when no explicit tier is provided.
+            </div>
+            <select id="default-min-tier" name="default_min_tier" aria-describedby="default-min-tier-desc">
+              <option value="trusted">trusted</option>
+              <option value="quarantine" selected>Restricted</option>
+            </select>
+            <div id="default-min-tier-desc" class="form-help-text">
+              Recommended default: <strong>quarantine</strong>. Promotes fail-closed retrieval of unverified external inputs.
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/index.js"></script>
+</body>
+</html>

@@ -87,6 +87,7 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
     let claude_lanes: Vec<&str> = claude
         .lines()
         .filter_map(|line| line.strip_prefix("scripts/ci/validation-lane.sh "))
+        .filter(|tail| !tail.starts_with("--"))
         .map(|tail| {
             tail.split_whitespace()
                 .next()
@@ -102,6 +103,9 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
         "validation_lane_choices()",
         "local IFS='|'",
         "echo \"${VALIDATION_LANES[*]}\"",
+        "if [[ \"${1:-}\" == \"--list\" ]]",
+        "validation_lane_choices",
+        "exit 0",
         "echo \"Unknown lane: $LANE (expected $(validation_lane_choices))\" >&2",
     ] {
         assert!(
@@ -109,6 +113,22 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
             "validation-lane must preserve shared lane-list phrase `{phrase}`"
         );
     }
+
+    assert_phrases_in_order(
+        "validation-lane --list must not initialize a lane",
+        validation_lane,
+        &[
+            "if [[ \"${1:-}\" == \"--list\" ]]",
+            "exit 0",
+            "LANE=\"${1:-quick}\"",
+            "mneme_ci_init \"$ROOT\" \"$LANE\"",
+        ],
+    );
+
+    assert!(
+        claude.contains("scripts/ci/validation-lane.sh --list"),
+        "CLAUDE validation ladder must document the non-executing lane list mode"
+    );
 }
 
 #[test]
