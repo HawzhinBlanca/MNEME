@@ -13,6 +13,13 @@ cd "$ROOT"
 # shellcheck source=scripts/ci/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
+VALIDATION_LANES=(quick crypto tamper merge determinism full-preflight full)
+
+validation_lane_choices() {
+  local IFS='|'
+  echo "${VALIDATION_LANES[*]}"
+}
+
 LANE="${1:-quick}"
 mneme_ci_init "$ROOT" "$LANE"
 
@@ -124,7 +131,7 @@ case "$LANE" in
     ;;
 
   *)
-    echo "Unknown lane: $LANE (expected quick|crypto|tamper|merge|determinism|full-preflight|full)" >&2
+    echo "Unknown lane: $LANE (expected $(validation_lane_choices))" >&2
     exit 2
     ;;
 esac

@@ -25,6 +25,27 @@ fn assert_phrases_in_order(surface: &str, text: &str, phrases: &[&str]) {
     }
 }
 
+fn bash_array_values<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
+    let marker = format!("{name}=(");
+    source
+        .split(&marker)
+        .nth(1)
+        .and_then(|tail| tail.split(')').next())
+        .unwrap_or_else(|| panic!("missing bash array `{name}`"))
+        .split_whitespace()
+        .collect()
+}
+
+fn validation_lane_usage_values(source: &str) -> Vec<&str> {
+    source
+        .split("# Usage: scripts/ci/validation-lane.sh <")
+        .nth(1)
+        .and_then(|tail| tail.split('>').next())
+        .expect("validation-lane usage comment must declare valid lanes")
+        .split('|')
+        .collect()
+}
+
 #[test]
 fn standing_honesty_docs_preserve_exact_dominance_distance_caveat() {
     assert_distance_caveat(
@@ -35,6 +56,59 @@ fn standing_honesty_docs_preserve_exact_dominance_distance_caveat() {
         "cross-host determinism proof doc",
         include_str!("../../../docs/benchmarks/XHOST_DETERMINISM_PROOF.md"),
     );
+}
+
+#[test]
+fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let claude = include_str!("../../../CLAUDE.md");
+    let expected_lanes = vec![
+        "quick",
+        "crypto",
+        "tamper",
+        "merge",
+        "determinism",
+        "full-preflight",
+        "full",
+    ];
+
+    let validation_lanes = bash_array_values(validation_lane, "VALIDATION_LANES");
+    assert_eq!(
+        validation_lanes, expected_lanes,
+        "validation-lane must keep one ordered source for accepted lanes"
+    );
+
+    assert_eq!(
+        validation_lane_usage_values(validation_lane),
+        validation_lanes,
+        "validation-lane usage comment must match VALIDATION_LANES"
+    );
+
+    let claude_lanes: Vec<&str> = claude
+        .lines()
+        .filter_map(|line| line.strip_prefix("scripts/ci/validation-lane.sh "))
+        .map(|tail| {
+            tail.split_whitespace()
+                .next()
+                .expect("CLAUDE validation-lane line must include a lane")
+        })
+        .collect();
+    assert_eq!(
+        claude_lanes, validation_lanes,
+        "CLAUDE validation ladder must match VALIDATION_LANES"
+    );
+
+    for phrase in [
+        "validation_lane_choices()",
+        "local IFS='|'",
+        "echo \"${VALIDATION_LANES[*]}\"",
+        "echo \"Unknown lane: $LANE (expected $(validation_lane_choices))\" >&2",
+    ] {
+        assert!(
+            validation_lane.contains(phrase),
+            "validation-lane must preserve shared lane-list phrase `{phrase}`"
+        );
+    }
 }
 
 #[test]
@@ -124,7 +198,7 @@ fn validation_lane_full_preflight_is_lightweight_and_preserves_plan() {
         "cross-host two-machine determinism is NOT proven by this lane (single host)",
         "set MNEME_SECOND_HOST",
         "distinct physical host",
-        "expected quick|crypto|tamper|merge|determinism|full-preflight|full",
+        "expected $(validation_lane_choices)",
     ] {
         assert!(
             validation_lane.contains(phrase),

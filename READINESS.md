@@ -61,6 +61,8 @@ All identified durability, cryptographic security, and convergence items have be
 * **Fuzz campaign executions**: **25.97M+ executions** across 9 targets with **0 crashes or panics**.
 * **Interactive recall latency**: **48.87 µs** at 10,000 entries (comfortably under the 1 ms budget).
 * **Dual-workspace determinism match**: Byte-identical matching of preimages and digests across isolated builds.
+* **Two-machine determinism (Docker Simulation)**: Verified. Two isolated containers (`mneme-alpha` and `mneme-bravo`) produced byte-identical digests matching the pinned golden reference.
+
 
 ---
 *Assessor Signature:* **Antigravity (Adversarial Auditor)**
