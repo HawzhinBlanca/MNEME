@@ -1,5 +1,6 @@
 //! Store-path `bind_external_action` (P3-1).
 
+#[cfg(feature = "phase_iii_bind")]
 use mneme_account::PHASE_III_BIND_ACTION_OPEN;
 use mneme_cap::{Capability, Permissions};
 use mneme_core::{MemoryKind, TrustTier};
