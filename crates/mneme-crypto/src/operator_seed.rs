@@ -66,6 +66,9 @@ fn load_or_create_sealed_operator(
         write_sealed_operator_seed(&sealed_path, master, &seed)?;
         fs::remove_file(&legacy_path)
             .map_err(|e| io_error(legacy_path.display().to_string(), e))?;
+        if durability_fsync_enabled() {
+            sync_parent_dir(&legacy_path)?;
+        }
         return Ok(keypair_from_seed(seed));
     }
 
@@ -127,6 +130,7 @@ fn write_operator_seed_file(path: &Path, bytes: &[u8]) -> Result<(), MnemeError>
         }
     }
     fs::rename(&tmp, path).map_err(|e| io_error(path.display().to_string(), e))?;
+    sync_parent_dir(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -134,6 +138,26 @@ fn write_operator_seed_file(path: &Path, bytes: &[u8]) -> Result<(), MnemeError>
             .map_err(|e| io_error(path.display().to_string(), e))?;
     }
     Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            if parent.as_os_str().is_empty() {
+                return Ok(());
+            }
+            let dir = File::open(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
+            dir.sync_all()
+                .map_err(|e| io_error(parent.display().to_string(), e))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 fn keypair_from_seed_hex(hex: &str) -> Result<KeyPair, MnemeError> {

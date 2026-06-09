@@ -16,7 +16,27 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
         f.sync_all().map_err(|e| io_err(path, e))?;
     }
     fs::rename(&tmp, path).map_err(|e| io_err(path, e))?;
+    sync_parent_dir(path)?;
     Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            if parent.as_os_str().is_empty() {
+                return Ok(());
+            }
+            let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
+            dir.sync_all().map_err(|e| io_err(parent, e))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 /// Create-new checkpoint entry; fails closed if the sequence file already exists.

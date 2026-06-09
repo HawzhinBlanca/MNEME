@@ -155,6 +155,9 @@ pub fn end_incomplete(store: &Path) -> Result<(), MnemeError> {
     let marker = incomplete_marker(store);
     if marker.exists() {
         fs::remove_file(&marker).map_err(|e| io_err(&marker, e))?;
+        if durability_fsync_enabled() {
+            sync_parent_dir(&marker)?;
+        }
     }
     Ok(())
 }

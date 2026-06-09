@@ -32,12 +32,7 @@ pub fn merge_object_versions(
     let kind = MemoryKind::try_from(local.kind)?;
 
     match kind {
-        MemoryKind::Working => Ok(MergeWinner {
-            object_id: local_id,
-            canonical_bytes: local_bytes.to_vec(),
-            retained_alternatives: Vec::new(),
-        }),
-        MemoryKind::Identity | MemoryKind::Procedural => {
+        MemoryKind::Working | MemoryKind::Identity | MemoryKind::Procedural => {
             let winner = lww_pick(&local, local_id, local_bytes, &peer, peer_id, peer_bytes)?;
             Ok(MergeWinner {
                 object_id: winner.0,
