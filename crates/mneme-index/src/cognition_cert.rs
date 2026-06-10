@@ -3,11 +3,11 @@
 //! Optional field 7 (`audit_beacon`) carries a drand v2 beacon binding for Trick #1
 //! probabilistically-checkable retrieval (see `beacon_spot_check`).
 
+use crate::beacon_spot_check::{
+    AuditBeacon, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, verify_beacon_spot_check,
+};
 #[cfg(feature = "context_gate")]
 use crate::context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
-use crate::beacon_spot_check::{
-    AuditBeacon, SpotCheckContext, verify_beacon_spot_check, DEFAULT_AUDIT_RATE_PPM,
-};
 use crate::receipt::SemanticRecallReceipt;
 use crate::verify::verify_semantic_receipt_vo_zkann;
 #[cfg(feature = "context_gate")]

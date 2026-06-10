@@ -253,11 +253,7 @@ fn crossref_cognition_cert_byte_exact() {
     .unwrap();
     for entry in manifest["vectors"].as_array().unwrap() {
         let name = entry["name"].as_str().unwrap();
-        if entry
-            .get("fixture_status")
-            .and_then(|v| v.as_str())
-            == Some("prototype")
-        {
+        if entry.get("fixture_status").and_then(|v| v.as_str()) == Some("prototype") {
             continue;
         }
         let path = vectors_root()
@@ -334,8 +330,7 @@ fn crossref_beacon_spot_check_manifest_pins_audit_beacon_fields() {
     assert_eq!(ext["cert_field"].as_u64(), Some(7));
 
     let beacon_spec = &entry["audit_beacon"];
-    let randomness =
-        wire_root::hex32(beacon_spec["randomness_hex"].as_str().unwrap()).unwrap();
+    let randomness = wire_root::hex32(beacon_spec["randomness_hex"].as_str().unwrap()).unwrap();
     let binding_digest =
         wire_root::hex32(beacon_spec["binding_digest_hex"].as_str().unwrap()).unwrap();
     let mut enc = mneme_crossref::dcbor::Encoder::new();

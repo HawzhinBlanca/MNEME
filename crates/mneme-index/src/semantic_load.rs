@@ -229,8 +229,11 @@ fn semantic_load_remove_embedding_entry(
 pub fn load_store_embeddings(
     store: &Path,
 ) -> Result<BTreeMap<ObjectId, FixedPointEmbedding>, MnemeError> {
-    load_embeddings(store)
-        .map(|map| map.into_iter().map(|(id, emb)| (ObjectId(id), emb)).collect())
+    load_embeddings(store).map(|map| {
+        map.into_iter()
+            .map(|(id, emb)| (ObjectId(id), emb))
+            .collect()
+    })
 }
 
 fn load_embeddings(store: &Path) -> Result<BTreeMap<[u8; 32], FixedPointEmbedding>, MnemeError> {

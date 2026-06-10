@@ -6,8 +6,9 @@ use mneme_core::{
 };
 use mneme_crypto::{KeyPair, TrustConfig};
 use mneme_index::{
-    SemanticIndex, assemble_cognition_certificate_v1, assemble_cognition_certificate_v1_with_beacon,
-    prove_audit_beacon, verify_cognition_certificate_v1,
+    SemanticIndex, assemble_cognition_certificate_v1,
+    assemble_cognition_certificate_v1_with_beacon, prove_audit_beacon,
+    verify_cognition_certificate_v1,
 };
 use mneme_root::StoredRoot;
 

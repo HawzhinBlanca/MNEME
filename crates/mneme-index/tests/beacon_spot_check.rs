@@ -6,11 +6,11 @@ use mneme_core::{
 };
 use mneme_crypto::{KeyPair, TrustConfig};
 use mneme_index::{
-    SpotCheckContext, assemble_cognition_certificate_v1_with_beacon,
-    audit_beacon_binding_digest, audit_lottery_selected, parse_cognition_certificate,
-    prove_audit_beacon, verify_audit_beacon_offline, verify_beacon_spot_check,
+    BEACON_SPOT_CHECK_HONESTY, DEFAULT_AUDIT_RATE_PPM, SemanticIndex, SpotCheckContext,
+    assemble_cognition_certificate_v1_with_beacon, audit_beacon_binding_digest,
+    audit_lottery_selected, parse_cognition_certificate, prove_audit_beacon,
+    verify_audit_beacon_offline, verify_beacon_spot_check,
     verify_cognition_certificate_v1_with_spot_check, verify_spot_check_exact_nn,
-    BEACON_SPOT_CHECK_HONESTY, DEFAULT_AUDIT_RATE_PPM, SemanticIndex,
 };
 use mneme_root::StoredRoot;
 
@@ -46,9 +46,18 @@ fn signed_fixture() -> (StoredRoot, mneme_index::SemanticRecallReceipt, TrustCon
     )
     .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, stored.preimage_hash, RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            stored.preimage_hash,
+            RetrievalProofLevel::ExactDominance,
+        )
         .unwrap();
-    (stored, receipt, TrustConfig::new(operator.public_key_bytes()))
+    (
+        stored,
+        receipt,
+        TrustConfig::new(operator.public_key_bytes()),
+    )
 }
 
 #[test]
@@ -76,8 +85,7 @@ fn audit_beacon_binding_is_receipt_sensitive() {
 #[test]
 fn cognition_cert_v1_without_beacon_unchanged() {
     let (stored, receipt, trust) = signed_fixture();
-    let bytes =
-        mneme_index::assemble_cognition_certificate_v1(&stored, &receipt, None).unwrap();
+    let bytes = mneme_index::assemble_cognition_certificate_v1(&stored, &receipt, None).unwrap();
     let parsed = parse_cognition_certificate(&bytes).unwrap();
     assert!(parsed.audit_beacon.is_none());
     verify_cognition_certificate_v1_with_spot_check(&bytes, &trust, &proc(), None).unwrap();
@@ -120,13 +128,9 @@ fn cognition_cert_v1_rejects_forged_beacon_binding() {
     let (stored, receipt, trust) = signed_fixture();
     let mut beacon = prove_audit_beacon(99, vec![0xef; 32], &receipt).unwrap();
     beacon.binding_digest[0] ^= 0xff;
-    let bytes = assemble_cognition_certificate_v1_with_beacon(
-        &stored,
-        &receipt,
-        None,
-        Some(beacon),
-    )
-    .unwrap();
+    let bytes =
+        assemble_cognition_certificate_v1_with_beacon(&stored, &receipt, None, Some(beacon))
+            .unwrap();
     assert_eq!(
         verify_cognition_certificate_v1_with_spot_check(&bytes, &trust, &proc(), None),
         Err(MnemeError::CertificateInvalid)
@@ -142,18 +146,9 @@ fn spot_check_exact_nn_accepts_true_distances() {
         query: &q,
         entries: &[(oid(1), emb)],
     };
-    verify_spot_check_exact_nn(
-        &receipt.verification_object,
-        &proc(),
-        &ctx,
-    )
-    .unwrap();
+    verify_spot_check_exact_nn(&receipt.verification_object, &proc(), &ctx).unwrap();
     let beacon = prove_audit_beacon(1, vec![0x12; 32], &receipt).unwrap();
-    if audit_lottery_selected(
-        &beacon.beacon_randomness,
-        &beacon.binding_digest,
-        1_000_000,
-    ) {
+    if audit_lottery_selected(&beacon.beacon_randomness, &beacon.binding_digest, 1_000_000) {
         verify_beacon_spot_check(
             &beacon,
             &receipt,
@@ -172,7 +167,10 @@ fn appendix_b_audit_beacon_fixture() -> (Vec<u8>, TrustConfig, FixedPointEmbeddi
     let mut index = SemanticIndex::new();
     let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
     index
-        .insert(oid(0xab), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
+        .insert(
+            oid(0xab),
+            FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap(),
+        )
         .unwrap();
     let stored = StoredRoot::assemble(
         [0x10; 32],
@@ -185,16 +183,17 @@ fn appendix_b_audit_beacon_fixture() -> (Vec<u8>, TrustConfig, FixedPointEmbeddi
     )
     .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, stored.preimage_hash, RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            stored.preimage_hash,
+            RetrievalProofLevel::ExactDominance,
+        )
         .unwrap();
     let beacon = prove_audit_beacon(1_000_000, vec![0xcd; 32], &receipt).unwrap();
-    let bytes = assemble_cognition_certificate_v1_with_beacon(
-        &stored,
-        &receipt,
-        None,
-        Some(beacon),
-    )
-    .unwrap();
+    let bytes =
+        assemble_cognition_certificate_v1_with_beacon(&stored, &receipt, None, Some(beacon))
+            .unwrap();
     (bytes, TrustConfig::new(operator.public_key_bytes()), q)
 }
 
@@ -247,11 +246,7 @@ fn dump_cognition_cert_v1_audit_beacon_fixture() {
     let out_dir =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../proof/vectors/certs");
     std::fs::create_dir_all(&out_dir).unwrap();
-    std::fs::write(
-        out_dir.join("cognition_cert_v1_audit_beacon.cbor"),
-        &bytes,
-    )
-    .unwrap();
+    std::fs::write(out_dir.join("cognition_cert_v1_audit_beacon.cbor"), &bytes).unwrap();
     eprintln!(
         "cognition_cert_v1_audit_beacon_operator_pubkey_hex={}",
         hex::encode(trust.operator_keys[0])

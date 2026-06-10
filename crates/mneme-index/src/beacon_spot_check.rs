@@ -94,7 +94,9 @@ enum BeaconSpotCheckFailure {
     WireRoundMissing,
     WireRandomnessMissing,
     WireBindingMissing,
-    WireUnknownField { field: u16 },
+    WireUnknownField {
+        field: u16,
+    },
 }
 
 fn beacon_spot_check_failure_to_mneme(failure: BeaconSpotCheckFailure) -> MnemeError {
@@ -126,9 +128,8 @@ pub fn audit_beacon_binding_digest(
     beacon_randomness: &[u8],
     receipt_digest: &[u8; 32],
 ) -> [u8; 32] {
-    let mut payload = Vec::with_capacity(
-        AUDIT_BEACON_BIND_TAG.len() + 8 + beacon_randomness.len() + 32,
-    );
+    let mut payload =
+        Vec::with_capacity(AUDIT_BEACON_BIND_TAG.len() + 8 + beacon_randomness.len() + 32);
     payload.extend_from_slice(AUDIT_BEACON_BIND_TAG);
     payload.extend_from_slice(&drand_round.to_le_bytes());
     payload.extend_from_slice(beacon_randomness);
@@ -144,7 +145,9 @@ pub fn prove_audit_beacon(
 ) -> Result<AuditBeacon, MnemeError> {
     validate_beacon_randomness(&beacon_randomness)?;
     if drand_round == 0 {
-        return Err(beacon_spot_check_error(BeaconSpotCheckFailure::DrandRoundZero));
+        return Err(beacon_spot_check_error(
+            BeaconSpotCheckFailure::DrandRoundZero,
+        ));
     }
     let receipt_digest = receipt.digest();
     let binding_digest =
@@ -176,7 +179,9 @@ pub fn verify_audit_beacon_offline(
     receipt: &SemanticRecallReceipt,
 ) -> Result<(), MnemeError> {
     if beacon.drand_round == 0 {
-        return Err(beacon_spot_check_error(BeaconSpotCheckFailure::DrandRoundZero));
+        return Err(beacon_spot_check_error(
+            BeaconSpotCheckFailure::DrandRoundZero,
+        ));
     }
     validate_beacon_randomness(&beacon.beacon_randomness)?;
     let expected = audit_beacon_binding_digest(
@@ -236,8 +241,7 @@ pub fn audit_lottery_selected(
     binding_digest: &[u8; 32],
     audit_rate_ppm: u32,
 ) -> bool {
-    let mut payload =
-        Vec::with_capacity(AUDIT_LOTTERY_DOMAIN.len() + beacon_randomness.len() + 32);
+    let mut payload = Vec::with_capacity(AUDIT_LOTTERY_DOMAIN.len() + beacon_randomness.len() + 32);
     payload.extend_from_slice(AUDIT_LOTTERY_DOMAIN);
     payload.extend_from_slice(beacon_randomness);
     payload.extend_from_slice(binding_digest);
@@ -264,9 +268,9 @@ pub fn verify_spot_check_exact_nn(
     }
     let mut recomputed: Vec<(ObjectId, [u8; 32], i64)> = Vec::with_capacity(vo.candidates.len());
     for (id, emb_commit, asserted_dist) in &vo.candidates {
-        let stored = emb_by_id.get(id).ok_or_else(|| {
-            beacon_spot_check_error(BeaconSpotCheckFailure::AuditedExactNnFailed)
-        })?;
+        let stored = emb_by_id
+            .get(id)
+            .ok_or_else(|| beacon_spot_check_error(BeaconSpotCheckFailure::AuditedExactNnFailed))?;
         if stored.commit() != *emb_commit {
             return Err(beacon_spot_check_error(
                 BeaconSpotCheckFailure::AuditedExactNnFailed,

@@ -72,23 +72,20 @@ pub use zkann::{
     verify_zkann_attachment,
 };
 
+pub use beacon_spot_check::{
+    AUDIT_BEACON_BIND_TAG, AuditBeacon, BEACON_SPOT_CHECK_HONESTY, BEACON_SPOT_CHECK_STATUS,
+    BeaconAuditOutcome, DEFAULT_AUDIT_RATE_PPM, DRAND_QUICKNET_CHAIN_HASH,
+    DRAND_V2_ROUND_URL_TEMPLATE, SpotCheckContext, audit_beacon_binding_digest,
+    audit_lottery_selected, decode_audit_beacon, encode_audit_beacon, prove_audit_beacon,
+    verify_audit_beacon_offline, verify_beacon_spot_check, verify_spot_check_exact_nn,
+};
+#[cfg(feature = "beacon_online")]
+pub use beacon_spot_check::{fetch_drand_beacon_randomness, verify_audit_beacon_online};
 #[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
     assemble_cognition_certificate_v2_draft_with_beacon, verify_cognition_certificate_v2_draft,
     verify_cognition_certificate_v2_draft_strict,
-};
-pub use beacon_spot_check::{
-    AuditBeacon, AUDIT_BEACON_BIND_TAG, BEACON_SPOT_CHECK_HONESTY, BEACON_SPOT_CHECK_STATUS,
-    DRAND_QUICKNET_CHAIN_HASH, DRAND_V2_ROUND_URL_TEMPLATE, SpotCheckContext,
-    audit_beacon_binding_digest, audit_lottery_selected, decode_audit_beacon,
-    encode_audit_beacon, prove_audit_beacon, verify_audit_beacon_offline,
-    verify_beacon_spot_check, verify_spot_check_exact_nn, BeaconAuditOutcome,
-    DEFAULT_AUDIT_RATE_PPM,
-};
-#[cfg(feature = "beacon_online")]
-pub use beacon_spot_check::{
-    fetch_drand_beacon_randomness, verify_audit_beacon_online,
 };
 pub use cognition_cert::{
     ParsedCognitionCert, assemble_cognition_certificate_v1,

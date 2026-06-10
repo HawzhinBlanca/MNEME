@@ -47,9 +47,8 @@ pub fn audit_beacon_binding_digest(
     beacon_randomness: &[u8],
     receipt_digest: &[u8; 32],
 ) -> [u8; 32] {
-    let mut payload = Vec::with_capacity(
-        AUDIT_BEACON_BIND_TAG.len() + 8 + beacon_randomness.len() + 32,
-    );
+    let mut payload =
+        Vec::with_capacity(AUDIT_BEACON_BIND_TAG.len() + 8 + beacon_randomness.len() + 32);
     payload.extend_from_slice(AUDIT_BEACON_BIND_TAG);
     payload.extend_from_slice(&drand_round.to_le_bytes());
     payload.extend_from_slice(beacon_randomness);
@@ -63,8 +62,7 @@ pub fn audit_lottery_selected(
     binding_digest: &[u8; 32],
     audit_rate_ppm: u32,
 ) -> bool {
-    let mut payload =
-        Vec::with_capacity(AUDIT_LOTTERY_DOMAIN.len() + beacon_randomness.len() + 32);
+    let mut payload = Vec::with_capacity(AUDIT_LOTTERY_DOMAIN.len() + beacon_randomness.len() + 32);
     payload.extend_from_slice(AUDIT_LOTTERY_DOMAIN);
     payload.extend_from_slice(beacon_randomness);
     payload.extend_from_slice(binding_digest);

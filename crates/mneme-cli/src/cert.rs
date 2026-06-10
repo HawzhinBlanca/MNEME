@@ -7,10 +7,9 @@ use mneme_core::{
 };
 use mneme_crypto::TrustConfig;
 use mneme_index::{
-    BEACON_SPOT_CHECK_HONESTY, SpotCheckContext, audit_lottery_selected,
+    BEACON_SPOT_CHECK_HONESTY, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, audit_lottery_selected,
     load_store_embeddings, parse_cognition_certificate, verify_audit_beacon_offline,
     verify_cognition_certificate_v1, verify_cognition_certificate_v1_with_spot_check,
-    DEFAULT_AUDIT_RATE_PPM,
 };
 use mneme_store::Store;
 use std::fs;
@@ -102,12 +101,8 @@ pub fn run_verify_cert_audit(
     );
 
     let spot_check = if selected {
-        let store = opts
-            .store
-            .ok_or(MnemeError::ProcedureMismatch)?;
-        let query = opts
-            .query
-            .ok_or(MnemeError::ProcedureMismatch)?;
+        let store = opts.store.ok_or(MnemeError::ProcedureMismatch)?;
+        let query = opts.query.ok_or(MnemeError::ProcedureMismatch)?;
         let embeddings = load_store_embeddings(store)?;
         let mut entries = Vec::with_capacity(parsed.receipt.verification_object.candidates.len());
         for (id, _, _) in &parsed.receipt.verification_object.candidates {
