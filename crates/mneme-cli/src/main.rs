@@ -556,13 +556,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             Ok(())
         }
         Commands::Attest { root } => {
-            require_file_exists(&root, "file")?;
+            require_file_exists(&root, "root checkpoint")?;
             let bytes = std::fs::read(&root).map_err(|_| CliErrorKind::Usage)?;
-            let statement = if let Ok(cert) = mneme_index::parse_cognition_certificate(&bytes) {
-                attest::sigstore_statement_for_cert(&bytes, &cert)
-            } else {
-                attest::sigstore_statement(&bytes)
-            };
+            let statement = attest::sigstore_statement(&bytes);
             println!(
                 "{}",
                 serde_json::to_string_pretty(&statement).map_err(|_| CliErrorKind::Usage)?
