@@ -248,6 +248,156 @@
           </div>
         </section>
 
+        <!-- HNSW Semantic Graph Explorer -->
+        <section class="card graph-explorer-card" aria-labelledby="graph-title">
+          <div class="card-header-row">
+            <h3 id="graph-title" class="card-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+                <line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/>
+                <line x1="5" y1="19" x2="19" y2="19"/>
+              </svg>
+              Semantic Graph Explorer
+            </h3>
+            <span class="registry-count-badge" id="graph-mode-badge">Demo Mode</span>
+          </div>
+          <div class="graph-input-row">
+            <div class="form-group flex-2">
+              <label for="graph-query-ns">Namespace</label>
+              <input type="text" id="graph-query-ns" placeholder="user" value="system">
+            </div>
+            <div class="form-group flex-3">
+              <label for="graph-query-name">Logical Key Name</label>
+              <input type="text" id="graph-query-name" placeholder="e.g. api-base-url">
+            </div>
+            <div class="form-group align-bottom">
+              <button type="button" class="btn btn-secondary" id="btn-explore-graph">
+                <span class="btn-text">Explore</span>
+                <span class="spinner" id="graph-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- SVG Canvas -->
+          <div class="graph-canvas-wrapper">
+            <svg id="graph-svg" class="graph-canvas" viewBox="0 0 640 340" aria-label="HNSW traversal graph">
+              <defs>
+                <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                  <polygon points="0 0, 8 3, 0 6" fill="hsla(220,20%,60%,0.4)"/>
+                </marker>
+                <filter id="glow-orange">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+                <filter id="glow-green">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+              <g id="graph-edges-layer"></g>
+              <g id="graph-nodes-layer"></g>
+            </svg>
+            <!-- Node tooltip -->
+            <div id="graph-tooltip" class="graph-tooltip" hidden>
+              <div id="graph-tooltip-label" class="tooltip-label"></div>
+              <div id="graph-tooltip-id" class="tooltip-id hex-text"></div>
+              <div id="graph-tooltip-dist" class="tooltip-dist"></div>
+            </div>
+          </div>
+
+          <!-- Graph legend and stats -->
+          <div class="graph-legend-row">
+            <div class="graph-legend">
+              <span class="legend-dot result"></span><span>Result</span>
+              <span class="legend-dot visited"></span><span>Visited</span>
+              <span class="legend-dot candidate"></span><span>Candidate</span>
+              <span class="legend-line traversed"></span><span>Traversal Path</span>
+            </div>
+            <div class="graph-stats" id="graph-stats">
+              <span id="graph-stat-level">—</span>
+              &nbsp;·&nbsp;
+              <span id="graph-stat-seq">Seq: —</span>
+            </div>
+          </div>
+
+          <!-- §3 Honesty Notice -->
+          <div class="honesty-notice" role="note" aria-label="Honesty boundary notice">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>§3 Honesty Boundary: Verifiable retrieval proves <strong>procedure-faithfulness</strong>, not exact nearest neighbors. The displayed traversal path is the prover-asserted visit sequence, not a proof of global top-k optimality.</span>
+          </div>
+        </section>
+
+        <!-- Cognition Certificate Inspector -->
+        <section class="card cert-inspector-card" aria-labelledby="cert-inspector-title">
+          <div class="card-header-row">
+            <h3 id="cert-inspector-title" class="card-title">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              Cognition Certificate Inspector
+            </h3>
+            <span class="registry-count-badge" id="cert-version-badge">—</span>
+          </div>
+
+          <div class="form-group">
+            <label for="cert-input">Base64 CBOR Cognition Certificate</label>
+            <textarea id="cert-input" rows="3" placeholder="Paste Base64-encoded CognitionCert wire bundle (v1 or v2-draft)..."></textarea>
+          </div>
+          <div class="cert-actions-row">
+            <button type="button" class="btn btn-primary" id="btn-inspect-cert">Inspect Certificate</button>
+            <button type="button" class="btn btn-secondary" id="btn-load-demo-cert-v1">Load Demo v1</button>
+            <button type="button" class="btn btn-secondary" id="btn-load-demo-cert-v2">Load Demo v2-draft</button>
+          </div>
+
+          <!-- Results -->
+          <div id="cert-result" class="cert-result hidden">
+            <!-- Header status row -->
+            <div class="cert-status-row" id="cert-status-row"></div>
+
+            <!-- Signed Root accordion -->
+            <details class="cert-section" id="cert-section-root" open>
+              <summary class="cert-section-title">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Signed Root
+              </summary>
+              <div class="cert-fields" id="cert-root-fields"></div>
+            </details>
+
+            <!-- Verification Object accordion -->
+            <details class="cert-section" id="cert-section-vo">
+              <summary class="cert-section-title">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Verification Object
+              </summary>
+              <div id="cert-vo-content"></div>
+            </details>
+
+            <!-- Context Attestation accordion (v2 only) -->
+            <details class="cert-section hidden" id="cert-section-attest">
+              <summary class="cert-section-title">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                Context Attestation (v2-draft)
+              </summary>
+              <div class="cert-fields" id="cert-attest-fields"></div>
+            </details>
+
+            <!-- Cross-field checks -->
+            <div class="cert-checks" id="cert-checks"></div>
+
+            <!-- Crypto disclaimer -->
+            <div class="cert-disclaimer">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              Ed25519 signature verification requires the operator's trust config and is <strong>not performed in the browser</strong>. The checks above confirm structural integrity only.
+            </div>
+          </div>
+        </section>
+
         <!-- Live Security & Audit Log Card -->
         <section class="card audit-log-card" aria-labelledby="audit-log-title">
           <div class="card-header-row">

@@ -117,6 +117,43 @@ struct PromoteBody {
     to_tier: String,
 }
 
+#[derive(Serialize)]
+struct SemanticGraphNode {
+    id: String,
+    object_id_hex: String,
+    label: String,
+    distance: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct SemanticGraphEdge {
+    from: String,
+    to: String,
+}
+
+#[derive(Serialize)]
+struct SemanticGraphResponse {
+    key_index_only: bool,
+    proof_level: String,
+    root_seq: u64,
+    nodes: Vec<SemanticGraphNode>,
+    edges: Vec<SemanticGraphEdge>,
+    visited_path: Vec<String>,
+    result_id: Option<String>,
+    entry_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct CertMetaResponse {
+    object_id_hex: Option<String>,
+    root_sequence: u64,
+    root_hash_hex: String,
+    key_index_root_hex: String,
+    semantic_commit_hex: String,
+    hlc_max_hex: String,
+    prev_root_hex: String,
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/v1/health", get(health))
@@ -127,6 +164,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/forget-proof/{namespace}/{name}", delete(forget_proof))
         .route("/v1/memory/promote", post(promote))
         .route("/v1/prove-absent/{namespace}/{name}", get(prove_absent))
+        .route("/v1/semantic-graph/{namespace}/{name}", get(semantic_graph))
+        .route("/v1/cert-meta/{namespace}/{name}", get(cert_meta))
         .route(
             "/v1/auth/verify",
             post(auth_verify).layer(DefaultBodyLimit::max(AUTH_VERIFY_BODY_LIMIT_BYTES)),
@@ -431,6 +470,108 @@ fn recall_entry_json(entry: Entry) -> Result<RecallEntryJson, ApiError> {
         body,
         trust_tier: trust_tier.as_u8(),
     })
+}
+
+async fn semantic_graph(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((namespace, name)): Path<(String, String)>,
+) -> Result<Json<SemanticGraphResponse>, ApiError> {
+    let cap = auth_cap(&headers)?;
+    check_rate_limit(&state, &cap)?;
+    verify_cap(&state, &cap)?;
+    let store = state
+        .store
+        .lock()
+        .map_err(|_| ApiError::internal("store lock poisoned"))?;
+    let root = store.current_root().map_err(ApiError::from_mneme)?;
+    // Key-index recall — embedding=None degrades gracefully when no HNSW index loaded
+    let query = Query {
+        logical_key: LogicalKey {
+            namespace: namespace.clone(),
+            name: name.clone(),
+        },
+        min_tier: DEFAULT_RECALL_MIN_TIER,
+        embedding: None,
+    };
+    let entries = store
+        .recall_verified_default(&query, &cap)
+        .unwrap_or_default();
+
+    if entries.is_empty() {
+        // No entry found — return empty key-index-only response
+        return Ok(Json(SemanticGraphResponse {
+            key_index_only: true,
+            proof_level: "KeyIndexOnly".to_string(),
+            root_seq: root.sequence,
+            nodes: vec![],
+            edges: vec![],
+            visited_path: vec![],
+            result_id: None,
+            entry_id: None,
+        }));
+    }
+
+    // Build a simple graph from the recalled entries (key-index mode — no real HNSW
+    // traversal data available without an embedding query, so we surface what we have)
+    let nodes: Vec<SemanticGraphNode> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| SemanticGraphNode {
+            id: format!("n{}", i),
+            object_id_hex: hex::encode(e.id.as_bytes()),
+            label: format!("{}/{}", namespace, name),
+            distance: None,
+        })
+        .collect();
+
+    let result_id = nodes.first().map(|n| n.id.clone());
+    let entry_id = nodes.first().map(|n| n.id.clone());
+
+    Ok(Json(SemanticGraphResponse {
+        key_index_only: true,
+        proof_level: "KeyIndexOnly".to_string(),
+        root_seq: root.sequence,
+        nodes,
+        edges: vec![],
+        visited_path: result_id.iter().cloned().collect(),
+        result_id,
+        entry_id,
+    }))
+}
+
+async fn cert_meta(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((namespace, name)): Path<(String, String)>,
+) -> Result<Json<CertMetaResponse>, ApiError> {
+    let cap = auth_cap(&headers)?;
+    check_rate_limit(&state, &cap)?;
+    verify_cap(&state, &cap)?;
+    let store = state
+        .store
+        .lock()
+        .map_err(|_| ApiError::internal("store lock poisoned"))?;
+    let root = store.current_root().map_err(ApiError::from_mneme)?;
+    // Optionally look up the entry to include its object_id
+    let query = Query {
+        logical_key: LogicalKey { namespace, name },
+        min_tier: DEFAULT_RECALL_MIN_TIER,
+        embedding: None,
+    };
+    let entries = store
+        .recall_verified_default(&query, &cap)
+        .unwrap_or_default();
+    let object_id_hex = entries.first().map(|e| hex::encode(e.id.as_bytes()));
+    Ok(Json(CertMetaResponse {
+        object_id_hex,
+        root_sequence: root.sequence,
+        root_hash_hex: hex::encode(root.preimage_hash),
+        key_index_root_hex: hex::encode(root.key_index_root),
+        semantic_commit_hex: hex::encode(root.semantic_commit),
+        hlc_max_hex: hex::encode(root.hlc_max),
+        prev_root_hex: hex::encode(root.prev_root),
+    }))
 }
 
 use crate::state::parse_capability_b64;

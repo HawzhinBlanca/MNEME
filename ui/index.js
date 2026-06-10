@@ -1375,6 +1375,446 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 4000);
   }
 
+  // ===========================================================================
+  // Phase VI — HNSW Semantic Graph Explorer
+  // ===========================================================================
+
+  const graphEdgesLayer = document.getElementById('graph-edges-layer');
+  const graphNodesLayer = document.getElementById('graph-nodes-layer');
+  const graphTooltip    = document.getElementById('graph-tooltip');
+  const graphTipLabel   = document.getElementById('graph-tooltip-label');
+  const graphTipId      = document.getElementById('graph-tooltip-id');
+  const graphTipDist    = document.getElementById('graph-tooltip-dist');
+  const graphModeBadge  = document.getElementById('graph-mode-badge');
+  const graphStatLevel  = document.getElementById('graph-stat-level');
+  const graphStatSeq    = document.getElementById('graph-stat-seq');
+  const btnExplore      = document.getElementById('btn-explore-graph');
+
+  // Fruchterman-Reingold spring layout (pure vanilla, no D3)
+  function forceLayout(nodes, edges, W, H) {
+    var iterations = 65;
+    var k = Math.sqrt((W * H) / Math.max(nodes.length, 1));
+    nodes.forEach(function(n) {
+      n.x = W * 0.1 + Math.random() * W * 0.8;
+      n.y = H * 0.1 + Math.random() * H * 0.8;
+      n.vx = 0; n.vy = 0;
+    });
+    var temp = W * 0.3;
+    for (var iter = 0; iter < iterations; iter++) {
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].vx = 0; nodes[i].vy = 0;
+        for (var j = 0; j < nodes.length; j++) {
+          if (i === j) continue;
+          var dx = nodes[i].x - nodes[j].x;
+          var dy = nodes[i].y - nodes[j].y;
+          var dist = Math.max(Math.sqrt(dx*dx + dy*dy), 0.01);
+          var f = (k*k) / dist;
+          nodes[i].vx += (dx/dist)*f;
+          nodes[i].vy += (dy/dist)*f;
+        }
+      }
+      edges.forEach(function(e) {
+        var u = nodes.find(function(n) { return n.id === e.from; });
+        var v = nodes.find(function(n) { return n.id === e.to; });
+        if (!u || !v) return;
+        var dx = v.x - u.x, dy = v.y - u.y;
+        var dist = Math.max(Math.sqrt(dx*dx + dy*dy), 0.01);
+        var f = (dist*dist) / k;
+        u.vx += (dx/dist)*f; u.vy += (dy/dist)*f;
+        v.vx -= (dx/dist)*f; v.vy -= (dy/dist)*f;
+      });
+      nodes.forEach(function(n) {
+        var disp = Math.sqrt(n.vx*n.vx + n.vy*n.vy);
+        if (disp > 0) {
+          n.x += (n.vx/disp)*Math.min(disp,temp);
+          n.y += (n.vy/disp)*Math.min(disp,temp);
+          n.x = Math.max(28, Math.min(W-28, n.x));
+          n.y = Math.max(28, Math.min(H-28, n.y));
+        }
+      });
+      temp *= 0.92;
+    }
+  }
+
+  function renderGraphData(graphData) {
+    var W = 640, H = 340;
+    graphEdgesLayer.innerHTML = '';
+    graphNodesLayer.innerHTML = '';
+    graphTooltip.hidden = true;
+
+    var nodes = graphData.nodes, edges = graphData.edges;
+    var visitedPath = graphData.visitedPath;
+    var resultId = graphData.resultId, entryId = graphData.entryId;
+    var proofLevel = graphData.proofLevel, rootSeq = graphData.rootSeq;
+
+    forceLayout(nodes, edges, W, H);
+
+    var traversedPairs = {};
+    for (var i = 0; i + 1 < visitedPath.length; i++) {
+      traversedPairs[visitedPath[i] + '-' + visitedPath[i+1]] = true;
+      traversedPairs[visitedPath[i+1] + '-' + visitedPath[i]] = true;
+    }
+
+    edges.forEach(function(e) {
+      var u = nodes.find(function(n) { return n.id === e.from; });
+      var v = nodes.find(function(n) { return n.id === e.to; });
+      if (!u || !v) return;
+      var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', u.x); line.setAttribute('y1', u.y);
+      line.setAttribute('x2', v.x); line.setAttribute('y2', v.y);
+      line.setAttribute('class', traversedPairs[e.from+'-'+e.to] ? 'graph-edge traversed' : 'graph-edge');
+      graphEdgesLayer.appendChild(line);
+    });
+
+    nodes.forEach(function(n, idx) {
+      var isResult  = n.id === resultId;
+      var isVisited = visitedPath.indexOf(n.id) >= 0;
+      var isEntry   = n.id === entryId;
+      var cls = 'graph-node' + (isResult ? ' result' : isVisited ? ' visited' : '') + (isEntry ? ' entry' : '');
+
+      var g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.setAttribute('class', cls);
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', n.label + ': ' + n.objectIdHex);
+
+      var r = isResult ? 16 : isVisited ? 13 : 10;
+      var circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y); circle.setAttribute('r', r);
+      g.appendChild(circle);
+
+      var sym = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      sym.setAttribute('x', n.x); sym.setAttribute('y', n.y + 4);
+      sym.textContent = isResult ? '\u2605' : isEntry ? 'E' : String(idx);
+      g.appendChild(sym);
+
+      var lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      lbl.setAttribute('x', n.x); lbl.setAttribute('y', n.y + r + 12);
+      lbl.setAttribute('class', 'node-label');
+      lbl.textContent = n.label.length > 10 ? n.label.substring(0,10) + '\u2026' : n.label;
+      g.appendChild(lbl);
+
+      var showTip = function() {
+        graphTipLabel.textContent = n.label;
+        graphTipId.textContent    = n.objectIdHex;
+        graphTipDist.textContent  = n.distance !== undefined ? 'Distance: ' + n.distance : '';
+        graphTooltip.hidden = false;
+      };
+      g.addEventListener('mouseenter', showTip);
+      g.addEventListener('focus',      showTip);
+      g.addEventListener('mouseleave', function() { graphTooltip.hidden = true; });
+      g.addEventListener('blur',       function() { graphTooltip.hidden = true; });
+      g.addEventListener('keydown',    function(ev) { if (ev.key === 'Enter' || ev.key === ' ') showTip(); });
+
+      graphNodesLayer.appendChild(g);
+    });
+
+    graphStatLevel.textContent = proofLevel || 'ExactDominance';
+    graphStatSeq.textContent   = 'Seq: ' + (rootSeq !== null && rootSeq !== undefined ? rootSeq : '\u2014');
+
+    visitedPath.forEach(function(vid, i) {
+      var nData = nodes.find(function(n) { return n.id === vid; });
+      if (!nData) return;
+      var el = graphNodesLayer.querySelector('[aria-label^="' + nData.label.substring(0,8) + '"]');
+      if (!el) return;
+      setTimeout(function() { el.classList.add('visited'); }, i * 160);
+    });
+  }
+
+  function buildDemoGraphData(namespace, name) {
+    var ids = [];
+    for (var i = 0; i < 10; i++) ids.push(i.toString(16).padStart(2,'0').repeat(32).substring(0,64));
+    var nodes = ids.map(function(id, i) {
+      return { id: 'n'+i, objectIdHex: id, label: i===0 ? namespace+'/'+name : 'cand-'+i,
+               distance: i===0 ? 0 : -Math.floor(1000 + Math.random()*8000) };
+    });
+    var edges = [
+      {from:'n0',to:'n1'},{from:'n0',to:'n2'},{from:'n1',to:'n3'},
+      {from:'n1',to:'n4'},{from:'n2',to:'n4'},{from:'n2',to:'n5'},
+      {from:'n3',to:'n6'},{from:'n4',to:'n6'},{from:'n4',to:'n7'},
+      {from:'n5',to:'n7'},{from:'n6',to:'n8'},{from:'n7',to:'n9'}
+    ];
+    return { nodes: nodes, edges: edges, visitedPath: ['n0','n1','n3','n6','n8'],
+             resultId: 'n8', entryId: 'n0', proofLevel: 'ExactDominance (Demo)', rootSeq: null };
+  }
+
+  btnExplore.addEventListener('click', async function() {
+    var ns   = document.getElementById('graph-query-ns').value.trim() || 'user';
+    var name = document.getElementById('graph-query-name').value.trim() || 'sample';
+    btnExplore.classList.add('loading');
+    btnExplore.disabled = true;
+
+    if (isLive) {
+      try {
+        var headers = {};
+        if (activeCapToken) headers['Authorization'] = 'Bearer ' + activeCapToken;
+        var resp = await fetch(
+          '/api/v1/semantic-graph/' + encodeURIComponent(ns) + '/' + encodeURIComponent(name),
+          { headers: headers }
+        );
+        if (resp.ok) {
+          var data = await resp.json();
+          if (data.key_index_only) {
+            addLog('warn', 'No semantic index for ' + ns + '/' + name + '. Showing demo.');
+            renderGraphData(buildDemoGraphData(ns, name));
+            graphModeBadge.textContent = 'Key-Index Only';
+          } else {
+            renderGraphData(data);
+            graphModeBadge.textContent = 'Live Semantic Graph';
+          }
+        } else { throw new Error('HTTP ' + resp.status); }
+      } catch (err) {
+        addLog('error', 'Graph fetch failed: ' + err.message + '. Showing demo.');
+        renderGraphData(buildDemoGraphData(ns, name));
+        graphModeBadge.textContent = 'Demo (Fallback)';
+      }
+    } else {
+      await new Promise(function(r) { setTimeout(r, 400); });
+      renderGraphData(buildDemoGraphData(ns, name));
+      graphModeBadge.textContent = 'Demo Mode';
+    }
+
+    btnExplore.classList.remove('loading');
+    btnExplore.disabled = false;
+    addLog('info', 'HNSW graph rendered for ' + ns + '/' + name + '.');
+  });
+
+  // ===========================================================================
+  // Phase VI — Cognition Certificate Inspector
+  // ===========================================================================
+
+  var PROOF_LEVEL_MAP = {0:'ExactDominance',1:'ZkannLevel1',2:'ZkannLevel2',3:'ZkannFull'};
+
+  function parseNestedCbor(bytes) {
+    try {
+      var buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      return new CBORDecoder(buf).decode();
+    } catch(e) { return null; }
+  }
+
+  function parseCognitionCert(b64) {
+    try {
+      var bytes = base64ToBytes(b64);
+      var raw   = new CBORDecoder(bytes.buffer).decode();
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      return {
+        version:     raw[1] || null,
+        level:       PROOF_LEVEL_MAP[raw[2]] || ('Unknown(' + raw[2] + ')'),
+        asOfSeq:     raw[3] || null,
+        storedRoot:  raw[4] instanceof Uint8Array ? parseNestedCbor(raw[4]) : null,
+        receipt:     raw[5] instanceof Uint8Array ? parseNestedCbor(raw[5]) : null,
+        attestation: raw[6] instanceof Uint8Array ? parseNestedCbor(raw[6]) : null
+      };
+    } catch(e) { return null; }
+  }
+
+  function hexOf(val) {
+    if (val instanceof Uint8Array) return bytesToHex(val);
+    if (typeof val === 'string')   return val;
+    if (val === null || val === undefined) return '\u2014';
+    return String(val);
+  }
+
+  function addCertField(container, label, value, mono) {
+    if (mono === undefined) mono = true;
+    var lbl = document.createElement('div');
+    lbl.className = 'cert-field-label';
+    lbl.textContent = label;
+    var val = document.createElement('div');
+    val.className  = mono ? 'cert-field-value' : 'cert-field-value plain';
+    val.textContent = value;
+    container.appendChild(lbl);
+    container.appendChild(val);
+  }
+
+  function renderCert(cert) {
+    var statusRow    = document.getElementById('cert-status-row');
+    var rootFields   = document.getElementById('cert-root-fields');
+    var voContent    = document.getElementById('cert-vo-content');
+    var attestFields = document.getElementById('cert-attest-fields');
+    var certChecks   = document.getElementById('cert-checks');
+    var certResult   = document.getElementById('cert-result');
+    var certBadge    = document.getElementById('cert-version-badge');
+    var sectAttest   = document.getElementById('cert-section-attest');
+
+    statusRow.innerHTML    = '';
+    rootFields.innerHTML   = '';
+    voContent.innerHTML    = '';
+    attestFields.innerHTML = '';
+    certChecks.innerHTML   = '';
+    sectAttest.classList.add('hidden');
+
+    var isV2 = cert.attestation !== null && cert.attestation !== undefined;
+    certBadge.textContent = isV2 ? 'v2-draft' : 'v1';
+
+    var badges = [
+      ['cert-badge valid', '\u2713 Structure Valid'],
+      ['cert-badge ' + (isV2 ? 'v2' : 'v1'), 'CognitionCert ' + (isV2 ? 'v2-draft' : 'v1')],
+      ['cert-badge warning', 'Level: ' + cert.level]
+    ];
+    badges.forEach(function(pair) {
+      var b = document.createElement('span');
+      b.className = pair[0]; b.textContent = pair[1];
+      statusRow.appendChild(b);
+    });
+
+    if (cert.storedRoot) {
+      var r = cert.storedRoot;
+      addCertField(rootFields, 'Version',        String(r[1] !== undefined ? r[1] : '\u2014'), false);
+      addCertField(rootFields, 'Sequence',        String(r[9] !== undefined ? r[9] : '\u2014'), false);
+      addCertField(rootFields, 'Preimage Hash',   hexOf(r[2]));
+      addCertField(rootFields, 'DAG Head Root',   hexOf(r[3]));
+      addCertField(rootFields, 'Key Index Root',  hexOf(r[4]));
+      addCertField(rootFields, 'Semantic Commit', hexOf(r[5]));
+      addCertField(rootFields, 'HLC Max',         hexOf(r[6]));
+      addCertField(rootFields, 'Prev Root',       hexOf(r[7]));
+      addCertField(rootFields, 'Signature',       hexOf(r[8]));
+    } else {
+      addCertField(rootFields, 'Status', 'Could not decode stored root bytes', false);
+    }
+
+    if (cert.receipt) {
+      var rec = cert.receipt;
+      var voMeta = document.createElement('div');
+      voMeta.className = 'cert-fields';
+      addCertField(voMeta, 'Root Bound',      hexOf(rec[1]));
+      addCertField(voMeta, 'Semantic Commit', hexOf(rec[2]));
+      addCertField(voMeta, 'Procedure ID',    hexOf(rec[3]));
+      voContent.appendChild(voMeta);
+
+      var candidates = rec[4];
+      if (Array.isArray(candidates) && candidates.length > 0) {
+        var tbl = document.createElement('table');
+        tbl.className = 'cert-candidates-table';
+        tbl.innerHTML = '<thead><tr><th>#</th><th>Object ID</th><th>Distance</th></tr></thead>';
+        var tbody = document.createElement('tbody');
+        candidates.forEach(function(c, i) {
+          var tr = document.createElement('tr');
+          var id   = Array.isArray(c) ? hexOf(c[0]).substring(0,24) + '\u2026' : '\u2014';
+          var dist = Array.isArray(c) ? (c[2] !== undefined ? c[2] : '\u2014') : '\u2014';
+          tr.innerHTML = '<td>' + (i+1) + '</td><td>' + id + '</td><td>' + dist + '</td>';
+          tbody.appendChild(tr);
+        });
+        tbl.appendChild(tbody);
+        voContent.appendChild(tbl);
+      }
+
+      var zkann = rec[5];
+      if (zkann && typeof zkann === 'object') {
+        var visitedIds = zkann['visited'] || zkann[2] || [];
+        if (Array.isArray(visitedIds) && visitedIds.length > 0) {
+          var sec = document.createElement('div');
+          sec.innerHTML = '<div style="padding:8px 16px 4px;font-size:11px;color:var(--text-muted);font-weight:600;">zkANN Visited Order (' + visitedIds.length + ' hops)</div>';
+          var tl = document.createElement('div');
+          tl.className = 'visited-order-list';
+          visitedIds.forEach(function(vid, i) {
+            var tag = document.createElement('span');
+            tag.className = 'visited-tag';
+            tag.textContent = i + ': ' + hexOf(vid).substring(0,10) + '\u2026';
+            tl.appendChild(tag);
+          });
+          sec.appendChild(tl);
+          voContent.appendChild(sec);
+        }
+      }
+    } else {
+      var p = document.createElement('p');
+      p.style.cssText = 'padding:12px 16px;color:var(--text-muted);font-size:12px;';
+      p.textContent = 'Could not decode semantic receipt bytes.';
+      voContent.appendChild(p);
+    }
+
+    if (isV2) {
+      sectAttest.classList.remove('hidden');
+      var att    = cert.attestation;
+      var status = att['status'] || att[1] || '\u2014';
+      var ctx    = att['context_digest'] || att[2] || null;
+      addCertField(attestFields, 'Status',         status, false);
+      addCertField(attestFields, 'Context Digest', hexOf(ctx));
+      var wb = document.createElement('span');
+      wb.className = 'cert-badge warning';
+      wb.style.margin = '8px 16px';
+      wb.textContent = '\u26a0 ' + status;
+      attestFields.appendChild(wb);
+      attestFields.appendChild(document.createElement('div'));
+    }
+
+    var checks = [];
+    if (cert.storedRoot && cert.receipt) {
+      var ph = hexOf(cert.storedRoot[2]);
+      var rb = hexOf(cert.receipt[1]);
+      checks.push({ pass: ph === rb, label: 'receipt.root_bound \u2261 stored_root.preimage_hash',
+                    detail: ph === rb ? '\u2713 Bound' : 'Got ' + rb.substring(0,16) + '\u2026' });
+    }
+    if (cert.receipt) {
+      var sc = cert.receipt[2];
+      checks.push({ pass: sc instanceof Uint8Array && sc.length === 32,
+                    label: 'receipt.semantic_commit present (32 bytes)',
+                    detail: sc instanceof Uint8Array ? sc.length + ' bytes' : 'missing' });
+    }
+    if (isV2 && cert.attestation) {
+      var st = cert.attestation['status'] || cert.attestation[1] || '';
+      var ok = st === 'unverified_until_phase_ii_gate';
+      checks.push({ pass: ok, label: 'attestation.status == "unverified_until_phase_ii_gate"',
+                    detail: ok ? '\u2713 Honest label' : 'Got: "' + st + '"' });
+    }
+
+    checks.forEach(function(c) {
+      var row = document.createElement('div');
+      row.className = 'cert-check-row';
+      row.innerHTML =
+        '<span class="check-icon ' + (c.pass ? 'pass' : 'fail') + '">' + (c.pass ? '\u2713' : '\u2717') + '</span>' +
+        '<span class="check-label">' + c.label + '</span>' +
+        '<span class="check-detail">' + c.detail + '</span>';
+      certChecks.appendChild(row);
+    });
+
+    certResult.classList.remove('hidden');
+  }
+
+  var DEMO_CERT_STORED_ROOT = {
+    1: 1, 2: new Uint8Array(32).fill(0xde), 3: new Uint8Array(32).fill(0xad),
+    4: new Uint8Array(32).fill(0xbe), 5: new Uint8Array(32).fill(0xef),
+    6: new Uint8Array(8).fill(0x00),  7: new Uint8Array(32).fill(0x00),
+    8: new Uint8Array(64).fill(0xab), 9: 42
+  };
+  var DEMO_CERT_RECEIPT = {
+    1: new Uint8Array(32).fill(0xde), // root_bound matches preimage_hash above
+    2: new Uint8Array(32).fill(0xca),
+    3: new Uint8Array(32).fill(0xfe),
+    4: [[new Uint8Array(32).fill(0x01), new Uint8Array(32).fill(0x02), -4200]]
+  };
+
+  function loadDemoCert(v2) {
+    document.getElementById('cert-input').value = '(demo fixture \u2014 not real Base64)';
+    addLog('info', 'Loaded demo CognitionCert ' + (v2 ? 'v2-draft' : 'v1') + ' fixture.');
+    renderCert({
+      version: v2 ? 2 : 1, level: 'ExactDominance', asOfSeq: 42,
+      storedRoot: DEMO_CERT_STORED_ROOT,
+      receipt: DEMO_CERT_RECEIPT,
+      attestation: v2 ? { 'status': 'unverified_until_phase_ii_gate',
+                          'context_digest': new Uint8Array(32).fill(0xcc) } : null
+    });
+  }
+
+  document.getElementById('btn-inspect-cert').addEventListener('click', function() {
+    var b64 = document.getElementById('cert-input').value.trim();
+    if (!b64 || b64.indexOf('(demo') === 0) {
+      addLog('warn', 'Paste a real Base64 CBOR cert, or use a demo fixture.');
+      return;
+    }
+    var cert = parseCognitionCert(b64);
+    if (!cert) {
+      addLog('error', 'Failed to parse Cognition Certificate: malformed Base64 CBOR.');
+      return;
+    }
+    addLog('sec', 'Cognition Certificate parsed: v' + cert.version + ', level=' + cert.level);
+    renderCert(cert);
+  });
+
+  document.getElementById('btn-load-demo-cert-v1').addEventListener('click', function() { loadDemoCert(false); });
+  document.getElementById('btn-load-demo-cert-v2').addEventListener('click', function() { loadDemoCert(true); });
+
   // --- Settings Min Tier Management ---
   const savedMinTier = localStorage.getItem('mneme_default_min_tier') || 'quarantine';
   defaultMinTier.value = savedMinTier;
