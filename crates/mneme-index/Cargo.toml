@@ -84,5 +84,6 @@ path = "tests/zkann_exact_dominance.rs"
 [dev-dependencies]
 hex.workspace = true
 mneme-context = { workspace = true }
+proptest = "1.6"
 serde_json.workspace = true
 tempfile.workspace = true

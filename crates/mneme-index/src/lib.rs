@@ -13,6 +13,7 @@
 mod beacon_spot_check;
 mod cognition_cert;
 mod commit;
+mod complete_knn;
 #[cfg(feature = "context_gate")]
 mod context_gate;
 mod distance;
@@ -47,6 +48,11 @@ mod semantic_zk;
 mod piop_research;
 
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
+pub use complete_knn::{
+    AuthenticatedBallTree, BallTree, COMPLETE_KNN_HONESTY, CompleteKnnProof, ExcludedLeaf,
+    FrontierNode, ReturnedPoint, brute_force_knn, knn_with_pruning, prove_complete_knn,
+    squared_euclidean, verify_complete_knn, verify_complete_knn_cost_bounded,
+};
 pub use error::IndexError;
 pub use key_index::KeyIndex;
 pub use key_index_load::{load_key_index_tree, load_object_keys};
