@@ -9,7 +9,7 @@ source scripts/ci/smoke-assertions.sh
 
 label="validation-lane-help-smoke"
 expected_output="$(cat <<'EOF'
-Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>
+Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full>
        scripts/ci/validation-lane.sh --list
        scripts/ci/validation-lane.sh --help
 EOF

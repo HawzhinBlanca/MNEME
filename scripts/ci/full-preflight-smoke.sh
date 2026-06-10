@@ -10,7 +10,7 @@ source scripts/ci/smoke-assertions.sh
 label="full-preflight-smoke"
 output="$(bash scripts/ci/validation-lane.sh full-preflight)"
 
-require_exact_line "$label" "$output" "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism"
+require_exact_line "$label" "$output" "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism p3-local"
 require_exact_line "$label" "$output" "validation-lane (full-preflight): heavy checks are NOT executed by this lane."
 require_exact_line "$label" "$output" "validation-lane (full-preflight): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
 require_exact_line "$label" "$output" "validation-lane (full-preflight): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."

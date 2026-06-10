@@ -13,7 +13,7 @@ cd "$ROOT"
 # shellcheck source=scripts/ci/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-VALIDATION_LANES=(quick crypto tamper merge determinism full-preflight full)
+VALIDATION_LANES=(quick crypto tamper merge determinism p3-local full-preflight full)
 
 validation_lane_choices() {
   local IFS='|'
@@ -46,7 +46,7 @@ fail_closed() {
   exit 1
 }
 
-FULL_SUBLANES=(quick crypto tamper merge determinism)
+FULL_SUBLANES=(quick crypto tamper merge determinism p3-local)
 
 print_local_cross_host_honesty_boundary() {
   echo "validation-lane ($LANE): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
@@ -80,6 +80,16 @@ case "$LANE" in
     bash scripts/ci/kill-resume-smoke.sh
     bash scripts/ci/mcp-smoke.sh
     bash scripts/ci/validation-contract-smoke.sh
+    ;;
+
+  p3-local)
+    cargo fmt --all -- --check
+    cargo clippy -p mneme-verify -p mneme-crdt --lib --tests -- -D warnings
+    bash scripts/ci/verify-tcb-guard.sh
+    bash scripts/ci/formal-obligations-scan.sh
+    cargo test -p mneme-verify --test tcb_budget -- --nocapture
+    cargo test -p mneme-verify -- --nocapture
+    cargo test -p mneme-crdt -- --nocapture
     ;;
 
   crypto)

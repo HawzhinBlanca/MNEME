@@ -31,9 +31,11 @@ pub fn verify_recall(
     ctx: &RecallContext<'_>,
 ) -> Result<Vec<Entry>, MnemeError> {
     verify_root(&recall.root, trust, ctx.previous_root)?;
+    // INVARIANT: Receipt binding matches the query logical key and current signed root.
     verify_receipt_binding(&recall.receipt, &recall.root, query)?;
     verify_key_index_membership(&recall.receipt, &recall.root)?;
 
+    // INVARIANT: Recomputed object hash matches the receipt object_id to prevent content tampering.
     let computed_id = hash_obj(&recall.object_bytes);
     if computed_id != recall.receipt.object_id {
         return Err(MnemeError::ObjectTampered);
@@ -44,8 +46,10 @@ pub fn verify_recall(
         return Err(unsupported_object_version_error(record.version));
     }
 
+    // PROOF-OBLIGATION: Verify Merkle DAG parent/head integrity (provenance chain check).
     verify_provenance(&record, ctx)?;
     verify_writer_and_tier(&record, trust, query)?;
+    // INVARIANT: Tombstone/forgotten check (anti-replay and shredded memory rejection).
     verify_not_forgotten(&recall.receipt.logical_key, ctx.key_index)?;
 
     // F-6 layering contract: the TCB returns the integrity/provenance/authorization-

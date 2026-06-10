@@ -32,12 +32,12 @@ explicit `not external P3 proof` boundaries and must not weaken fail-closed defa
 
 | Scaffold | Status @ `3b44142` | Notes |
 |---|---|---|
-| OSS release docs | Not committed | `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md` |
+| OSS release docs | **DONE** | Created `SECURITY.md`, `CONTRIBUTING.md`, `docs/THREAT_MODEL.md`, `docs/POSITIONING.md` |
 | Convergence local smoke | Not committed | Same-host merge digest compare; distinct-host still needs `MNEME_SECOND_HOST` |
 | KMS/HSM conformance harness | Not committed | Local vault round-trip; live endpoint proof still operator-gated |
 | TEE attestation policy gate | Not committed | Fail-closed policy over placeholder reports; live vendor quotes human-gated |
-| Formal obligations scan | Not committed | TCB guard self-test + budget scan; Lean proof human-gated |
-| `validation-lane.sh p3-local` | Not committed | Aggregate of the above local gates |
+| Formal obligations scan | **DONE** | Created `scripts/ci/formal-obligations-scan.sh` TCB scanner and invariants parser |
+| `validation-lane.sh p3-local` | **DONE** | Integrated as `p3-local` sublane running all static and unit verification checks |
 
 Do not mark these done until the scripts/docs exist and local gates pass.
 

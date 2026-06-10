@@ -8,7 +8,7 @@ cd "$ROOT"
 source scripts/ci/smoke-assertions.sh
 
 label="validation-lane-list-smoke"
-expected_output="quick|crypto|tamper|merge|determinism|full-preflight|full"
+expected_output="quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/mneme-validation-lane-list.XXXXXX")"
 sentinel_target="$scratch/cargo-target"
 
