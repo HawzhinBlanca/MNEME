@@ -19,6 +19,15 @@ pub struct ZkannAttachment {
     pub visited_order: Vec<mneme_core::ObjectId>,
 }
 
+/// CR-6: provably-complete top-k ball-tree proof (receipt field 8).
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompleteKnnAttachment {
+    pub commitment: [u8; 32],
+    pub query: Vec<f64>,
+    pub k: u32,
+    pub proof_bytes: Vec<u8>,
+}
+
 /// Phase I provenance-scoped recall attestation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProvenanceAttestation {
@@ -27,7 +36,7 @@ pub struct ProvenanceAttestation {
 }
 
 /// Receipt for semantic/ANN recall — lives in `mneme-index` (key `Receipt` remains key-index only).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SemanticRecallReceipt {
     /// Signed root preimage hash this recall is bound to.
     pub root_bound: [u8; 32],
@@ -40,6 +49,8 @@ pub struct SemanticRecallReceipt {
     pub zk_retrieval: Option<ZkRetrievalAttachment>,
     /// Phase I zkANN-1 dominance / audit-on-demand proof level.
     pub zkann: Option<ZkannAttachment>,
+    /// Provably-complete top-k ball-tree proof (`RetrievalProofLevel::CompleteTopK`).
+    pub complete_knn: Option<CompleteKnnAttachment>,
     /// Phase I provenance-filter attestation (optional).
     pub provenance: Option<ProvenanceAttestation>,
 }
@@ -56,6 +67,7 @@ impl SemanticRecallReceipt {
             verification_object,
             zk_retrieval: None,
             zkann: None,
+            complete_knn: None,
             provenance: None,
         }
     }

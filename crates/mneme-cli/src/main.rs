@@ -205,6 +205,7 @@ enum ProofLevelArg {
     #[default]
     ExactDominance,
     HnswAuditOnDemand,
+    CompleteTopK,
 }
 
 impl From<ProofLevelArg> for RetrievalProofLevel {
@@ -212,6 +213,7 @@ impl From<ProofLevelArg> for RetrievalProofLevel {
         match v {
             ProofLevelArg::ExactDominance => RetrievalProofLevel::ExactDominance,
             ProofLevelArg::HnswAuditOnDemand => RetrievalProofLevel::HnswAuditOnDemand,
+            ProofLevelArg::CompleteTopK => RetrievalProofLevel::CompleteTopK,
         }
     }
 }

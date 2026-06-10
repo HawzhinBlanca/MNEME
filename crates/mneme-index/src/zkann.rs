@@ -77,7 +77,20 @@ pub fn verify_zkann_attachment(
         RetrievalProofLevel::HnswAuditOnDemand => {
             verify_hnsw_audit_on_demand(&receipt.verification_object, proc, &zkann.visited_order)
         }
+        RetrievalProofLevel::CompleteTopK => verify_complete_topk_attachment(receipt),
     }
+}
+
+fn verify_complete_topk_attachment(receipt: &SemanticRecallReceipt) -> Result<(), MnemeError> {
+    let raw = receipt
+        .complete_knn
+        .as_ref()
+        .ok_or_else(|| zkann_error(ZkannFailure::AttachmentMissing))?;
+    let att = crate::complete_knn_cert::decode_complete_knn_attachment(&raw.proof_bytes)?;
+    if att.commitment != raw.commitment || att.query != raw.query || att.k != raw.k {
+        return Err(zkann_error(ZkannFailure::ReplayResultMismatch));
+    }
+    att.verify_offline()
 }
 
 /// Authenticate the COMPLETE candidate set against the signed `semantic_commit`: rebuild

@@ -35,6 +35,8 @@ case "$LANE" in
     cargo test -p mneme-verify --test tamper_checkpoint -- --nocapture
     echo "==> complete-kNN generative tamper (≥150 cases)"
     cargo test -p mneme-index --test complete_knn_tamper -- --nocapture
+    echo "==> complete-kNN JL conservative invariant"
+    cargo test -p mneme-index --test complete_knn_jl -- --nocapture
     ;;
 
   determinism)

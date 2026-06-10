@@ -305,6 +305,7 @@ fn parse_level(value: &CborValue) -> Result<RetrievalProofLevel, CrossrefError> 
     match value.as_u64().ok_or(CrossrefError::SchemaDrift)? {
         0 => Ok(RetrievalProofLevel::ExactDominance),
         1 => Ok(RetrievalProofLevel::HnswAuditOnDemand),
+        2 => Ok(RetrievalProofLevel::CompleteTopK),
         _ => Err(CrossrefError::CertificateInvalid),
     }
 }

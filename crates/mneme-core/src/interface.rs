@@ -143,6 +143,9 @@ pub enum RetrievalProofLevel {
     ExactDominance = 0,
     /// Dominance over a prover-asserted set of authenticated members (`visited_order`); not graph replay.
     HnswAuditOnDemand = 1,
+    /// Provably-complete top-k via authenticated ball-tree pruning frontier (CR-6). Proves no closer
+    /// neighbor was hidden in committed geometry — not semantic truth, not exact-NN-by-relevance.
+    CompleteTopK = 2,
 }
 
 /// Phase I bi-temporal anchor (transaction-time via signed root; valid-time in P1-2).
