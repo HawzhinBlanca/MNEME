@@ -20,8 +20,19 @@ validation_lane_choices() {
   echo "${VALIDATION_LANES[*]}"
 }
 
+validation_lane_usage() {
+  echo "Usage: scripts/ci/validation-lane.sh <$(validation_lane_choices)>"
+  echo "       scripts/ci/validation-lane.sh --list"
+  echo "       scripts/ci/validation-lane.sh --help"
+}
+
 if [[ "${1:-}" == "--list" ]]; then
   validation_lane_choices
+  exit 0
+fi
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  validation_lane_usage
   exit 0
 fi
 

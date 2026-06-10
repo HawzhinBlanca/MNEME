@@ -45,9 +45,10 @@
       <div class="sidebar-footer">
         <div class="version">Version 2.0.0-Beta</div>
         <div class="system-status">
-          <span class="status-dot online"></span>
-          Daemon Connected
+          <span class="status-dot online" id="connection-dot"></span>
+          <span id="connection-status-text">Daemon Connected</span>
         </div>
+        <div class="mode-badge" id="mode-badge">Live Integration</div>
       </div>
     </aside>
 
@@ -61,9 +62,9 @@
             <h2>Memory Substrate Status</h2>
           </div>
           <div class="actions">
-            <div class="capability-badge">
+            <div class="capability-badge" id="active-cap-badge">
               <span class="badge-label">Active Key:</span>
-              <span class="badge-value">Operator Key Loaded</span>
+              <span class="badge-value" id="active-cap-value">No Token Bound</span>
             </div>
           </div>
         </header>
@@ -116,6 +117,73 @@
           </section>
         </div>
 
+        <!-- Capability Credentials Manager Card -->
+        <section class="card capability-manager-card" aria-labelledby="cap-mgr-title">
+          <h3 id="cap-mgr-title" class="card-title">Capability Credentials Manager</h3>
+          <div class="cap-mgr-content">
+            <div class="form-group">
+              <label for="cap-token-input">Base64 CBOR Capability Token</label>
+              <textarea id="cap-token-input" placeholder="Paste Base64-encoded capability token..." rows="2"></textarea>
+            </div>
+            <div class="cap-actions-row">
+              <button type="button" class="btn btn-primary" id="btn-bind-cap">Bind & Validate Token</button>
+              <button type="button" class="btn btn-secondary" id="btn-load-mock-cap">Load Developer Key</button>
+            </div>
+            <div id="cap-details" class="cap-details hidden">
+              <div class="cap-detail-grid">
+                <div><strong>Issuer:</strong> <span id="cap-issuer" class="hex-text"></span></div>
+                <div><strong>Subject:</strong> <span id="cap-subject" class="hex-text"></span></div>
+                <div><strong>Namespaces:</strong> <span id="cap-namespaces"></span></div>
+                <div><strong>Memory Kinds:</strong> <span id="cap-kinds"></span></div>
+                <div><strong>Max Trust Tier:</strong> <span id="cap-tier-max" class="tier-badge-inline"></span></div>
+                <div><strong>Default Tier:</strong> <span id="cap-tier-default" class="tier-badge-inline"></span></div>
+                <div><strong>Permissions:</strong> <span id="cap-permissions"></span></div>
+              </div>
+              <div id="cap-caveats-section" class="cap-caveats-section">
+                <h4>Active Caveats</h4>
+                <ul id="cap-caveats-list"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Verifiable Memory Writer -->
+        <section class="card remember-card" aria-labelledby="remember-title">
+          <h3 id="remember-title" class="card-title">Verifiable Memory Writer (Remember)</h3>
+          <form class="remember-form" id="remember-form">
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="remember-namespace">Namespace</label>
+                <input type="text" id="remember-namespace" name="namespace" value="user" placeholder="e.g., user" required>
+              </div>
+              <div class="form-group flex-2">
+                <label for="remember-name">Logical Key Name</label>
+                <input type="text" id="remember-name" name="name" placeholder="e.g., config/theme-mode" required>
+              </div>
+              <div class="form-group flex-1">
+                <label for="remember-kind">Memory Kind</label>
+                <select id="remember-kind" name="kind">
+                  <option value="episodic">Episodic</option>
+                  <option value="semantic" selected>Semantic</option>
+                  <option value="procedural">Procedural</option>
+                  <option value="working">Working</option>
+                  <option value="identity">Identity</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top: 16px;">
+              <label for="remember-body">Memory Body Payload</label>
+              <textarea id="remember-body" name="body" placeholder="Enter memory value or metadata payload to write..." rows="2" required></textarea>
+            </div>
+            <div class="form-group" style="margin-top: 16px; align-items: flex-start;">
+              <button type="submit" class="btn btn-primary" id="btn-remember">
+                <span class="btn-text">Remember Key</span>
+                <span class="spinner" id="remember-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+        </section>
+
         <!-- Memory Recall Console -->
         <section class="card recall-card" aria-labelledby="recall-title">
           <h3 id="recall-title" class="card-title">Verifiable Recall Console</h3>
@@ -155,6 +223,50 @@
             </div>
           </div>
         </section>
+
+        <!-- Local Sandbox Registry -->
+        <section class="card registry-card" id="sandbox-registry-card" aria-labelledby="registry-title">
+          <div class="card-header-row">
+            <h3 id="registry-title" class="card-title">Local Sandbox Registry</h3>
+            <span class="registry-count-badge" id="registry-count-badge">0 Keys</span>
+          </div>
+          <div class="registry-table-wrapper">
+            <table class="registry-table" id="registry-table">
+              <thead>
+                <tr>
+                  <th>Namespace</th>
+                  <th>Logical Key Name</th>
+                  <th>Kind</th>
+                  <th>Trust Tier</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="registry-tbody">
+                <!-- Rows will be dynamically injected here -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Live Security & Audit Log Card -->
+        <section class="card audit-log-card" aria-labelledby="audit-log-title">
+          <div class="card-header-row">
+            <h3 id="audit-log-title" class="card-title">Live Security & Audit Log</h3>
+            <div class="log-controls">
+              <span class="log-filter-label">Filter:</span>
+              <div class="log-filters">
+                <button class="log-filter-btn active" data-filter="all">All</button>
+                <button class="log-filter-btn" data-filter="info">Info</button>
+                <button class="log-filter-btn" data-filter="sec">Security</button>
+                <button class="log-filter-btn" data-filter="error">Error</button>
+              </div>
+              <button type="button" class="btn-text-only" id="btn-clear-logs">Clear</button>
+            </div>
+          </div>
+          <div class="log-terminal" id="log-terminal" role="log" aria-live="polite">
+            <!-- Log rows will be dynamically appended here -->
+          </div>
+        </section>
       </div>
 
       <!-- SETTINGS VIEW -->
@@ -185,6 +297,53 @@
       </div>
     </main>
   </div>
+
+  <!-- SMT Cryptographic Proof Drawer -->
+  <dialog id="proof-drawer" aria-labelledby="proof-drawer-title" aria-modal="true">
+    <div class="drawer-header">
+      <h3 id="proof-drawer-title">Cryptographic Proof</h3>
+      <button type="button" class="btn-close" id="btn-close-drawer" aria-label="Close proof viewer">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="drawer-body">
+      <div class="proof-status-banner">
+        <div class="status-indicator">
+          <span class="status-dot online"></span>
+          <span>SMT Path Verified & Signed by Operator</span>
+        </div>
+      </div>
+
+      <div class="svg-container">
+        <svg id="proof-svg" viewBox="0 0 440 320" width="100%" height="100%"></svg>
+      </div>
+
+      <!-- Interactive Node Detail Panel -->
+      <div id="proof-node-details" class="proof-node-details hidden">
+        <h4>Selected Node Details</h4>
+        <div class="node-detail-grid">
+          <div><strong>Type:</strong> <span id="node-detail-type">-</span></div>
+          <div><strong>Role:</strong> <span id="node-detail-role">-</span></div>
+          <div class="node-detail-hash-row"><strong>Full Hash:</strong> <span id="node-detail-hash" class="hex-text">-</span></div>
+        </div>
+      </div>
+
+      <div class="proof-steps-container">
+        <h4>Sparse Merkle Tree Path Verification Details</h4>
+        <div class="proof-steps" id="proof-steps-list">
+          <!-- Step items will be injected here -->
+        </div>
+      </div>
+
+      <div class="drawer-actions">
+        <button type="button" class="btn btn-secondary" id="btn-copy-proof-json">Copy Proof JSON</button>
+        <button type="button" class="btn btn-primary" id="btn-reverify-proof">Re-verify Path</button>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Scripts -->
   <script src="/index.js"></script>

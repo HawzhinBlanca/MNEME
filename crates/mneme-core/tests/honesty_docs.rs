@@ -101,6 +101,7 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
 
     for phrase in [
         "validation_lane_choices()",
+        "validation_lane_usage()",
         "local IFS='|'",
         "echo \"${VALIDATION_LANES[*]}\"",
         "if [[ \"${1:-}\" == \"--list\" ]]",
@@ -119,6 +120,9 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
         validation_lane,
         &[
             "if [[ \"${1:-}\" == \"--list\" ]]",
+            "exit 0",
+            "if [[ \"${1:-}\" == \"--help\" || \"${1:-}\" == \"-h\" ]]",
+            "validation_lane_usage",
             "exit 0",
             "LANE=\"${1:-quick}\"",
             "mneme_ci_init \"$ROOT\" \"$LANE\"",
@@ -450,6 +454,9 @@ fn validation_contract_smoke_enforces_exact_component_output() {
         "source scripts/ci/smoke-assertions.sh",
         "expected_output=\"$(cat <<'EOF'",
         "smoke-assertions-smoke: OK",
+        "validation-lane-list-smoke: OK",
+        "validation-lane-help-smoke: OK",
+        "ui-server-smoke: OK",
         "full-preflight-smoke: OK",
         "validation-lane-unknown-smoke: OK",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
@@ -459,6 +466,177 @@ fn validation_contract_smoke_enforces_exact_component_output() {
         assert!(
             smoke.contains(phrase),
             "validation contract smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn ui_server_smoke_preserves_local_static_contract() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/ui-server-smoke.sh"),
+        "validation contract smoke must run the UI server smoke"
+    );
+
+    let shell_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/ui-server-smoke.sh"
+    );
+    let shell = std::fs::read_to_string(shell_path).expect("UI server smoke shell must exist");
+    for phrase in [
+        "node --check scripts/serve-ui.js",
+        "node --check ui/index.js",
+        "node scripts/ci/ui-server-smoke.mjs",
+        "ui-server-smoke: OK",
+    ] {
+        assert!(
+            shell.contains(phrase),
+            "UI server smoke shell must preserve `{phrase}`"
+        );
+    }
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/ui-server-smoke.mjs"
+    );
+    let smoke = std::fs::read_to_string(smoke_path).expect("UI server smoke module must exist");
+    for phrase in [
+        "const { createUiServer } = require('../../scripts/serve-ui.js');",
+        "await request(port, '/')",
+        "await request(port, '/settings')",
+        "await request(port, '/index.css')",
+        "await request(port, '/index.js')",
+        "await request(port, '/%2e%2e%2fCLAUDE.md')",
+        "await request(port, '/%E0%A4%A')",
+        "assert.equal(malformed.status, 400)",
+        "url: req.url",
+        "await request(port, '/api/v1/health?probe=1&min_tier=trusted')",
+        "assert.equal(upstreamRequests[0].url, '/v1/health?probe=1&min_tier=trusted')",
+        "method: options.method || 'GET'",
+        "headers: options.headers || {}",
+        "req.write(options.body);",
+        "const received = {",
+        "upstreamRequests.push(received)",
+        "host: req.headers.host",
+        "capability: req.headers['x-mneme-capability']",
+        "body: body",
+        "const posted = await request(port, '/api/v1/auth/verify?trace=1', {",
+        "method: 'POST'",
+        "host: 'browser.example.test'",
+        "'x-mneme-capability': 'smoke-cap'",
+        "body: JSON.stringify({ capability_b64: 'abc123' })",
+        "assert.equal(posted.status, 200)",
+        "assert.equal(upstreamRequests[1].host, `127.0.0.1:${upstreamPort}`)",
+        "assert.equal(JSON.parse(posted.body).method, 'POST')",
+        "assert.equal(JSON.parse(posted.body).capability, 'smoke-cap')",
+        "assert.equal(JSON.parse(posted.body).body, '{\"capability_b64\":\"abc123\"}')",
+        "await request(port, '/api/v1/health')",
+        "assert.equal(traversal.status, 403)",
+        "assert.equal(gateway.status, 502)",
+        "const stalledServer = createUiServer({ apiPort: stalledUpstreamPort, apiTimeoutMs: 50 });",
+        "const stalled = await request(stalledPort, '/api/v1/health', { timeoutMs: 1000 });",
+        "assert.equal(stalled.status, 504)",
+        "GATEWAY_TIMEOUT",
+        "BAD_GATEWAY",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "UI server smoke module must preserve `{phrase}`"
+        );
+    }
+
+    let serve_ui = include_str!("../../../scripts/serve-ui.js");
+    for phrase in [
+        "function createUiServer(",
+        "module.exports = { createUiServer };",
+        "if (require.main === module)",
+        "path.relative(publicDir, filePath)",
+        "decodeURIComponent",
+        "DEFAULT_API_TIMEOUT_MS",
+        "proxyReq.setTimeout(apiTimeoutMs",
+        "GATEWAY_TIMEOUT",
+    ] {
+        assert!(
+            serve_ui.contains(phrase),
+            "serve-ui must preserve importable smoke surface `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_lane_list_smoke_preserves_exact_list_contract() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/validation-lane-list-smoke.sh"),
+        "validation contract smoke must run the validation-lane --list smoke"
+    );
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-list-smoke.sh"
+    );
+    let smoke = std::fs::read_to_string(smoke_path).expect("validation-lane list smoke must exist");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-list.XXXXXX\")\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "CARGO_TARGET_DIR=\"$sentinel_target\"",
+        "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\"",
+        "expected_output=\"quick|crypto|tamper|merge|determinism|full-preflight|full\"",
+        "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
+        "require_line_count \"$label\" \"$output\" \"1\"",
+        "if [[ -e \"$sentinel_target\" ]]",
+        "validation-lane-list-smoke: --list created target dir",
+        "validation-lane-list-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation-lane list smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_lane_help_smoke_preserves_non_executing_usage_contract() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/validation-lane-help-smoke.sh"),
+        "validation contract smoke must run the validation-lane --help smoke"
+    );
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-help-smoke.sh"
+    );
+    let smoke = std::fs::read_to_string(smoke_path).expect("validation-lane help smoke must exist");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-help.XXXXXX\")\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "short_sentinel_target=\"$scratch/short-cargo-target\"",
+        "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --help)\"",
+        "short_output=\"$(CARGO_TARGET_DIR=\"$short_sentinel_target\" bash scripts/ci/validation-lane.sh -h)\"",
+        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>",
+        "       scripts/ci/validation-lane.sh --list",
+        "       scripts/ci/validation-lane.sh --help",
+        "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
+        "require_exact_output \"$label\" \"$short_output\" \"$expected_output\"",
+        "require_line_count \"$label\" \"$output\" \"3\"",
+        "require_line_count \"$label\" \"$short_output\" \"3\"",
+        "if [[ -e \"$sentinel_target\" ]]",
+        "if [[ -e \"$short_sentinel_target\" ]]",
+        "validation-lane-help-smoke: --help created target dir",
+        "validation-lane-help-smoke: -h created target dir",
+        "validation-lane-help-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation-lane help smoke must preserve `{phrase}`"
         );
     }
 }
