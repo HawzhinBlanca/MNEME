@@ -90,7 +90,7 @@ compression gate: `cargo test -p mneme-index --test complete_knn_compression -- 
 (`|F|/n → 1`); JL conservative may help in moderate `D` on synthetic data but **does not**
 close the open problem of sublinear **and** sound pruning on production embedding manifolds
 (768–1536-d). Probabilistic JL mode is empirical-only (δ heuristic test, not a theorem on real
-embeddings). Cognition Certificate integration of complete proofs remains interface-gated.
+embeddings). Offline `verify-cert` for `CompleteTopK` is landed; store `certify` issuance remains parked.
 
 ## Provably-complete retrieval (CR-5..CR-7, 2026-06-11)
 
