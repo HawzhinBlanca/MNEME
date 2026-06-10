@@ -225,6 +225,17 @@ fn semantic_load_remove_embedding_entry(
     *embeddings = retained_embeddings;
 }
 
+/// Load all semantic embeddings from a store directory (sidecar + journal replay).
+pub fn load_store_embeddings(
+    store: &Path,
+) -> Result<BTreeMap<ObjectId, FixedPointEmbedding>, MnemeError> {
+    load_embeddings(store).map(|map| {
+        map.into_iter()
+            .map(|(id, emb)| (ObjectId(id), emb))
+            .collect()
+    })
+}
+
 fn load_embeddings(store: &Path) -> Result<BTreeMap<[u8; 32], FixedPointEmbedding>, MnemeError> {
     let mut embeddings = BTreeMap::new();
     let snapshot = store.join("meta/embeddings.json");

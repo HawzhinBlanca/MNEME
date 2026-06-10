@@ -22,6 +22,11 @@ SemanticMerkleTree, hash_sem_leaf, hash_sem_internal, empty_semantic_root
 CommitmentBindingReceipt, prove_binding_receipt, verify_binding_receipt
 BINDING_ENVELOPE_TAG, BINDING_HONESTY, BINDING_PROOF_LEN, B3_V0_BINDING_STATUS
 
+// Beacon spot-check (Trick #1 prototype — drand v2 field 7 on cognition cert v1/v2)
+AuditBeacon, prove_audit_beacon, verify_audit_beacon_offline, verify_beacon_spot_check
+BEACON_SPOT_CHECK_HONESTY, BEACON_SPOT_CHECK_STATUS, AUDIT_BEACON_BIND_TAG
+assemble_cognition_certificate_v1_with_beacon
+
 // Pedersen + Schnorr (12-month only — `pedersen_schnorr_zk` feature; real transparent
 // NIZK over Ristretto; previously mis-named `plonky2_prover` and renamed for honesty.
 // `plonky2_prover` is retained only as a deprecated compatibility alias.
@@ -40,6 +45,7 @@ PEDERSEN_SCHNORR_HONESTY, B3_DEFERRAL_STATUS
   not top-k by true query-to-embedding distance until verifiers recompute candidate
   distances from carried embeddings
 - **§9.2 honesty**: `commitment_binding` proves leaf commitment only; `BINDING_ENVELOPE_TAG` must never claim Plonky2 or SNARK; `ZkProofInvalid` on this path means binding verification failed — not SNARK verification
+- **Beacon spot-check honesty**: `BEACON_SPOT_CHECK_HONESTY` — statistical deterrence via drand lottery, not per-call ZK; lottery-enforced exact-NN on audited calls only; non-audited calls remain procedure-faithful
 
 ## Proof obligations
 

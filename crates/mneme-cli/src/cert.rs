@@ -6,7 +6,11 @@ use mneme_core::{
     TrustTier,
 };
 use mneme_crypto::TrustConfig;
-use mneme_index::verify_cognition_certificate_v1;
+use mneme_index::{
+    BEACON_SPOT_CHECK_HONESTY, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, audit_lottery_selected,
+    load_store_embeddings, parse_cognition_certificate, verify_audit_beacon_offline,
+    verify_cognition_certificate_v1, verify_cognition_certificate_v1_with_spot_check,
+};
 use mneme_store::Store;
 use std::fs;
 use std::path::Path;
@@ -47,7 +51,7 @@ pub fn run_certify(
     Ok(())
 }
 
-fn certify_embedding_from_components(
+pub(crate) fn certify_embedding_from_components(
     components: &[i16],
     dim: u16,
     scale: i8,
@@ -66,6 +70,69 @@ pub fn run_verify_cert(
     })?;
     verify_cognition_certificate_v1(&bytes, trust, proc)?;
     Ok(())
+}
+
+pub struct VerifyCertAuditOptions<'a> {
+    pub store: Option<&'a Path>,
+    pub query: Option<&'a FixedPointEmbedding>,
+}
+
+pub fn run_verify_cert_audit(
+    path: &Path,
+    trust: &TrustConfig,
+    proc: &Procedure,
+    opts: VerifyCertAuditOptions<'_>,
+) -> Result<String, MnemeError> {
+    let bytes = fs::read(path).map_err(|e| MnemeError::IoFailed {
+        path: path.display().to_string(),
+        kind: e.to_string(),
+    })?;
+    let parsed = parse_cognition_certificate(&bytes)?;
+    let beacon = parsed
+        .audit_beacon
+        .as_ref()
+        .ok_or(MnemeError::CertificateInvalid)?;
+    verify_audit_beacon_offline(beacon, &parsed.receipt)?;
+
+    let selected = audit_lottery_selected(
+        &beacon.beacon_randomness,
+        &beacon.binding_digest,
+        DEFAULT_AUDIT_RATE_PPM,
+    );
+
+    let spot_check = if selected {
+        let store = opts.store.ok_or(MnemeError::ProcedureMismatch)?;
+        let query = opts.query.ok_or(MnemeError::ProcedureMismatch)?;
+        let embeddings = load_store_embeddings(store)?;
+        let mut entries = Vec::with_capacity(parsed.receipt.verification_object.candidates.len());
+        for (id, _, _) in &parsed.receipt.verification_object.candidates {
+            let embedding = embeddings
+                .get(id)
+                .ok_or(MnemeError::RetrievalDominanceFailed)?;
+            entries.push((*id, embedding.clone()));
+        }
+        let ctx = SpotCheckContext {
+            query,
+            entries: &entries,
+        };
+        let root =
+            verify_cognition_certificate_v1_with_spot_check(&bytes, trust, proc, Some(&ctx))?;
+        return Ok(format!(
+            "verify-cert ok: cognition certificate v1 valid offline (audit: selected, true-distance dominance verified; seq {})",
+            root.sequence
+        ));
+    };
+
+    let _ = spot_check;
+    let root = verify_cognition_certificate_v1_with_spot_check(&bytes, trust, proc, None)?;
+    Ok(format!(
+        "verify-cert ok: cognition certificate v1 valid offline (audit: not selected; seq {})",
+        root.sequence
+    ))
+}
+
+pub fn verify_cert_audit_honesty_footer() -> &'static str {
+    BEACON_SPOT_CHECK_HONESTY
 }
 
 #[cfg(test)]

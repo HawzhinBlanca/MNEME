@@ -14,6 +14,7 @@ use crate::procedure::{CandidateRow, Procedure};
 use crate::semantic_commit::{
     RetrievalProofLevel, VerificationObject, ZkannAttachment, verify_semantic_vo_zkann,
 };
+use crate::wire_beacon::{self, AuditBeacon};
 use crate::wire_root::StoredRoot;
 
 const CERT_VERSION_V1: u16 = 1;
@@ -25,6 +26,7 @@ const F_AS_OF_SEQ: u64 = 3;
 const F_STORED_ROOT: u64 = 4;
 const F_SEMANTIC_RECEIPT: u64 = 5;
 const F_CONTEXT_ATTESTATION: u64 = 6;
+const F_AUDIT_BEACON: u64 = wire_beacon::F_AUDIT_BEACON_CERT;
 
 const CONTEXT_GATE_DRAFT_STATUS: &str = "unverified_until_phase_ii_gate";
 
@@ -42,6 +44,7 @@ struct CognitionCert {
     stored_root: StoredRoot,
     receipt: SemanticReceipt,
     attestation: Option<ContextAttestationDraft>,
+    _audit_beacon: Option<AuditBeacon>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,6 +115,7 @@ fn decode_cert(bytes: &[u8]) -> Result<CognitionCert, CrossrefError> {
     let mut stored_root = None;
     let mut receipt = None;
     let mut attestation = None;
+    let mut audit_beacon = None;
 
     for (key, value) in map {
         match field_key(&key)? {
@@ -122,6 +126,9 @@ fn decode_cert(bytes: &[u8]) -> Result<CognitionCert, CrossrefError> {
             F_SEMANTIC_RECEIPT => receipt = Some(decode_receipt(parse_bytes(&value)?)?),
             F_CONTEXT_ATTESTATION => {
                 attestation = Some(decode_attestation(parse_bytes(&value)?)?);
+            }
+            F_AUDIT_BEACON => {
+                audit_beacon = Some(wire_beacon::decode_audit_beacon(parse_bytes(&value)?)?);
             }
             _ => return Err(CrossrefError::SchemaDrift),
         }
@@ -134,6 +141,7 @@ fn decode_cert(bytes: &[u8]) -> Result<CognitionCert, CrossrefError> {
         stored_root: stored_root.ok_or(CrossrefError::CertificateInvalid)?,
         receipt: receipt.ok_or(CrossrefError::CertificateInvalid)?,
         attestation,
+        _audit_beacon: audit_beacon,
     })
 }
 

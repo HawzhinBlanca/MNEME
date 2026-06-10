@@ -14,12 +14,14 @@ pub mod object_fixture;
 pub mod procedure;
 pub mod semantic_commit;
 pub mod smt;
+pub mod wire_beacon;
 pub mod wire_cap;
 pub mod wire_cert;
 pub mod wire_root;
 
 pub use error::CrossrefError;
 pub use semantic_commit::HONESTY_PROCEDURE;
+pub use wire_beacon::BEACON_SPOT_CHECK_HONESTY;
 
 pub fn vectors_root() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../proof/vectors")

@@ -253,6 +253,9 @@ fn crossref_cognition_cert_byte_exact() {
     .unwrap();
     for entry in manifest["vectors"].as_array().unwrap() {
         let name = entry["name"].as_str().unwrap();
+        if entry.get("fixture_status").and_then(|v| v.as_str()) == Some("prototype") {
+            continue;
+        }
         let path = vectors_root()
             .join("certs")
             .join(entry["cbor_file"].as_str().unwrap());
@@ -299,6 +302,56 @@ fn crossref_identity_digests_exclude_nondeterministic_inputs() {
             );
         }
     }
+}
+
+#[test]
+fn crossref_beacon_spot_check_manifest_pins_audit_beacon_fields() {
+    use mneme_crossref::wire_beacon::{
+        AuditBeacon, F_BEACON_RANDOMNESS, F_BINDING_DIGEST, F_DRAND_ROUND, decode_audit_beacon,
+    };
+
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(vectors_root().join("certs/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    let entry = manifest["vectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"].as_str() == Some("beacon_spot_check"))
+        .expect("beacon_spot_check manifest entry");
+    assert_eq!(
+        entry["fixture_status"].as_str(),
+        Some("prototype"),
+        "prototype until wire bytes pin field 7 audit_beacon"
+    );
+    let ext = &entry["wire_extension"];
+    assert_eq!(ext["field_name"].as_str(), Some("audit_beacon"));
+    assert_eq!(ext["cert_field"].as_u64(), Some(7));
+
+    let beacon_spec = &entry["audit_beacon"];
+    let randomness = wire_root::hex32(beacon_spec["randomness_hex"].as_str().unwrap()).unwrap();
+    let binding_digest =
+        wire_root::hex32(beacon_spec["binding_digest_hex"].as_str().unwrap()).unwrap();
+    let mut enc = mneme_crossref::dcbor::Encoder::new();
+    enc.begin_map(3).unwrap();
+    enc.encode_unsigned(F_DRAND_ROUND).unwrap();
+    enc.encode_unsigned(beacon_spec["drand_round"].as_u64().unwrap())
+        .unwrap();
+    enc.encode_unsigned(F_BEACON_RANDOMNESS).unwrap();
+    enc.encode_bytes(&randomness).unwrap();
+    enc.encode_unsigned(F_BINDING_DIGEST).unwrap();
+    enc.encode_bytes(&binding_digest).unwrap();
+    let wire = enc.finish();
+    let decoded = decode_audit_beacon(&wire).unwrap();
+    assert_eq!(
+        decoded,
+        AuditBeacon {
+            drand_round: beacon_spec["drand_round"].as_u64().unwrap(),
+            beacon_randomness: randomness,
+            binding_digest,
+        }
+    );
 }
 
 #[test]
