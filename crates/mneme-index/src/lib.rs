@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 #![deny(warnings)]
 
+mod beacon_spot_check;
 mod cognition_cert;
 mod commit;
 #[cfg(feature = "context_gate")]
@@ -60,21 +61,40 @@ pub use receipt::SemanticRecallReceipt;
 pub use receipt::ZkRetrievalAttachment;
 pub use receipt::{ProvenanceAttestation, ZkannAttachment};
 pub use semantic::SemanticIndex;
-pub use semantic_load::load_semantic_commit;
+pub use semantic_load::{load_semantic_commit, load_store_embeddings};
 pub use verify::{
     HONESTY_NOT_EXACT_NN, verify_ads_vo, verify_ads_vo_membership, verify_semantic_receipt_full,
     verify_semantic_receipt_tcb_gate, verify_semantic_receipt_vo, verify_semantic_receipt_vo_zkann,
 };
 pub use wire::{fuzz_index_path_wire, fuzz_receipt_wire};
-pub use zkann::{verify_exact_dominance, verify_hnsw_audit_on_demand, verify_zkann_attachment};
+pub use zkann::{
+    verify_dominance_over_candidates, verify_exact_dominance, verify_hnsw_audit_on_demand,
+    verify_zkann_attachment,
+};
 
 #[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
-    verify_cognition_certificate_v2_draft, verify_cognition_certificate_v2_draft_strict,
+    assemble_cognition_certificate_v2_draft_with_beacon, verify_cognition_certificate_v2_draft,
+    verify_cognition_certificate_v2_draft_strict,
+};
+pub use beacon_spot_check::{
+    AuditBeacon, AUDIT_BEACON_BIND_TAG, BEACON_SPOT_CHECK_HONESTY, BEACON_SPOT_CHECK_STATUS,
+    DRAND_QUICKNET_CHAIN_HASH, DRAND_V2_ROUND_URL_TEMPLATE, SpotCheckContext,
+    audit_beacon_binding_digest, audit_lottery_selected, decode_audit_beacon,
+    encode_audit_beacon, prove_audit_beacon, verify_audit_beacon_offline,
+    verify_beacon_spot_check, verify_spot_check_exact_nn, BeaconAuditOutcome,
+    DEFAULT_AUDIT_RATE_PPM,
+};
+#[cfg(feature = "beacon_online")]
+pub use beacon_spot_check::{
+    fetch_drand_beacon_randomness, verify_audit_beacon_online,
 };
 pub use cognition_cert::{
-    assemble_cognition_certificate_v1, fuzz_cognition_cert_wire, verify_cognition_certificate_v1,
+    ParsedCognitionCert, assemble_cognition_certificate_v1,
+    assemble_cognition_certificate_v1_with_beacon, fuzz_cognition_cert_wire,
+    parse_cognition_certificate, verify_cognition_certificate_v1,
+    verify_cognition_certificate_v1_with_spot_check,
 };
 #[cfg(feature = "context_gate")]
 pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
