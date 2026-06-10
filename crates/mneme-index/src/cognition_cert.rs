@@ -785,7 +785,7 @@ struct CognitionCertWire {
 }
 
 #[cfg(feature = "context_gate")]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct CognitionCertWireV2Draft {
     version: u16,
     level: RetrievalProofLevel,
