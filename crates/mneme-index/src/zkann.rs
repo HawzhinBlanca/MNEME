@@ -1,4 +1,7 @@
 //! zkANN-1 retrieval proofs: authenticated dominance + HNSW audit-on-demand (Phase I P1-1).
+//!
+//! Lottery-enforced exact-NN on *audited calls only* is handled by [`crate::beacon_spot_check`]
+//! when an optional drand `audit_beacon` is present on the cognition certificate (Trick #1).
 
 use crate::commit::SemanticMerkleTree;
 use crate::procedure::replay_from_candidates;
@@ -154,6 +157,14 @@ pub fn verify_hnsw_audit_on_demand(
     if candidate_ids != visited {
         return Err(zkann_error(ZkannFailure::VisitedOrderCandidateMismatch));
     }
+    dominance_over_candidates(vo, proc)
+}
+
+/// Dominance replay + cutoff over candidate rows (prover-asserted or verifier-recomputed distances).
+pub fn verify_dominance_over_candidates(
+    vo: &VerificationObject,
+    proc: &Procedure,
+) -> Result<(), MnemeError> {
     dominance_over_candidates(vo, proc)
 }
 

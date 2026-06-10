@@ -20,6 +20,27 @@
       "semantic_commit_hex": "53ced2ba9cb080bebb25e120c25baddbec8bbbf2da0b853cf410fb2646316057"
     },
     {
+      "cbor_file": "cognition_cert_v1_audit_beacon.cbor",
+      "level": "exact_dominance",
+      "name": "cognition_cert_v1_audit_beacon",
+      "operator_pubkey_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "preimage_hash_hex": "acb3c3d5f1f6014a545e39941c9c6db785b8f1dff5fdeb287787b0dfa80375e",
+      "procedure": {
+        "algo": "hnsw",
+        "distance": "squared_l2_i64",
+        "ef_search": 64,
+        "k": 1,
+        "seed": 0
+      },
+      "semantic_commit_hex": "82a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b",
+      "audit_beacon": {
+        "drand_round": 1000000,
+        "field": 7,
+        "lottery_domain": "MNEME-AUDIT-LOTTERY-v1",
+        "rate_ppm": 100000
+      }
+    },
+    {
       "cbor_file": "cognition_cert_v2_draft.cbor",
       "level": "exact_dominance",
       "name": "cognition_cert_v2_draft",

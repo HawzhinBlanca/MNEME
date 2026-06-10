@@ -20,7 +20,9 @@ pub const BINDING_HONESTY: &str = concat!(
     "not exact-NN / not exact nearest-neighbor, not semantic correctness. ",
     "It does not upgrade Phase I ExactDominance: current v1 remains top-k over ",
     "prover-asserted distances, not top-k by true query-to-embedding distance until ",
-    "verifiers recompute candidate distances."
+    "verifiers recompute candidate distances. For lottery-enforced exact-NN on audited ",
+    "calls only, see beacon spot-check (`BEACON_SPOT_CHECK_HONESTY`) — statistical deterrence, ",
+    "not a per-call ZK proof."
 );
 
 /// v0 binding path status for audit B3 (Plonky2 is out of scope until 12-month).
