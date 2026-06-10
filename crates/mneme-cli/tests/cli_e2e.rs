@@ -163,6 +163,51 @@ fn certify_and_verify_cert_succeeds() {
 }
 
 #[test]
+fn verify_cert_audit_beacon_fixture_succeeds() {
+    let cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../proof/vectors/certs/cognition_cert_v1_audit_beacon.cbor");
+    let seed = [0x42; 32];
+    let seed_hex = hex::encode(seed);
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    fs::create_dir_all(store.join("index")).unwrap();
+    let sidecar = serde_json::json!({
+        "entries": {
+            hex::encode([0xab; 32]): {
+                "dim": 2,
+                "scale": 0,
+                "components": [1, 0],
+            }
+        }
+    });
+    fs::write(
+        store.join("index/embeddings.json"),
+        serde_json::to_string_pretty(&sidecar).unwrap(),
+    )
+    .unwrap();
+
+    mneme()
+        .args([
+            "verify-cert",
+            cert_path.to_str().unwrap(),
+            "--audit",
+            "--store",
+            store.to_str().unwrap(),
+            "--components",
+            "0,0",
+            "--ef-search",
+            "64",
+            "--k",
+            "1",
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify-cert ok"));
+}
+
+#[test]
 fn verify_cert_is_fail_closed() {
     let dir = tempdir().unwrap();
     let cert = dir.path().join("cert.json");

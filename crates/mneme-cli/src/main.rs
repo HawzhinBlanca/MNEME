@@ -120,6 +120,19 @@ enum Commands {
     /// Offline verify Cognition Certificate v1 (Phase I)
     VerifyCert {
         cert: PathBuf,
+        /// Enable Trick #1 audit-beacon spot-check (requires `audit_beacon` on cert)
+        #[arg(long)]
+        audit: bool,
+        /// Store directory for true-distance recompute when audit is selected
+        #[arg(long)]
+        store: Option<PathBuf>,
+        /// Query embedding components for audit recompute (e.g. `0,0`)
+        #[arg(long, default_value = "0,0")]
+        components: String,
+        #[arg(long, default_value_t = 2)]
+        dim: u16,
+        #[arg(long, default_value_t = 0)]
+        scale: i8,
         #[arg(long = "ef-search", default_value_t = 64)]
         ef_search: u32,
         #[arg(long, default_value_t = 1)]
@@ -489,7 +502,16 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("cognition certificate v1 written to {}", out.display());
             Ok(())
         }
-        Commands::VerifyCert { cert, ef_search, k } => {
+        Commands::VerifyCert {
+            cert,
+            audit,
+            store,
+            components,
+            dim,
+            scale,
+            ef_search,
+            k,
+        } => {
             require_file_exists(&cert, "cognition certificate")?;
             let pk = if let Some(ref seed) = cli.operator_seed {
                 let operator = KeyPair::from_seed(parse_seed_hex(seed)?);
@@ -505,14 +527,42 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 distance: DistanceMetric::SquaredL2I64,
                 seed: 0,
             };
-            cert::run_verify_cert(&cert, &trust, &proc).map_err(CliErrorKind::VerifyFailed)?;
-            println!("verify-cert ok: cognition certificate v1 valid offline");
+            if audit {
+                let store_path = store.as_deref();
+                let query = cert::certify_embedding_from_components(
+                    &parse_i16_list(&components)?,
+                    dim,
+                    scale,
+                )
+                .map_err(CliErrorKind::VerifyFailed)?;
+                let msg = cert::run_verify_cert_audit(
+                    &cert,
+                    &trust,
+                    &proc,
+                    cert::VerifyCertAuditOptions {
+                        store: store_path,
+                        query: Some(&query),
+                    },
+                )
+                .map_err(|e| {
+                    eprintln!("honesty: {}", cert::verify_cert_audit_honesty_footer());
+                    CliErrorKind::VerifyFailed(e)
+                })?;
+                println!("{msg}");
+            } else {
+                cert::run_verify_cert(&cert, &trust, &proc).map_err(CliErrorKind::VerifyFailed)?;
+                println!("verify-cert ok: cognition certificate v1 valid offline");
+            }
             Ok(())
         }
         Commands::Attest { root } => {
-            require_file_exists(&root, "root checkpoint")?;
+            require_file_exists(&root, "file")?;
             let bytes = std::fs::read(&root).map_err(|_| CliErrorKind::Usage)?;
-            let statement = attest::sigstore_statement(&bytes);
+            let statement = if let Ok(cert) = mneme_index::parse_cognition_certificate(&bytes) {
+                attest::sigstore_statement_for_cert(&bytes, &cert)
+            } else {
+                attest::sigstore_statement(&bytes)
+            };
             println!(
                 "{}",
                 serde_json::to_string_pretty(&statement).map_err(|_| CliErrorKind::Usage)?
