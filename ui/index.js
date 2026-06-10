@@ -74,14 +74,27 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Configuration ---
   const DEFAULT_CAP_FIXTURE = 'qWVraW5kc4UAAQIDBGZpc3N1ZXJYIHm1Vi6P5lT5QHixEuipi6eQH4U65pW+1+DjkQutBJZkZ2NhdmVhdHOBoWhOb3RBZnRlcqNnY291bnRlcgBnbm9kZV9pZFAAAAAAAAAAAAAAAAAAAAAAZ3dhbGxfbXMbP/////////9nc3ViamVjdFggebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmRodGllcl9tYXgDaXNpZ25hdHVyZVhAGV1yUL9Gmz8aNP90tvjINlUQvrG7vzvCQsmY1vuWRgGf/Z/ukP9SYDrtzpFiZg8IpfG+4dNgDu9KWvSIdDWCB2puYW1lc3BhY2VzgWEqa3Blcm1pc3Npb25zF2x0aWVyX2RlZmF1bHQD';
 
+  // ---------------------------------------------------------------------------
+  // State flags
+  // ---------------------------------------------------------------------------
   let isLive = false;
   let activeCapToken = localStorage.getItem('mneme_cap_token') || '';
   let activeCapDecoded = null;
-  let activeLogFilter = 'all';
   let activeDrawerObject = null;
 
-  // --- Mock Database (Demo Mode Fallback) ---
-  let mockMemories = [
+  // Persistent log filter
+  let activeLogFilter = localStorage.getItem('mneme_log_filter') || 'all';
+
+  // Daemon probe backoff state
+  let probeFailCount = 0;
+  let probeTimerId = null;
+  const PROBE_BASE_MS = 3000;
+  const PROBE_MAX_MS = 60000;
+
+  // ---------------------------------------------------------------------------
+  // Mock / Demo Database — seeded from localStorage when present
+  // ---------------------------------------------------------------------------
+  const REGISTRY_SEED = [
     {
       namespace: 'system',
       logicalName: 'API base URL',
@@ -104,6 +117,19 @@ document.addEventListener('DOMContentLoaded', () => {
       objectId: 'e101b59dd54e0d2a0b21f3f2ca22fd8a5c4e0b2a3f65d0bfea1ce9f000000003'
     }
   ];
+
+  function loadRegistry() {
+    try {
+      const raw = localStorage.getItem('mneme_registry');
+      return raw ? JSON.parse(raw) : REGISTRY_SEED.slice();
+    } catch { return REGISTRY_SEED.slice(); }
+  }
+
+  function saveRegistry() {
+    try { localStorage.setItem('mneme_registry', JSON.stringify(mockMemories)); } catch {}
+  }
+
+  let mockMemories = loadRegistry();
 
   // --- Helpers: Hex & Base64 ---
   function bytesToHex(uint8) {
@@ -222,16 +248,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- Log Terminal Manager ---
-  const logs = [];
+  // ---------------------------------------------------------------------------
+  // Log Terminal Manager — ring-buffer persisted to localStorage (max 200 rows)
+  // ---------------------------------------------------------------------------
+  const LOG_MAX = 200;
+
+  function loadLogs() {
+    try {
+      const raw = localStorage.getItem('mneme_logs');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }
+
+  function saveLogs() {
+    try { localStorage.setItem('mneme_logs', JSON.stringify(logs)); } catch {}
+  }
+
+  const logs = loadLogs();
+
   function addLog(level, msg) {
     const timestamp = new Date().toISOString().substring(11, 19);
     const logItem = { timestamp, level, msg };
     logs.push(logItem);
-
-    // Limit log size in DOM
-    if (logs.length > 200) logs.shift();
-
+    if (logs.length > LOG_MAX) logs.shift();
+    saveLogs();
     renderLogs();
   }
 
@@ -272,14 +312,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnClearLogs.addEventListener('click', () => {
     logs.length = 0;
+    saveLogs();
     renderLogs();
+    addLog('info', 'Log terminal cleared.');
   });
 
+  // Restore active filter UI state
   logFilterBtns.forEach(btn => {
+    if (btn.getAttribute('data-filter') === activeLogFilter) {
+      logFilterBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
     btn.addEventListener('click', () => {
       logFilterBtns.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       activeLogFilter = btn.getAttribute('data-filter');
+      localStorage.setItem('mneme_log_filter', activeLogFilter);
       renderLogs();
     });
   });
@@ -367,14 +415,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 600);
   });
 
-  // --- Daemon Connection Management (Probing) ---
+  // ---------------------------------------------------------------------------
+  // Daemon Connection Management — exponential backoff + jitter on failure
+  // ---------------------------------------------------------------------------
   let lastStateLive = null;
+
+  function scheduleNextProbe() {
+    if (probeTimerId) clearTimeout(probeTimerId);
+    // Exponential backoff: 3 s → 6 s → 12 s … up to 60 s, +/- 10% jitter
+    const backoffMs = Math.min(PROBE_BASE_MS * Math.pow(2, probeFailCount), PROBE_MAX_MS);
+    const jitter = backoffMs * 0.1 * (Math.random() * 2 - 1);
+    probeTimerId = setTimeout(probeDaemon, backoffMs + jitter);
+  }
 
   async function probeDaemon() {
     try {
-      const response = await fetch('/api/v1/health');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const response = await fetch('/api/v1/health', { signal: controller.signal });
+      clearTimeout(timeoutId);
+
       if (response.ok) {
         const data = await response.json();
+        probeFailCount = 0; // reset backoff on success
         if (!isLive) {
           isLive = true;
           updateModeUI(true, data.root_sequence);
@@ -382,14 +445,16 @@ document.addEventListener('DOMContentLoaded', () => {
           connectionStatusText.textContent = `Daemon Connected (Seq: ${data.root_sequence})`;
         }
       } else {
-        throw new Error('Bad response');
+        throw new Error(`HTTP ${response.status}`);
       }
     } catch (err) {
+      probeFailCount = Math.min(probeFailCount + 1, 6); // cap at 6 → max 60 s
       if (isLive || lastStateLive === null) {
         isLive = false;
         updateModeUI(false);
       }
     }
+    scheduleNextProbe();
   }
 
   function updateModeUI(connected, sequence = 0) {
@@ -788,6 +853,7 @@ document.addEventListener('DOMContentLoaded', () => {
           setTimeout(() => {
             if (card) card.remove();
             mockMemories = mockMemories.filter(m => !(m.namespace === namespace && m.logicalName === name));
+            saveRegistry();
             renderRegistry();
             addLog('sec', `Zeroization Succeeded. Key ${namespace}/${name} shredded permanently.`);
             addLog('sec', `ForgetProof written to signed root sequence ${result.root_hash_hex.substring(0, 16)}...`);
@@ -809,6 +875,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => {
         if (card) card.remove();
         mockMemories = mockMemories.filter(m => !(m.namespace === namespace && m.logicalName === name));
+        saveRegistry();
         renderRegistry();
         addLog('sec', `Zeroization Succeeded (Demo). Key ${namespace}/${name} zeroized.`);
         addLog('sec', `Simulated ForgetProof committed. Path proved absent.`);
@@ -1238,6 +1305,7 @@ document.addEventListener('DOMContentLoaded', () => {
             objectId: data.object_id_hex,
             kind: kind
           });
+          saveRegistry();
           renderRegistry();
 
           showRememberAlert(`Remember Succeeded! Object ID: ${data.object_id_hex.substring(0, 24)}...`, 'success');
@@ -1274,6 +1342,7 @@ document.addEventListener('DOMContentLoaded', () => {
           objectId: mockObjectId,
           kind: kind
         });
+        saveRegistry();
         renderRegistry();
 
         addLog('sec', `Substrate Write Succeeded (Demo). Key "${namespace}/${name}" stored locally.`);
@@ -1315,11 +1384,22 @@ document.addEventListener('DOMContentLoaded', () => {
     addLog('info', `Security Policy Updated: Default min trust tier set to ${defaultMinTier.value}`);
   });
 
-  // --- Initialization ---
-  addLog('info', 'Substrate console loading...');
-  probeDaemon();
-  renderRegistry();
+  // ---------------------------------------------------------------------------
+  // Initialization — restore persisted state then start daemon probing
+  // ---------------------------------------------------------------------------
+  renderLogs(); // render any persisted logs immediately
+  if (logs.length > 0) {
+    addLog('info', `Session resumed — ${logs.length} log entries restored from previous session.`);
+  } else {
+    addLog('info', 'Substrate console loading...');
+  }
 
-  // Set intervals to query health status regularly
-  setInterval(probeDaemon, 5000);
+  // Restore cap token from storage into UI input field if present
+  if (activeCapToken && capTokenInput) {
+    capTokenInput.value = activeCapToken;
+    validateAndBindToken(activeCapToken);
+  }
+
+  renderRegistry();
+  probeDaemon(); // kicks off backoff-aware polling loop
 });
