@@ -1,7 +1,7 @@
 {
   "generated_by": "cargo test -p mneme-index --test cognition_cert_v1 dump_cognition_cert_fixture -- --ignored --nocapture",
   "phase_i_item": "P1-4",
-  "scope": "cross-validated: mneme-index cert verify + mneme-crossref wire_cert (Ed25519 + ADS replay + zkANN dominance)",
+  "scope": "cross-validated: mneme-index cert verify + mneme-crossref wire_cert (Ed25519 + ADS replay + zkANN dominance); beacon_spot_check prototype manifest (wire extension doc-only until bytes pinned)",
   "status": "pass",
   "vectors": [
     {
@@ -54,6 +54,44 @@
         "seed": 0
       },
       "semantic_commit_hex": "82a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b"
+    },
+    {
+      "audit_beacon": {
+        "randomness_hex": "7c3e9a1f2b8d4e6051a9c3f7e8b2d1046a5f9e3c1b7d8a4f6e2c0b9d5a3f1e7c",
+        "round": 4646464,
+        "source": "drand"
+      },
+      "audit_selector": {
+        "algorithm": "blake3_domain",
+        "domain": "MNEME-AUDIT-SELECT/v1",
+        "rate_denom": 256,
+        "selected": true
+      },
+      "cbor_file": "beacon_spot_check.cbor",
+      "cbor_note": "Interim bytes mirror cognition_cert_v1 until wire agent pins field-6 audit_beacon; regenerate via cargo test -p mneme-index --test beacon_spot_check dump_beacon_spot_check_fixture -- --ignored --nocapture",
+      "fixture_status": "prototype",
+      "level": "exact_dominance",
+      "name": "beacon_spot_check",
+      "operator_pubkey_hex": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "preimage_hash_hex": "0967fb6b4aee9912b9baacc179efc967e8007e14e7c852c137dd162ca2d9ebe5",
+      "procedure": {
+        "algo": "hnsw",
+        "distance": "squared_l2_i64",
+        "ef_search": 64,
+        "k": 1,
+        "seed": 0
+      },
+      "semantic_commit_hex": "53ced2ba9cb080bebb25e120c25baddbec8bbbf2da0b853cf410fb2646316057",
+      "wire_extension": {
+        "audit_beacon_map": {
+          "0": "source (text: drand|nist)",
+          "1": "round (u64)",
+          "2": "randomness (32-byte BLAKE3 of beacon output)"
+        },
+        "cert_field_v1": 6,
+        "cert_field_v2_draft": 7,
+        "field_name": "audit_beacon"
+      }
     }
   ],
   "verified_by": "cargo test -p mneme-crossref --test appendix_b_crossref crossref_cognition_cert_v1_byte_exact",
