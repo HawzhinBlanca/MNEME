@@ -93,7 +93,7 @@ fn conservative_jl_thousand_random_queries() {
                 ((seed >> 33) as f64 / u32::MAX as f64) * 16.0 - 8.0 + d as f64 * 0.02
             })
             .collect();
-        let k = 1 + ((seed >> 40) as usize) % pts.len().min(6).max(1);
+        let k = 1 + ((seed >> 40) as usize) % pts.len().clamp(1, 6);
         assert!(
             conservative_matches_exact(&pts, &q, k, &projector, epsilon),
             "seed={seed} k={k}"
