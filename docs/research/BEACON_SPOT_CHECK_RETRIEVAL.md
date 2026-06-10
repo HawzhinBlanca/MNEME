@@ -82,24 +82,18 @@ that the operator cannot grind before committing the receipt.
 ## 4. Wire extension (`audit_beacon`)
 
 Additive Cognition Certificate field — **does not mutate** frozen
-`mneme-core` interface types. Extension map on the cert outer body:
-
-| Cert version | Field key | Name |
-|---|---:|---|
-| v1 | `6` | `audit_beacon` |
-| v2 draft | `7` | `audit_beacon` (field `6` remains context attestation) |
-
-`audit_beacon` value: dCBOR map:
+`mneme-core` interface types. Optional outer field **7** on cognition certificate v1
+and v2 draft (`audit_beacon` value: dCBOR map):
 
 | Key | Type | Semantics |
 |---:|---|---|
-| `0` | text | `source`: `"drand"` or `"nist"` |
-| `1` | unsigned | `round`: drand round or NIST pulse index |
-| `2` | bytes (32) | `randomness`: BLAKE3 digest of beacon output (domain-separated) |
+| `1` | unsigned | `drand_round`: drand v2 round number |
+| `2` | bytes (32) | `beacon_randomness`: drand API `randomness` (SHA-256 of BLS signature) |
+| `3` | bytes (32) | `binding_digest`: `audit_beacon_binding_digest(round, randomness, receipt.digest())` |
 
-Binding: the beacon tuple is included in the certificate commitment domain
-(`MNEME-COGNITION-CERT/v1` extension tag) so tampering after publication fails
-closed.
+Binding domain tag: `MNEME-AUDIT-BEACON-BIND-v1`.
+
+Certificates **without** field 7 verify exactly as before (fail-closed unchanged).
 
 Fixture pin: `proof/vectors/certs/manifest.json` entry `beacon_spot_check`.
 
@@ -110,16 +104,21 @@ Fixture pin: `proof/vectors/certs/manifest.json` entry `beacon_spot_check`.
 Deterministic, documented for `mneme verify-cert --audit` and crossref:
 
 ```
-input = BLAKE3(
-  "MNEME-AUDIT-SELECT/v1"
-  ‖ randomness (32)
-  ‖ query_commit (32)
-  ‖ semantic_commit (32)
+binding = BLAKE3(
+  "MNEME-AUDIT-BEACON-BIND-v1"
+  ‖ LE_u64(drand_round)
+  ‖ beacon_randomness
+  ‖ receipt.digest()
 )
-selected := (LE_u64(input[0..8]) mod AUDIT_RATE_DENOM) == 0
+ticket = BLAKE3(
+  "MNEME-AUDIT-LOTTERY-v1"
+  ‖ beacon_randomness
+  ‖ binding
+)
+selected := (LE_u64(ticket[0..8]) mod 1_000_000) < audit_rate_ppm
 ```
 
-Default `AUDIT_RATE_DENOM = 256` (~1/256 recalls fully audited). Tunable policy,
+Default `audit_rate_ppm = 100_000` (10% of beacon-bound certificates). Tunable policy,
 not consensus-critical in v0 prototype.
 
 **If selected:** verifier loads embeddings for the committed candidate universe

@@ -11,18 +11,23 @@
 use crate::dcbor::{CborValue, Decoder};
 use crate::error::CrossrefError;
 
-/// Cert outer field key for `audit_beacon` on Cognition Certificate v1.
-pub const F_AUDIT_BEACON_CERT_V1: u64 = 6;
-/// Cert outer field key for `audit_beacon` on Cognition Certificate v2 draft.
-pub const F_AUDIT_BEACON_CERT_V2: u64 = 7;
+/// Cert outer field key for optional `audit_beacon` (cognition certificate v1 / v2 draft).
+pub const F_AUDIT_BEACON_CERT: u64 = 7;
 
-/// Default audit rate: ~1/256 recalls selected for full exact-NN recompute.
-pub const AUDIT_RATE_DENOM: u64 = 256;
+/// Inner map field: drand round number.
+pub const F_DRAND_ROUND: u64 = 1;
+/// Inner map field: drand `randomness` (32 bytes).
+pub const F_BEACON_RANDOMNESS: u64 = 2;
+/// Inner map field: `audit_beacon_binding_digest(round, randomness, receipt.digest())`.
+pub const F_BINDING_DIGEST: u64 = 3;
 
-/// Domain tag for beacon output hashing (matches primary crate).
-pub const AUDIT_BEACON_RANDOMNESS_DOMAIN: &[u8] = b"MNEME-AUDIT-BEACON/v1";
-/// Domain tag for audit selector (matches primary crate).
-pub const AUDIT_SELECT_DOMAIN: &[u8] = b"MNEME-AUDIT-SELECT/v1";
+/// Domain tag binding drand beacon randomness into the receipt/cert hash domain.
+pub const AUDIT_BEACON_BIND_TAG: &[u8] = b"MNEME-AUDIT-BEACON-BIND-v1";
+/// Domain tag for lottery ticket derivation (beacon ‖ cert binding).
+pub const AUDIT_LOTTERY_DOMAIN: &[u8] = b"MNEME-AUDIT-LOTTERY-v1";
+
+/// Default audit lottery rate: 100_000 ppm = 10% of beacon-bound certificates.
+pub const DEFAULT_AUDIT_RATE_PPM: u32 = 100_000;
 
 pub const BEACON_SPOT_CHECK_HONESTY: &str = "Beacon spot-check upgrades audited calls only to \
 lottery-enforced exact-NN over the committed embedding set; non-audited calls remain \
@@ -31,94 +36,89 @@ semantic truth.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuditBeacon {
-    pub source: BeaconSource,
-    pub round: u64,
-    pub randomness: [u8; 32],
+    pub drand_round: u64,
+    pub beacon_randomness: [u8; 32],
+    pub binding_digest: [u8; 32],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BeaconSource {
-    Drand,
-    Nist,
+/// Bind drand beacon into the receipt/cert hash domain (mirrors `mneme-index`).
+pub fn audit_beacon_binding_digest(
+    drand_round: u64,
+    beacon_randomness: &[u8],
+    receipt_digest: &[u8; 32],
+) -> [u8; 32] {
+    let mut payload = Vec::with_capacity(
+        AUDIT_BEACON_BIND_TAG.len() + 8 + beacon_randomness.len() + 32,
+    );
+    payload.extend_from_slice(AUDIT_BEACON_BIND_TAG);
+    payload.extend_from_slice(&drand_round.to_le_bytes());
+    payload.extend_from_slice(beacon_randomness);
+    payload.extend_from_slice(receipt_digest);
+    *blake3::hash(&payload).as_bytes()
 }
 
-impl BeaconSource {
-    fn parse(text: &str) -> Result<Self, CrossrefError> {
-        match text {
-            "drand" => Ok(Self::Drand),
-            "nist" => Ok(Self::Nist),
-            _ => Err(CrossrefError::SchemaDrift),
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Drand => "drand",
-            Self::Nist => "nist",
-        }
-    }
+/// Deterministic lottery: returns true when this certificate is selected for spot-check audit.
+pub fn audit_lottery_selected(
+    beacon_randomness: &[u8],
+    binding_digest: &[u8; 32],
+    audit_rate_ppm: u32,
+) -> bool {
+    let mut payload =
+        Vec::with_capacity(AUDIT_LOTTERY_DOMAIN.len() + beacon_randomness.len() + 32);
+    payload.extend_from_slice(AUDIT_LOTTERY_DOMAIN);
+    payload.extend_from_slice(beacon_randomness);
+    payload.extend_from_slice(binding_digest);
+    let hash = blake3::hash(&payload);
+    let ticket = u64::from_le_bytes(hash.as_bytes()[0..8].try_into().unwrap());
+    ticket % 1_000_000 < u64::from(audit_rate_ppm)
 }
 
-/// Decode optional `audit_beacon` extension map (fields 0..2).
+/// Decode optional `audit_beacon` extension map (fields 1..3).
 pub fn decode_audit_beacon(bytes: &[u8]) -> Result<AuditBeacon, CrossrefError> {
     let mut dec = Decoder::new(bytes);
     let map = dec.decode_map()?;
     dec.ensure_consumed()?;
 
-    let mut source = None;
-    let mut round = None;
-    let mut randomness = None;
+    let mut drand_round = None;
+    let mut beacon_randomness = None;
+    let mut binding_digest = None;
 
     for (key, value) in map {
         let field = key.as_u64().ok_or(CrossrefError::SchemaDrift)?;
         match field {
-            0 => {
-                let text = value.as_text().ok_or(CrossrefError::SchemaDrift)?;
-                source = Some(BeaconSource::parse(text)?);
+            F_DRAND_ROUND => drand_round = Some(value.as_u64().ok_or(CrossrefError::SchemaDrift)?),
+            F_BEACON_RANDOMNESS => {
+                beacon_randomness = Some(parse_fixed32(&value)?);
             }
-            1 => round = Some(value.as_u64().ok_or(CrossrefError::SchemaDrift)?),
-            2 => randomness = Some(parse_fixed32(&value)?),
+            F_BINDING_DIGEST => binding_digest = Some(parse_fixed32(&value)?),
             _ => return Err(CrossrefError::SchemaDrift),
         }
     }
 
     Ok(AuditBeacon {
-        source: source.ok_or(CrossrefError::SchemaDrift)?,
-        round: round.ok_or(CrossrefError::SchemaDrift)?,
-        randomness: randomness.ok_or(CrossrefError::SchemaDrift)?,
+        drand_round: drand_round.ok_or(CrossrefError::SchemaDrift)?,
+        beacon_randomness: beacon_randomness.ok_or(CrossrefError::SchemaDrift)?,
+        binding_digest: binding_digest.ok_or(CrossrefError::SchemaDrift)?,
     })
-}
-
-/// Deterministic audit selector (reference implementation).
-pub fn audit_selected(
-    randomness: &[u8; 32],
-    query_commit: &[u8; 32],
-    semantic_commit: &[u8; 32],
-) -> bool {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(AUDIT_SELECT_DOMAIN);
-    hasher.update(randomness);
-    hasher.update(query_commit);
-    hasher.update(semantic_commit);
-    let digest = hasher.finalize();
-    let limb = u64::from_le_bytes(digest.as_bytes()[0..8].try_into().unwrap());
-    limb % AUDIT_RATE_DENOM == 0
 }
 
 /// Prototype verifier hook for Appendix B extension.
 ///
 /// When `audit_beacon` is present and the call is selected, full exact-NN replay
-/// requires embedding sidecars not carried in the v1 VO — return `AuditRequired` until
+/// requires embedding sidecars not carried in the v1 VO — return `UnsupportedVersion` until
 /// the v-next distance-recompute path or store-backed audit CLI lands.
 pub fn verify_beacon_spot_check_stub(
     beacon: Option<&AuditBeacon>,
-    query_commit: &[u8; 32],
-    semantic_commit: &[u8; 32],
+    audit_rate_ppm: u32,
 ) -> Result<(), CrossrefError> {
     let Some(beacon) = beacon else {
         return Ok(());
     };
-    if audit_selected(&beacon.randomness, query_commit, semantic_commit) {
+    if audit_lottery_selected(
+        &beacon.beacon_randomness,
+        &beacon.binding_digest,
+        audit_rate_ppm,
+    ) {
         return Err(CrossrefError::UnsupportedVersion);
     }
     Ok(())
@@ -139,11 +139,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn audit_selector_is_deterministic() {
+    fn audit_lottery_is_deterministic() {
         let r = [0xAB; 32];
-        let q = [0x01; 32];
-        let s = [0x02; 32];
-        assert_eq!(audit_selected(&r, &q, &s), audit_selected(&r, &q, &s));
+        let b = [0xCD; 32];
+        assert_eq!(
+            audit_lottery_selected(&r, &b, DEFAULT_AUDIT_RATE_PPM),
+            audit_lottery_selected(&r, &b, DEFAULT_AUDIT_RATE_PPM)
+        );
     }
 
     #[test]
@@ -151,17 +153,17 @@ mod tests {
         use crate::dcbor::Encoder;
         let mut enc = Encoder::new();
         enc.begin_map(3).unwrap();
-        enc.encode_unsigned(0).unwrap();
-        enc.encode_text("drand").unwrap();
-        enc.encode_unsigned(1).unwrap();
+        enc.encode_unsigned(F_DRAND_ROUND).unwrap();
         enc.encode_unsigned(4_646_464).unwrap();
-        enc.encode_unsigned(2).unwrap();
+        enc.encode_unsigned(F_BEACON_RANDOMNESS).unwrap();
         enc.encode_bytes(&[0x11; 32]).unwrap();
+        enc.encode_unsigned(F_BINDING_DIGEST).unwrap();
+        enc.encode_bytes(&[0x22; 32]).unwrap();
         let bytes = enc.finish();
 
         let decoded = decode_audit_beacon(&bytes).unwrap();
-        assert_eq!(decoded.source, BeaconSource::Drand);
-        assert_eq!(decoded.round, 4_646_464);
-        assert_eq!(decoded.randomness, [0x11; 32]);
+        assert_eq!(decoded.drand_round, 4_646_464);
+        assert_eq!(decoded.beacon_randomness, [0x11; 32]);
+        assert_eq!(decoded.binding_digest, [0x22; 32]);
     }
 }

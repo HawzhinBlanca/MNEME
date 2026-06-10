@@ -61,13 +61,13 @@ External SDKs should not paraphrase retrieval limits:
 
 | Surface | In `mneme-index` | In `mneme-crossref` |
 |---|---|---|
-| `audit_beacon` cert field (v1 key `6`, v2 key `7`) | prototype branch | `wire_beacon.rs` decode + selector |
+| `audit_beacon` cert field (key `7`) | prototype branch | `wire_beacon.rs` decode + lottery selector |
 | Full exact-NN replay on selected audits | `verify-cert --audit` (store-backed) | **Not started** — returns `UnsupportedVersion` when selected |
 | drand / NIST BLS offline verify | documented in research memo | **Deferred** — zero new deps in crossref v0 |
 
 Planned mirror steps when fixture bytes pin:
 
-1. Extend `wire_cert::decode_cert` to accept optional field `6`/`7` without breaking v1-only certs.
+1. Extend `wire_cert::decode_cert` to accept optional field `7` without breaking v1-only certs.
 2. Call `wire_beacon::verify_beacon_spot_check_stub` after standard cert verify.
 3. Add `crossref_beacon_spot_check_fixture` test reading `beacon_spot_check.cbor` once `fixture_status` is `pass`.
 
