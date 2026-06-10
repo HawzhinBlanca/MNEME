@@ -6,7 +6,8 @@ use mneme_core::{
 };
 use mneme_crypto::{KeyPair, TrustConfig};
 use mneme_index::{
-    SemanticIndex, assemble_cognition_certificate_v1, verify_cognition_certificate_v1,
+    SemanticIndex, assemble_cognition_certificate_v1, assemble_cognition_certificate_v1_with_beacon,
+    prove_audit_beacon, verify_cognition_certificate_v1,
 };
 use mneme_root::StoredRoot;
 
@@ -473,6 +474,33 @@ fn cognition_cert_v1_rejects_forged_receipt_semantic_commit_mismatch() {
     assert_eq!(
         verify_cognition_certificate_v1(&forged, &trust, &proc()),
         Err(MnemeError::ReceiptRootMismatch)
+    );
+}
+
+#[test]
+fn cognition_cert_v1_optional_audit_beacon_field_absent_by_default() {
+    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let parsed = mneme_index::parse_cognition_certificate(&bytes).unwrap();
+    assert!(parsed.audit_beacon.is_none());
+    verify_cognition_certificate_v1(&bytes, &trust, &proc()).unwrap();
+}
+
+#[test]
+fn cognition_cert_v1_audit_beacon_rejects_tampered_binding() {
+    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let parsed = mneme_index::parse_cognition_certificate(&bytes).unwrap();
+    let mut beacon = prove_audit_beacon(50_000, vec![0x42; 32], &parsed.receipt).unwrap();
+    beacon.binding_digest[1] ^= 0x80;
+    let tampered = assemble_cognition_certificate_v1_with_beacon(
+        &parsed.stored_root,
+        &parsed.receipt,
+        None,
+        Some(beacon),
+    )
+    .unwrap();
+    assert_eq!(
+        verify_cognition_certificate_v1(&tampered, &trust, &proc()),
+        Err(MnemeError::CertificateInvalid)
     );
 }
 
