@@ -127,8 +127,10 @@ pub use commitment_binding::{
 
 #[cfg(feature = "pedersen_schnorr_zk")]
 pub use pedersen_schnorr_zk::{
-    PEDERSEN_SCHNORR_HONESTY, PUBLIC_COMMIT_LEN, PedersenSchnorrRetrievalProof, RetrievalWitness,
-    ZK_BACKEND, prove_pedersen_schnorr, verify_pedersen_schnorr,
+    CONN1_UNIFICATION, PEDERSEN_SCHNORR_HONESTY, PUBLIC_COMMIT_LEN, PedersenSchnorrRetrievalProof,
+    PedersenSchnorrSetEqualityProof, RetrievalWitness, SET_EQUALITY_HONESTY, SetEqualityWitness,
+    ZK_BACKEND, commit_multiset, h_set, prove_pedersen_schnorr, prove_set_equality,
+    verify_pedersen_schnorr, verify_set_equality,
 };
 
 // `B3_DEFERRAL_STATUS` re-exported separately because it documents the

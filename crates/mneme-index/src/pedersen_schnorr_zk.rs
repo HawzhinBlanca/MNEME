@@ -57,8 +57,14 @@ pub const PROOF_LEN: usize = 96;
 
 /// Nothing-up-my-sleeve domain for deriving the second generator `H`.
 const H_GENERATOR_DOMAIN: &[u8] = b"MNEME-ZK-RETRIEVAL-RISTRETTO-H-GENERATOR-v1";
-/// Fiat–Shamir transcript domain separator.
+/// Fiat–Shamir transcript domain separator (retrieval-match / scalar equality).
 const FS_DOMAIN: &[u8] = b"MNEME-ZK-RETRIEVAL-PEDERSEN-SCHNORR-v1";
+/// Hash-to-group domain for multiset elements `h_set(x)` (Connection 1 / ECMH map).
+/// Load-bearing: MUST NOT reuse `H_GENERATOR_DOMAIN` — independent generator derivation.
+const H_SET_DOMAIN: &[u8] = b"MNEME-ZK-SET-EQUALITY-H-SET-v1";
+/// Fiat–Shamir domain for set-equality Schnorr proofs (Connection 1).
+/// Load-bearing: MUST NOT reuse `FS_DOMAIN` — cross-protocol replay would otherwise verify.
+const FS_SET_EQUALITY_DOMAIN: &[u8] = b"MNEME-ZK-SET-EQUALITY-PEDERSEN-SCHNORR-v1";
 
 /// Identifies the actual shipped proving backend (honesty export).
 pub const ZK_BACKEND: &str = "pedersen-schnorr-ristretto-nizk (transparent, no trusted setup)";
@@ -92,6 +98,27 @@ pub const PEDERSEN_SCHNORR_HONESTY: &str = concat!(
     "distance until verifiers recompute candidate distances."
 );
 
+/// Connection 1 (Verifiable Cognition Program): honesty ceiling for multiset set-equality.
+///
+/// Soundness is **computational** under DLP in the Ristretto group and the random-oracle
+/// model (Fiat–Shamir). Multiset collision resistance follows from ECMH (Bellare–Micciancio).
+/// This is **not** information-theoretic. Authenticated ≠ true. Membership is **not** proved —
+/// only multiset equality; see accumulators (Jewel C) for non-membership.
+pub const SET_EQUALITY_HONESTY: &str = concat!(
+    "Set-equality proof (Connection 1): the shipped Schnorr verifier checks C_A − C_B ∈ span(H); ",
+    "with hiding multiset commitments C(S,r) = Σ h_set(x) + r·H this proves multiset equality ",
+    "under DLP+ROM (~126-bit computational). NOT information-theoretic. NOT semantic truth. ",
+    "NOT membership — additive multiset hashes prove equality/union only, not element membership. ",
+    "Domain separation is load-bearing (FS_SET_EQUALITY_DOMAIN ≠ FS_DOMAIN)."
+);
+
+/// Connection 1 unification lemma (documentation export).
+pub const CONN1_UNIFICATION: &str = concat!(
+    "Every set-shaped MNEME invariant is a Ristretto point; every pairwise equality is one ",
+    "Schnorr span(H) statement. Scalar retrieval-match and multiset set-equality share one ",
+    "96-byte proof and one fail-closed verifier core; security reduces to DLP+ROM + ECMH."
+);
+
 /// Opaque ZK retrieval proof for a private retrieval-match statement.
 ///
 /// `public_commit` is the binding+hiding Pedersen commitment to the stored `entry` (the value
@@ -119,6 +146,36 @@ impl RetrievalWitness {
         Self {
             entry,
             query: entry,
+        }
+    }
+}
+
+/// Opaque ZK proof that two committed multisets are equal (Connection 1).
+///
+/// Wire format matches [`PedersenSchnorrRetrievalProof`]: `public_commit` = C(S_A, r_A),
+/// `proof_bytes` = `C(S_B, r_B) (32) || R (32) || z (32)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PedersenSchnorrSetEqualityProof {
+    pub public_commit: [u8; PUBLIC_COMMIT_LEN],
+    pub proof_bytes: Vec<u8>,
+}
+
+/// Private witness for multiset set-equality.
+///
+/// A valid proof exists iff `set_a` and `set_b` are equal as multisets (order irrelevant,
+/// multiplicity matters). Elements are arbitrary byte strings (e.g. object IDs).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetEqualityWitness {
+    pub set_a: Vec<Vec<u8>>,
+    pub set_b: Vec<Vec<u8>>,
+}
+
+impl SetEqualityWitness {
+    /// Build a witness where both sides carry the same multiset (the satisfiable case).
+    pub fn matching(elements: Vec<Vec<u8>>) -> Self {
+        Self {
+            set_a: elements.clone(),
+            set_b: elements,
         }
     }
 }
@@ -182,14 +239,49 @@ fn commit(value: Scalar, blinding: Scalar) -> RistrettoPoint {
     value * RISTRETTO_BASEPOINT_POINT + blinding * (*generator_h())
 }
 
-/// Fiat–Shamir challenge over the public transcript `(domain, C_e, C_q, R)`.
+/// ECMH element map `h_set : {0,1}* → Ristretto` (Connection 1).
+///
+/// Uses the same `from_uniform_bytes` hash-to-group primitive as [`generator_h`], under a
+/// fresh domain tag so multiset commitments are independent of the Pedersen generator derivation.
+pub fn h_set(element: &[u8]) -> RistrettoPoint {
+    let mut reader = blake3::Hasher::new()
+        .update(H_SET_DOMAIN)
+        .update(element)
+        .finalize_xof();
+    let mut wide = [0u8; 64];
+    reader.fill(&mut wide);
+    RistrettoPoint::from_uniform_bytes(&wide)
+}
+
+/// Hiding multiset commitment `C(S, r) = Σ_{x∈S} h_set(x) + r·H`.
+pub fn commit_multiset(elements: &[impl AsRef<[u8]>], blinding: Scalar) -> RistrettoPoint {
+    let mut point = blinding * (*generator_h());
+    for elem in elements {
+        point += h_set(elem.as_ref());
+    }
+    point
+}
+
+fn multisets_equal(a: &[Vec<u8>], b: &[Vec<u8>]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut sa = a.to_vec();
+    let mut sb = b.to_vec();
+    sa.sort();
+    sb.sort();
+    sa == sb
+}
+
+/// Fiat–Shamir challenge over the public transcript `(domain, C_a, C_b, R)`.
 fn fiat_shamir_challenge(
+    fs_domain: &[u8],
     public_commit: &CompressedRistretto,
     query_commit: &CompressedRistretto,
     nonce_point: &CompressedRistretto,
 ) -> Scalar {
     let mut reader = blake3::Hasher::new()
-        .update(FS_DOMAIN)
+        .update(fs_domain)
         .update(public_commit.as_bytes())
         .update(query_commit.as_bytes())
         .update(nonce_point.as_bytes())
@@ -197,6 +289,76 @@ fn fiat_shamir_challenge(
     let mut wide = [0u8; 64];
     reader.fill(&mut wide);
     Scalar::from_bytes_mod_order_wide(&wide)
+}
+
+/// Schnorr proof of knowledge of `s` with `C_a − C_b = s·H` (shared verifier core).
+fn prove_span_h_difference(
+    c_a: &CompressedRistretto,
+    c_b: &CompressedRistretto,
+    s: Scalar,
+    fs_domain: &[u8],
+) -> Vec<u8> {
+    let mut rng = OsRng;
+    let k = Scalar::random(&mut rng);
+    let nonce_point = (k * (*generator_h())).compress();
+    let challenge = fiat_shamir_challenge(fs_domain, c_a, c_b, &nonce_point);
+    let z = k + challenge * s;
+
+    let mut proof_bytes = Vec::with_capacity(PROOF_LEN);
+    proof_bytes.extend_from_slice(c_b.as_bytes());
+    proof_bytes.extend_from_slice(nonce_point.as_bytes());
+    proof_bytes.extend_from_slice(z.as_bytes());
+    proof_bytes
+}
+
+/// Verify `z·H == R + c·(C_a − C_b)` for a span(H) Schnorr proof (shared verifier core).
+fn verify_span_h_difference(
+    public_commit: &[u8; PUBLIC_COMMIT_LEN],
+    proof_bytes: &[u8],
+    fs_domain: &[u8],
+) -> Result<(), MnemeError> {
+    if proof_bytes.len() != PROOF_LEN {
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::ProofByteLengthInvalid,
+        ));
+    }
+
+    let c_a = CompressedRistretto::from_slice(public_commit)
+        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::EntryCommitEncodingRejected))?;
+    let c_b = CompressedRistretto::from_slice(&proof_bytes[0..32])
+        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::QueryCommitEncodingRejected))?;
+    let nonce_point = CompressedRistretto::from_slice(&proof_bytes[32..64])
+        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::NonceEncodingRejected))?;
+
+    let mut z_bytes = [0u8; 32];
+    z_bytes.copy_from_slice(&proof_bytes[64..96]);
+    let z = Option::<Scalar>::from(Scalar::from_canonical_bytes(z_bytes)).ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::ResponseScalarNonCanonical)
+    })?;
+
+    let c_a_point = c_a.decompress().ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::EntryCommitDecompressionRejected)
+    })?;
+    let c_b_point = c_b.decompress().ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::QueryCommitDecompressionRejected)
+    })?;
+    let nonce = nonce_point.decompress().ok_or_else(|| {
+        pedersen_schnorr_error(PedersenSchnorrFailure::NonceDecompressionRejected)
+    })?;
+
+    let d = c_a_point - c_b_point;
+    let challenge = fiat_shamir_challenge(fs_domain, &c_a, &c_b, &nonce_point);
+
+    let lhs = z * (*generator_h());
+    let rhs = nonce + challenge * d;
+
+    if lhs == rhs {
+        Ok(())
+    } else {
+        Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::SchnorrEquationFailed,
+        ))
+    }
 }
 
 /// Generate a zero-knowledge retrieval-match proof.
@@ -226,16 +388,7 @@ pub fn prove_pedersen_schnorr(
     // D = C_e - C_q = (r_e - r_q)·H, since the value parts cancel. Prove knowledge of s.
     let s = r_e - r_q;
 
-    // Schnorr proof of knowledge of s with D = s·H (base H), Fiat–Shamir non-interactive.
-    let k = Scalar::random(&mut rng);
-    let nonce_point = (k * (*generator_h())).compress();
-    let challenge = fiat_shamir_challenge(&c_e, &c_q, &nonce_point);
-    let z = k + challenge * s;
-
-    let mut proof_bytes = Vec::with_capacity(PROOF_LEN);
-    proof_bytes.extend_from_slice(c_q.as_bytes());
-    proof_bytes.extend_from_slice(nonce_point.as_bytes());
-    proof_bytes.extend_from_slice(z.as_bytes());
+    let proof_bytes = prove_span_h_difference(&c_e, &c_q, s, FS_DOMAIN);
 
     Ok(PedersenSchnorrRetrievalProof {
         public_commit: *c_e.as_bytes(),
@@ -269,43 +422,68 @@ pub fn verify_pedersen_schnorr(
         ));
     }
 
-    let c_e = CompressedRistretto::from_slice(&proof.public_commit)
-        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::EntryCommitEncodingRejected))?;
-    let c_q = CompressedRistretto::from_slice(&proof.proof_bytes[0..32])
-        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::QueryCommitEncodingRejected))?;
-    let nonce_point = CompressedRistretto::from_slice(&proof.proof_bytes[32..64])
-        .map_err(|_| pedersen_schnorr_error(PedersenSchnorrFailure::NonceEncodingRejected))?;
+    verify_span_h_difference(&proof.public_commit, &proof.proof_bytes, FS_DOMAIN)
+}
 
-    let mut z_bytes = [0u8; 32];
-    z_bytes.copy_from_slice(&proof.proof_bytes[64..96]);
-    let z = Option::<Scalar>::from(Scalar::from_canonical_bytes(z_bytes)).ok_or_else(|| {
-        pedersen_schnorr_error(PedersenSchnorrFailure::ResponseScalarNonCanonical)
-    })?;
-
-    let c_e_point = c_e.decompress().ok_or_else(|| {
-        pedersen_schnorr_error(PedersenSchnorrFailure::EntryCommitDecompressionRejected)
-    })?;
-    let c_q_point = c_q.decompress().ok_or_else(|| {
-        pedersen_schnorr_error(PedersenSchnorrFailure::QueryCommitDecompressionRejected)
-    })?;
-    let nonce = nonce_point.decompress().ok_or_else(|| {
-        pedersen_schnorr_error(PedersenSchnorrFailure::NonceDecompressionRejected)
-    })?;
-
-    // D = C_e - C_q. Verify z·H == R + c·D (Schnorr equality of committed values).
-    let d = c_e_point - c_q_point;
-    let challenge = fiat_shamir_challenge(&c_e, &c_q, &nonce_point);
-
-    let lhs = z * (*generator_h());
-    let rhs = nonce + challenge * d;
-
-    if lhs == rhs {
-        Ok(())
-    } else {
-        Err(pedersen_schnorr_error(
-            PedersenSchnorrFailure::SchnorrEquationFailed,
-        ))
+/// Generate a zero-knowledge multiset set-equality proof (Connection 1).
+///
+/// Fails closed with [`MnemeError::ZkProofInvalid`] when the witness is unsatisfiable
+/// (`set_a` and `set_b` differ as multisets); a false statement cannot be proven.
+pub fn prove_set_equality(
+    witness: &SetEqualityWitness,
+) -> Result<PedersenSchnorrSetEqualityProof, MnemeError> {
+    if !multisets_equal(&witness.set_a, &witness.set_b) {
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::UnsatisfiableWitness,
+        ));
     }
+
+    let mut rng = OsRng;
+    let r_a = Scalar::random(&mut rng);
+    let r_b = Scalar::random(&mut rng);
+
+    let c_a = commit_multiset(&witness.set_a, r_a).compress();
+    let c_b = commit_multiset(&witness.set_b, r_b).compress();
+
+    // C(S,r) = Σ h_set(x) + r·H; equal multisets cancel the Σ term, leaving (r_a − r_b)·H.
+    let s = r_a - r_b;
+    let proof_bytes = prove_span_h_difference(&c_a, &c_b, s, FS_SET_EQUALITY_DOMAIN);
+
+    Ok(PedersenSchnorrSetEqualityProof {
+        public_commit: *c_a.as_bytes(),
+        proof_bytes,
+    })
+}
+
+/// Verify a multiset set-equality proof against a published `public_commit` (32 bytes).
+///
+/// Uses the same Schnorr span(H) check as [`verify_pedersen_schnorr`], with a separate
+/// Fiat–Shamir domain so retrieval-match proofs cannot be replayed as set-equality proofs.
+pub fn verify_set_equality(
+    proof: &PedersenSchnorrSetEqualityProof,
+    public_commit: &[u8],
+) -> Result<(), MnemeError> {
+    if public_commit.len() != PUBLIC_COMMIT_LEN {
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::PublishedCommitLengthInvalid,
+        ));
+    }
+    if public_commit != proof.public_commit {
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::PublishedCommitDoesNotMatchProof,
+        ));
+    }
+    if proof.proof_bytes.len() != PROOF_LEN {
+        return Err(pedersen_schnorr_error(
+            PedersenSchnorrFailure::ProofByteLengthInvalid,
+        ));
+    }
+
+    verify_span_h_difference(
+        &proof.public_commit,
+        &proof.proof_bytes,
+        FS_SET_EQUALITY_DOMAIN,
+    )
 }
 
 #[cfg(test)]
@@ -513,6 +691,138 @@ mod tests {
         assert_eq!(
             verify_pedersen_schnorr(&proof, &proof.public_commit),
             Err(MnemeError::ZkProofInvalid)
+        );
+    }
+
+    #[test]
+    fn conn1_honesty_strings_preserve_dlp_rom_ceiling() {
+        assert!(SET_EQUALITY_HONESTY.contains("DLP+ROM"));
+        assert!(SET_EQUALITY_HONESTY.contains("NOT membership"));
+        assert!(SET_EQUALITY_HONESTY.contains("NOT information-theoretic"));
+        assert!(SET_EQUALITY_HONESTY.contains("NOT semantic truth"));
+        assert!(SET_EQUALITY_HONESTY.contains("FS_SET_EQUALITY_DOMAIN"));
+        assert!(CONN1_UNIFICATION.contains("Schnorr span(H)"));
+        assert!(CONN1_UNIFICATION.contains("DLP+ROM"));
+    }
+
+    #[test]
+    fn set_equality_proof_round_trips() {
+        let elements = vec![b"obj-a".to_vec(), b"obj-b".to_vec(), b"obj-c".to_vec()];
+        let proof = prove_set_equality(&SetEqualityWitness::matching(elements)).expect("prove");
+        assert_eq!(proof.proof_bytes.len(), PROOF_LEN);
+        verify_set_equality(&proof, &proof.public_commit).expect("verify");
+    }
+
+    #[test]
+    fn set_equality_is_order_independent() {
+        let a = vec![b"x".to_vec(), b"y".to_vec(), b"z".to_vec()];
+        let mut b = vec![b"z".to_vec(), b"x".to_vec(), b"y".to_vec()];
+        let proof_a = prove_set_equality(&SetEqualityWitness::matching(a)).expect("a");
+        let proof_b = prove_set_equality(&SetEqualityWitness::matching(b.clone())).expect("b");
+        verify_set_equality(&proof_a, &proof_a.public_commit).expect("verify a");
+        verify_set_equality(&proof_b, &proof_b.public_commit).expect("verify b");
+
+        // Same multiset under different orderings yields equal Σ h_set(x) (ECMH homomorphism).
+        let r = Scalar::ZERO;
+        let ca = commit_multiset(&[b"x", b"y", b"z"], r);
+        b.sort();
+        let cb = commit_multiset(&b.iter().map(|v| v.as_slice()).collect::<Vec<_>>(), r);
+        assert_eq!(ca, cb, "multiset commitment must be order-independent");
+    }
+
+    #[test]
+    fn set_equality_respects_multiplicity() {
+        let equal = vec![b"dup".to_vec(), b"dup".to_vec()];
+        prove_set_equality(&SetEqualityWitness::matching(equal)).expect("equal multisets prove");
+
+        let a = vec![b"dup".to_vec(), b"dup".to_vec()];
+        let b = vec![b"dup".to_vec()];
+        assert_eq!(
+            prove_set_equality(&SetEqualityWitness { set_a: a, set_b: b }),
+            Err(MnemeError::ZkProofInvalid)
+        );
+    }
+
+    #[test]
+    fn set_equality_unsatisfiable_multisets_cannot_prove() {
+        let a = vec![b"alpha".to_vec()];
+        let b = vec![b"beta".to_vec()];
+        assert_eq!(
+            prove_set_equality(&SetEqualityWitness { set_a: a, set_b: b }),
+            Err(MnemeError::ZkProofInvalid)
+        );
+    }
+
+    #[test]
+    fn set_equality_proof_is_randomized() {
+        let elements = vec![b"k1".to_vec(), b"k2".to_vec()];
+        let p1 = prove_set_equality(&SetEqualityWitness::matching(elements.clone())).expect("p1");
+        let p2 = prove_set_equality(&SetEqualityWitness::matching(elements)).expect("p2");
+        assert_ne!(
+            p1.public_commit, p2.public_commit,
+            "blinding hides the multiset"
+        );
+        assert_ne!(p1.proof_bytes, p2.proof_bytes);
+        verify_set_equality(&p1, &p1.public_commit).expect("verify p1");
+        verify_set_equality(&p2, &p2.public_commit).expect("verify p2");
+    }
+
+    #[test]
+    fn set_equality_domain_separation_blocks_cross_protocol_replay() {
+        let elements = vec![b"obj".to_vec()];
+        let set_proof =
+            prove_set_equality(&SetEqualityWitness::matching(elements)).expect("set prove");
+
+        // A set-equality proof must not verify under the retrieval-match FS domain.
+        assert_eq!(
+            verify_span_h_difference(&set_proof.public_commit, &set_proof.proof_bytes, FS_DOMAIN,),
+            Err(MnemeError::ZkProofInvalid)
+        );
+
+        // Retrieval-match proof must not verify under set-equality FS domain.
+        let entry = [5u8; 32];
+        let retrieval =
+            prove_pedersen_schnorr(&RetrievalWitness::matching(entry)).expect("retrieval prove");
+        assert_eq!(
+            verify_span_h_difference(
+                &retrieval.public_commit,
+                &retrieval.proof_bytes,
+                FS_SET_EQUALITY_DOMAIN,
+            ),
+            Err(MnemeError::ZkProofInvalid)
+        );
+    }
+
+    #[test]
+    fn set_equality_forgery_rejects() {
+        let elements = vec![b"t1".to_vec(), b"t2".to_vec()];
+        let mut proof = prove_set_equality(&SetEqualityWitness::matching(elements)).expect("prove");
+        proof.proof_bytes[64] = proof.proof_bytes[64].wrapping_add(1);
+        assert_eq!(
+            verify_set_equality(&proof, &proof.public_commit),
+            Err(MnemeError::ZkProofInvalid)
+        );
+
+        let fresh = prove_set_equality(&SetEqualityWitness::matching(vec![
+            b"t1".to_vec(),
+            b"t2".to_vec(),
+        ]))
+        .expect("fresh");
+        let mut wrong = fresh.public_commit;
+        wrong[0] ^= 0x01;
+        assert_eq!(
+            verify_set_equality(&fresh, &wrong),
+            Err(MnemeError::ZkProofInvalid)
+        );
+    }
+
+    #[test]
+    fn h_set_domain_differs_from_generator_h() {
+        let elem_point = h_set(b"test-element");
+        assert_ne!(
+            elem_point,
+            *generator_h(),
+            "h_set must not collide with H generator derivation"
         );
     }
 }
