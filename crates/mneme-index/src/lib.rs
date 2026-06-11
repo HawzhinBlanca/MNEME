@@ -21,6 +21,7 @@ mod context_gate;
 mod distance;
 mod error;
 mod federation_cert;
+mod forget_absence;
 mod hnsw_backend;
 mod key_index;
 mod key_index_load;
@@ -44,6 +45,9 @@ mod pedersen_schnorr_zk;
 
 #[cfg(feature = "pedersen_schnorr_zk")]
 mod semantic_zk;
+
+#[cfg(feature = "context_set_lock")]
+mod homomorphic_context_lock;
 
 // Phase IV-A research seam — UNIMPLEMENTED, off by default, wired into no recall path.
 #[cfg(feature = "piop_research")]
@@ -113,6 +117,11 @@ pub use federation_cert::{
     PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
     fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
 };
+pub use forget_absence::{
+    COGNITION_CERT_COMMIT_TAG, FORGET_ABSENCE_HONESTY, FORGET_ABSENCE_STATUS, ForgetAbsenceRequest,
+    PostForgetCert, PreForgetAnchorCert, certified_used_commits, cognition_certificate_commit,
+    object_id_target_commit, verify_forget_absence,
+};
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::{
     verify_consumption_attestation, verify_consumption_attestation_strict,
@@ -135,6 +144,13 @@ pub use pedersen_schnorr_zk::{
 // *deferral* (Plonky2/FRI SNARK target not shipped), not the actual backend.
 #[cfg(feature = "pedersen_schnorr_zk")]
 pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
+
+#[cfg(feature = "context_set_lock")]
+pub use homomorphic_context_lock::{
+    CONTEXT_SET_LOCK_HONESTY, CONTEXT_SET_LOCK_PROOF_LEN, CONTEXT_SET_LOCK_STATUS,
+    ContextSetLockProof, decode_context_set_lock_sidecar, encode_context_set_lock_sidecar,
+    hash_entry_scalar, prove_context_set_lock, verify_context_set_lock,
+};
 
 // Phase IV-A research seam (UNIMPLEMENTED). Exported only so the honesty
 // constants are inspectable; `prove_exact_nn_piop` fails closed and proves nothing.
@@ -280,6 +296,12 @@ mod tests {
             !cfg!(feature = "piop_research"),
             "piop_research must remain off-by-default and research-only; remove it from default features."
         );
+    }
+
+    #[cfg(not(feature = "context_set_lock"))]
+    #[test]
+    fn context_set_lock_feature_is_not_default() {
+        assert!(!cfg!(feature = "context_set_lock"));
     }
 
     #[test]
