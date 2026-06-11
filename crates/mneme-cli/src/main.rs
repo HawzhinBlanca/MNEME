@@ -3,6 +3,7 @@
 mod attest;
 mod cert;
 mod determinism;
+mod pace;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
@@ -145,6 +146,11 @@ enum Commands {
         #[command(subcommand)]
         command: DeterminismCommands,
     },
+    /// VCP A1: BLAKE3 sequential pace log (min-interval only; not wall time)
+    Pace {
+        #[command(subcommand)]
+        command: PaceCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -155,6 +161,36 @@ enum SyncCommands {
         /// WebSocket URL of peer mnemed sync endpoint (e.g. ws://127.0.0.1:7845/v1/sync)
         #[arg(long = "peer-url")]
         peer_url: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PaceCommands {
+    /// Measure alg=2 iterations-per-tick on this host (advisory calibration)
+    Calibrate {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long = "target-ms", default_value_t = 1000)]
+        target_ms: u64,
+    },
+    /// Append one paced segment to a log (creates log if missing)
+    Run {
+        #[arg(long)]
+        log: PathBuf,
+        #[arg(long)]
+        calib: Option<PathBuf>,
+        #[arg(long)]
+        genesis: Option<String>,
+        #[arg(long)]
+        iterations: Option<u64>,
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Offline verify chain integrity and optional minimum iterations per gap
+    Verify {
+        log: PathBuf,
+        #[arg(long = "min-iterations")]
+        min_iterations: Option<u64>,
     },
 }
 
@@ -585,6 +621,45 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 Ok(())
             }
         },
+        Commands::Pace { command } => match command {
+            PaceCommands::Calibrate { out, target_ms } => {
+                pace::run_calibrate(&out, target_ms).map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+            PaceCommands::Run {
+                log,
+                calib,
+                genesis,
+                iterations,
+                label,
+            } => {
+                pace::run_append(
+                    &log,
+                    calib.as_deref(),
+                    genesis.as_deref(),
+                    iterations,
+                    label,
+                )
+                .map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+            PaceCommands::Verify {
+                log,
+                min_iterations,
+            } => {
+                require_file_exists(&log, "pace log")?;
+                pace::run_verify(&log, min_iterations).map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+        },
+    }
+}
+
+fn pace_error_to_cli(err: mneme_pace::PaceError) -> CliErrorKind {
+    use mneme_pace::PaceError;
+    match err {
+        PaceError::EmptyLog | PaceError::GenesisMismatch => CliErrorKind::Usage,
+        other => CliErrorKind::VerifyFailed(other.to_mneme()),
     }
 }
 

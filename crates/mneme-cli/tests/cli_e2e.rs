@@ -45,6 +45,7 @@ fn help_lists_critical_subcommands() {
         .stdout(predicate::str::contains("verify-cert"))
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("sync"))
+        .stdout(predicate::str::contains("pace"))
         .stdout(predicate::str::contains("--vault"));
 }
 
@@ -745,4 +746,52 @@ fn attest_emits_sigstore_statement() {
         .stdout(predicate::str::contains(
             "not top-k by true query-to-embedding distance",
         ));
+}
+
+#[test]
+fn pace_calibrate_run_verify_journey() {
+    let dir = tempdir().unwrap();
+    let calib = dir.path().join("pace.calib.cbor");
+    let log = dir.path().join("pace.log.cbor");
+    let genesis = "aa".repeat(32);
+    mneme()
+        .args([
+            "pace",
+            "calibrate",
+            "--out",
+            calib.to_str().unwrap(),
+            "--target-ms",
+            "10",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "maximum elapsed time is impossible",
+        ));
+    mneme()
+        .args([
+            "pace",
+            "run",
+            "--log",
+            log.to_str().unwrap(),
+            "--calib",
+            calib.to_str().unwrap(),
+            "--genesis",
+            &genesis,
+            "--label",
+            "event-a",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pace run ok"));
+    mneme()
+        .args(["pace", "run", "--log", log.to_str().unwrap()])
+        .assert()
+        .success();
+    mneme()
+        .args(["pace", "verify", log.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pace verify ok"))
+        .stderr(predicate::str::contains("post-quantum"));
 }

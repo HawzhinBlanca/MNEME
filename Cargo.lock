@@ -1368,6 +1368,7 @@ dependencies = [
  "mneme-core",
  "mneme-crypto",
  "mneme-index",
+ "mneme-pace",
  "mneme-smt",
  "mneme-store",
  "mneme-verify",
@@ -1516,6 +1517,16 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "mneme-pace"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "hex",
+ "mneme-core",
+ "tempfile",
 ]
 
 [[package]]
