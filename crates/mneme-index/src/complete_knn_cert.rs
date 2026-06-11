@@ -13,6 +13,21 @@ const F_PROOF: u64 = 4;
 const F_BEACON_ROUND: u64 = 5;
 const F_BEACON_SEED: u64 = 6;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CompleteKnnCertFailure {
+    Invalid,
+}
+
+fn complete_knn_cert_failure_to_mneme(failure: CompleteKnnCertFailure) -> MnemeError {
+    match failure {
+        CompleteKnnCertFailure::Invalid => MnemeError::CertificateInvalid,
+    }
+}
+
+fn complete_knn_cert_invalid_error() -> MnemeError {
+    complete_knn_cert_failure_to_mneme(CompleteKnnCertFailure::Invalid)
+}
+
 /// Offline-verifiable complete top-k payload (receipt field 8 inner body).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompleteKnnCertAttachment {
@@ -28,7 +43,7 @@ impl CompleteKnnCertAttachment {
         verify_complete_knn(
             &self.commitment,
             &self.query,
-            usize::try_from(self.k).map_err(|_| MnemeError::CertificateInvalid)?,
+            usize::try_from(self.k).map_err(|_| complete_knn_cert_invalid_error())?,
             &self.proof,
         )
     }
@@ -72,32 +87,32 @@ pub fn decode_complete_knn_attachment(
     let mut beacon_round = None;
     let mut beacon_seed = None;
     for (key, value) in map {
-        let field = key.as_u64().ok_or(MnemeError::CertificateInvalid)?;
+        let field = key.as_u64().ok_or(complete_knn_cert_invalid_error())?;
         match field {
             F_COMMITMENT => commitment = Some(parse_fixed32(&value)?),
             F_QUERY => query = Some(decode_f64_vec(&value)?),
             F_K => {
                 k = Some(
                     u32::try_from(parse_u64(&value)?)
-                        .map_err(|_| MnemeError::CertificateInvalid)?,
+                        .map_err(|_| complete_knn_cert_invalid_error())?,
                 );
             }
             F_PROOF => proof = Some(decode_proof(&value)?),
             F_BEACON_ROUND => beacon_round = Some(parse_u64(&value)?),
             F_BEACON_SEED => beacon_seed = Some(parse_fixed32(&value)?),
-            _ => return Err(MnemeError::CertificateInvalid),
+            _ => return Err(complete_knn_cert_invalid_error()),
         }
     }
     let beacon = match (beacon_round, beacon_seed) {
         (Some(round), Some(seed)) => Some(BeaconSeed { round, seed }),
         (None, None) => None,
-        _ => return Err(MnemeError::CertificateInvalid),
+        _ => return Err(complete_knn_cert_invalid_error()),
     };
     Ok(CompleteKnnCertAttachment {
-        commitment: commitment.ok_or(MnemeError::CertificateInvalid)?,
-        query: query.ok_or(MnemeError::CertificateInvalid)?,
-        k: k.ok_or(MnemeError::CertificateInvalid)?,
-        proof: proof.ok_or(MnemeError::CertificateInvalid)?,
+        commitment: commitment.ok_or(complete_knn_cert_invalid_error())?,
+        query: query.ok_or(complete_knn_cert_invalid_error())?,
+        k: k.ok_or(complete_knn_cert_invalid_error())?,
+        proof: proof.ok_or(complete_knn_cert_invalid_error())?,
         beacon,
     })
 }
@@ -107,7 +122,7 @@ fn encode_proof(enc: &mut Encoder, proof: &CompleteKnnProof) -> Result<(), Mneme
     inner.begin_map(4)?;
     inner.encode_unsigned(1)?;
     inner.encode_unsigned(
-        u64::try_from(proof.total_points).map_err(|_| MnemeError::CertificateInvalid)?,
+        u64::try_from(proof.total_points).map_err(|_| complete_knn_cert_invalid_error())?,
     )?;
     inner.encode_unsigned(2)?;
     encode_returned(&mut inner, &proof.returned)?;
@@ -119,7 +134,7 @@ fn encode_proof(enc: &mut Encoder, proof: &CompleteKnnProof) -> Result<(), Mneme
 }
 
 fn decode_proof(value: &CborValue) -> Result<CompleteKnnProof, MnemeError> {
-    let bytes = value.as_bytes().ok_or(MnemeError::CertificateInvalid)?;
+    let bytes = value.as_bytes().ok_or(complete_knn_cert_invalid_error())?;
     let mut dec = Decoder::new(bytes);
     let map = dec.decode_map()?;
     let mut total_points = None;
@@ -127,24 +142,24 @@ fn decode_proof(value: &CborValue) -> Result<CompleteKnnProof, MnemeError> {
     let mut frontier = None;
     let mut excluded = None;
     for (key, value) in map {
-        match key.as_u64().ok_or(MnemeError::CertificateInvalid)? {
+        match key.as_u64().ok_or(complete_knn_cert_invalid_error())? {
             1 => {
                 total_points = Some(
                     usize::try_from(parse_u64(&value)?)
-                        .map_err(|_| MnemeError::CertificateInvalid)?,
+                        .map_err(|_| complete_knn_cert_invalid_error())?,
                 );
             }
             2 => returned = Some(decode_returned(&value)?),
             3 => frontier = Some(decode_frontier(&value)?),
             4 => excluded = Some(decode_excluded(&value)?),
-            _ => return Err(MnemeError::CertificateInvalid),
+            _ => return Err(complete_knn_cert_invalid_error()),
         }
     }
     Ok(CompleteKnnProof {
-        total_points: total_points.ok_or(MnemeError::CertificateInvalid)?,
-        returned: returned.ok_or(MnemeError::CertificateInvalid)?,
-        frontier: frontier.ok_or(MnemeError::CertificateInvalid)?,
-        excluded: excluded.ok_or(MnemeError::CertificateInvalid)?,
+        total_points: total_points.ok_or(complete_knn_cert_invalid_error())?,
+        returned: returned.ok_or(complete_knn_cert_invalid_error())?,
+        frontier: frontier.ok_or(complete_knn_cert_invalid_error())?,
+        excluded: excluded.ok_or(complete_knn_cert_invalid_error())?,
     })
 }
 
@@ -152,7 +167,9 @@ fn encode_returned(enc: &mut Encoder, rows: &[ReturnedPoint]) -> Result<(), Mnem
     enc.begin_array(rows.len() as u64)?;
     for row in rows {
         enc.begin_array(4)?;
-        enc.encode_unsigned(u64::try_from(row.index).map_err(|_| MnemeError::CertificateInvalid)?)?;
+        enc.encode_unsigned(
+            u64::try_from(row.index).map_err(|_| complete_knn_cert_invalid_error())?,
+        )?;
         encode_f64_vec(enc, &row.point)?;
         enc.encode_unsigned(f64_to_u64(row.distance_sq)?)?;
         encode_auth(enc, &row.auth)?;
@@ -161,16 +178,16 @@ fn encode_returned(enc: &mut Encoder, rows: &[ReturnedPoint]) -> Result<(), Mnem
 }
 
 fn decode_returned(value: &CborValue) -> Result<Vec<ReturnedPoint>, MnemeError> {
-    let arr = value.as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let arr = value.as_array().ok_or(complete_knn_cert_invalid_error())?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let row = item.as_array().ok_or(MnemeError::CertificateInvalid)?;
+        let row = item.as_array().ok_or(complete_knn_cert_invalid_error())?;
         if row.len() != 4 {
-            return Err(MnemeError::CertificateInvalid);
+            return Err(complete_knn_cert_invalid_error());
         }
         out.push(ReturnedPoint {
             index: usize::try_from(parse_u64(&row[0])?)
-                .map_err(|_| MnemeError::CertificateInvalid)?,
+                .map_err(|_| complete_knn_cert_invalid_error())?,
             point: decode_f64_vec(&row[1])?,
             distance_sq: u64_to_f64(parse_u64(&row[2])?)?,
             auth: decode_auth(&row[3])?,
@@ -184,7 +201,7 @@ fn encode_frontier(enc: &mut Encoder, rows: &[FrontierNode]) -> Result<(), Mneme
     for row in rows {
         enc.begin_array(7)?;
         enc.encode_unsigned(
-            u64::try_from(row.pivot_index).map_err(|_| MnemeError::CertificateInvalid)?,
+            u64::try_from(row.pivot_index).map_err(|_| complete_knn_cert_invalid_error())?,
         )?;
         encode_f64_vec(enc, &row.pivot)?;
         enc.encode_unsigned(f64_to_u64(row.radius_sq)?)?;
@@ -192,7 +209,9 @@ fn encode_frontier(enc: &mut Encoder, rows: &[FrontierNode]) -> Result<(), Mneme
         enc.encode_bytes(&row.right_hash)?;
         enc.begin_array(row.subtree_leaf_indices.len() as u64)?;
         for idx in &row.subtree_leaf_indices {
-            enc.encode_unsigned(u64::try_from(*idx).map_err(|_| MnemeError::CertificateInvalid)?)?;
+            enc.encode_unsigned(
+                u64::try_from(*idx).map_err(|_| complete_knn_cert_invalid_error())?,
+            )?;
         }
         encode_auth(enc, &row.auth)?;
     }
@@ -200,22 +219,23 @@ fn encode_frontier(enc: &mut Encoder, rows: &[FrontierNode]) -> Result<(), Mneme
 }
 
 fn decode_frontier(value: &CborValue) -> Result<Vec<FrontierNode>, MnemeError> {
-    let arr = value.as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let arr = value.as_array().ok_or(complete_knn_cert_invalid_error())?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let row = item.as_array().ok_or(MnemeError::CertificateInvalid)?;
+        let row = item.as_array().ok_or(complete_knn_cert_invalid_error())?;
         if row.len() != 7 {
-            return Err(MnemeError::CertificateInvalid);
+            return Err(complete_knn_cert_invalid_error());
         }
-        let indices_arr = row[5].as_array().ok_or(MnemeError::CertificateInvalid)?;
+        let indices_arr = row[5].as_array().ok_or(complete_knn_cert_invalid_error())?;
         let mut subtree_leaf_indices = Vec::with_capacity(indices_arr.len());
         for v in indices_arr {
-            subtree_leaf_indices
-                .push(usize::try_from(parse_u64(v)?).map_err(|_| MnemeError::CertificateInvalid)?);
+            subtree_leaf_indices.push(
+                usize::try_from(parse_u64(v)?).map_err(|_| complete_knn_cert_invalid_error())?,
+            );
         }
         out.push(FrontierNode {
             pivot_index: usize::try_from(parse_u64(&row[0])?)
-                .map_err(|_| MnemeError::CertificateInvalid)?,
+                .map_err(|_| complete_knn_cert_invalid_error())?,
             pivot: decode_f64_vec(&row[1])?,
             radius_sq: u64_to_f64(parse_u64(&row[2])?)?,
             left_hash: parse_fixed32(&row[3])?,
@@ -231,7 +251,9 @@ fn encode_excluded(enc: &mut Encoder, rows: &[ExcludedLeaf]) -> Result<(), Mneme
     enc.begin_array(rows.len() as u64)?;
     for row in rows {
         enc.begin_array(3)?;
-        enc.encode_unsigned(u64::try_from(row.index).map_err(|_| MnemeError::CertificateInvalid)?)?;
+        enc.encode_unsigned(
+            u64::try_from(row.index).map_err(|_| complete_knn_cert_invalid_error())?,
+        )?;
         encode_f64_vec(enc, &row.point)?;
         encode_auth(enc, &row.auth)?;
     }
@@ -239,16 +261,16 @@ fn encode_excluded(enc: &mut Encoder, rows: &[ExcludedLeaf]) -> Result<(), Mneme
 }
 
 fn decode_excluded(value: &CborValue) -> Result<Vec<ExcludedLeaf>, MnemeError> {
-    let arr = value.as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let arr = value.as_array().ok_or(complete_knn_cert_invalid_error())?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let row = item.as_array().ok_or(MnemeError::CertificateInvalid)?;
+        let row = item.as_array().ok_or(complete_knn_cert_invalid_error())?;
         if row.len() != 3 {
-            return Err(MnemeError::CertificateInvalid);
+            return Err(complete_knn_cert_invalid_error());
         }
         out.push(ExcludedLeaf {
             index: usize::try_from(parse_u64(&row[0])?)
-                .map_err(|_| MnemeError::CertificateInvalid)?,
+                .map_err(|_| complete_knn_cert_invalid_error())?,
             point: decode_f64_vec(&row[1])?,
             auth: decode_auth(&row[2])?,
         });
@@ -268,7 +290,7 @@ fn encode_auth(enc: &mut Encoder, auth: &AuthNodeProof) -> Result<(), MnemeError
     }
     match auth.leaf_index {
         Some(idx) => {
-            enc.encode_unsigned(u64::try_from(idx).map_err(|_| MnemeError::CertificateInvalid)?)?
+            enc.encode_unsigned(u64::try_from(idx).map_err(|_| complete_knn_cert_invalid_error())?)?
         }
         None => enc.encode_null()?,
     }
@@ -283,16 +305,16 @@ fn encode_auth(enc: &mut Encoder, auth: &AuthNodeProof) -> Result<(), MnemeError
 }
 
 fn decode_auth(value: &CborValue) -> Result<AuthNodeProof, MnemeError> {
-    let row = value.as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let row = value.as_array().ok_or(complete_knn_cert_invalid_error())?;
     if row.len() != 6 {
-        return Err(MnemeError::CertificateInvalid);
+        return Err(complete_knn_cert_invalid_error());
     }
-    let path_arr = row[0].as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let path_arr = row[0].as_array().ok_or(complete_knn_cert_invalid_error())?;
     let mut path = Vec::with_capacity(path_arr.len());
     for item in path_arr {
-        let step = item.as_array().ok_or(MnemeError::CertificateInvalid)?;
+        let step = item.as_array().ok_or(complete_knn_cert_invalid_error())?;
         if step.len() != 4 {
-            return Err(MnemeError::CertificateInvalid);
+            return Err(complete_knn_cert_invalid_error());
         }
         path.push(AuthPathStep {
             pivot: decode_f64_vec(&step[0])?,
@@ -300,15 +322,15 @@ fn decode_auth(value: &CborValue) -> Result<AuthNodeProof, MnemeError> {
             sibling_hash: parse_fixed32(&step[2])?,
             is_left_child: match &step[3] {
                 CborValue::Bool(v) => *v,
-                _ => return Err(MnemeError::CertificateInvalid),
+                _ => return Err(complete_knn_cert_invalid_error()),
             },
         });
     }
     let leaf_index = match &row[1] {
         CborValue::Null => None,
-        other => {
-            Some(usize::try_from(parse_u64(other)?).map_err(|_| MnemeError::CertificateInvalid)?)
-        }
+        other => Some(
+            usize::try_from(parse_u64(other)?).map_err(|_| complete_knn_cert_invalid_error())?,
+        ),
     };
     let radius_sq = match &row[3] {
         CborValue::Null => None,
@@ -333,13 +355,13 @@ fn encode_f64_vec(enc: &mut Encoder, values: &[f64]) -> Result<(), MnemeError> {
 }
 
 fn decode_f64_vec(value: &CborValue) -> Result<Vec<f64>, MnemeError> {
-    let arr = value.as_array().ok_or(MnemeError::CertificateInvalid)?;
+    let arr = value.as_array().ok_or(complete_knn_cert_invalid_error())?;
     arr.iter().map(|v| u64_to_f64(parse_u64(v)?)).collect()
 }
 
 fn f64_to_u64(v: f64) -> Result<u64, MnemeError> {
     if !v.is_finite() {
-        return Err(MnemeError::CertificateInvalid);
+        return Err(complete_knn_cert_invalid_error());
     }
     Ok(v.to_bits())
 }
@@ -347,16 +369,16 @@ fn f64_to_u64(v: f64) -> Result<u64, MnemeError> {
 fn u64_to_f64(bits: u64) -> Result<f64, MnemeError> {
     let v = f64::from_bits(bits);
     if !v.is_finite() {
-        return Err(MnemeError::CertificateInvalid);
+        return Err(complete_knn_cert_invalid_error());
     }
     Ok(v)
 }
 
 fn parse_u64(value: &CborValue) -> Result<u64, MnemeError> {
-    value.as_u64().ok_or(MnemeError::CertificateInvalid)
+    value.as_u64().ok_or(complete_knn_cert_invalid_error())
 }
 
 fn parse_fixed32(value: &CborValue) -> Result<[u8; 32], MnemeError> {
-    let b = value.as_bytes().ok_or(MnemeError::CertificateInvalid)?;
-    b.try_into().map_err(|_| MnemeError::CertificateInvalid)
+    let b = value.as_bytes().ok_or(complete_knn_cert_invalid_error())?;
+    b.try_into().map_err(|_| complete_knn_cert_invalid_error())
 }
