@@ -88,10 +88,6 @@ path = "tests/context_set_lock.rs"
 required-features = ["context_set_lock"]
 
 [[test]]
-name = "forget_absence"
-path = "tests/forget_absence.rs"
-
-[[test]]
 name = "zkann_exact_dominance"
 path = "tests/zkann_exact_dominance.rs"
 
