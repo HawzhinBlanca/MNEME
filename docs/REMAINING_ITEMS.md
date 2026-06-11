@@ -44,10 +44,12 @@ the certified single-host v0 core.
 
 ## Turn-key (in-repo substitute passes; full proof unlocks with one input)
 
-- **A2 — live-LLM MCP agent loop.** CI runs `scripts/ci/mcp-agent-sim.sh` and
-  `e2e/mcp/sdk-client.test.mjs`. The live loop is `e2e/mcp/live-agent.test.mjs` (skips
-  cleanly without `ANTHROPIC_API_KEY`). **To unlock:** `npm i @anthropic-ai/sdk`, set
-  `ANTHROPIC_API_KEY` (+ `MNEME_MCP_BIN`).
+- **A2 — live-LLM MCP agent loop — DELIVERED 2026-06-11.** Proven live: a real Anthropic
+  model drove `memory.remember` + `memory.recall` over a live `mneme-mcp` stdio server
+  (`e2e/mcp/live-agent.test.mjs`, `pass 1 / fail 0`, ~12.5 s) with `@anthropic-ai/sdk`
+  installed and `ANTHROPIC_API_KEY` set — the L1 story is no longer simulated. CI continues
+  to run the no-credential substitutes (`scripts/ci/mcp-agent-sim.sh`,
+  `e2e/mcp/sdk-client.test.mjs`); the live loop skips cleanly without the key.
 
 ## Delivered (2.0 waves C–E, 2026-06-02)
 
