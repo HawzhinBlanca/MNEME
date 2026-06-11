@@ -79,6 +79,10 @@ name = "beacon_spot_check"
 path = "tests/beacon_spot_check.rs"
 
 [[test]]
+name = "byzantine_inference"
+path = "tests/byzantine_inference.rs"
+
+[[test]]
 name = "context_set_lock"
 path = "tests/context_set_lock.rs"
 required-features = ["context_set_lock"]

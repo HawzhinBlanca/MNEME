@@ -3,6 +3,7 @@
 mod attest;
 mod cert;
 mod determinism;
+mod pace;
 mod replay;
 mod shapley;
 
@@ -125,6 +126,9 @@ enum Commands {
         /// Enable Trick #1 audit-beacon spot-check (requires `audit_beacon` on cert)
         #[arg(long)]
         audit: bool,
+        /// Enable Trick #4 Byzantine inference consistency (requires field 8 on cert)
+        #[arg(long)]
+        byzantine: bool,
         /// Store directory for true-distance recompute when audit is selected
         #[arg(long)]
         store: Option<PathBuf>,
@@ -208,6 +212,11 @@ enum Commands {
         #[command(subcommand)]
         command: DeterminismCommands,
     },
+    /// VCP A1: BLAKE3 sequential pace log (min-interval only; not wall time)
+    Pace {
+        #[command(subcommand)]
+        command: PaceCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -218,6 +227,36 @@ enum SyncCommands {
         /// WebSocket URL of peer mnemed sync endpoint (e.g. ws://127.0.0.1:7845/v1/sync)
         #[arg(long = "peer-url")]
         peer_url: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PaceCommands {
+    /// Measure alg=2 iterations-per-tick on this host (advisory calibration)
+    Calibrate {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long = "target-ms", default_value_t = 1000)]
+        target_ms: u64,
+    },
+    /// Append one paced segment to a log (creates log if missing)
+    Run {
+        #[arg(long)]
+        log: PathBuf,
+        #[arg(long)]
+        calib: Option<PathBuf>,
+        #[arg(long)]
+        genesis: Option<String>,
+        #[arg(long)]
+        iterations: Option<u64>,
+        #[arg(long)]
+        label: Option<String>,
+    },
+    /// Offline verify chain integrity and optional minimum iterations per gap
+    Verify {
+        log: PathBuf,
+        #[arg(long = "min-iterations")]
+        min_iterations: Option<u64>,
     },
 }
 
@@ -797,6 +836,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
         Commands::VerifyCert {
             cert,
             audit,
+            byzantine,
             store,
             components,
             dim,
@@ -819,7 +859,13 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 distance: DistanceMetric::SquaredL2I64,
                 seed: 0,
             };
-            if audit {
+            if byzantine {
+                let msg = cert::run_verify_cert_byzantine(&cert, &trust, &proc).map_err(|e| {
+                    eprintln!("honesty: {}", cert::verify_cert_byzantine_honesty_footer());
+                    CliErrorKind::VerifyFailed(e)
+                })?;
+                println!("{msg}");
+            } else if audit {
                 let store_path = store.as_deref();
                 let query = cert::certify_embedding_from_components(
                     &parse_i16_list(&components)?,
@@ -875,6 +921,45 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 Ok(())
             }
         },
+        Commands::Pace { command } => match command {
+            PaceCommands::Calibrate { out, target_ms } => {
+                pace::run_calibrate(&out, target_ms).map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+            PaceCommands::Run {
+                log,
+                calib,
+                genesis,
+                iterations,
+                label,
+            } => {
+                pace::run_append(
+                    &log,
+                    calib.as_deref(),
+                    genesis.as_deref(),
+                    iterations,
+                    label,
+                )
+                .map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+            PaceCommands::Verify {
+                log,
+                min_iterations,
+            } => {
+                require_file_exists(&log, "pace log")?;
+                pace::run_verify(&log, min_iterations).map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+        },
+    }
+}
+
+fn pace_error_to_cli(err: mneme_pace::PaceError) -> CliErrorKind {
+    use mneme_pace::PaceError;
+    match err {
+        PaceError::EmptyLog | PaceError::GenesisMismatch => CliErrorKind::Usage,
+        other => CliErrorKind::VerifyFailed(other.to_mneme()),
     }
 }
 

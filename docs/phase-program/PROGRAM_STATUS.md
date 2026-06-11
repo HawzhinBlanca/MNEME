@@ -27,7 +27,7 @@
 | **I** — Verifiable retrieval + Certificate v1 | 5/5 | 0 | 0 | **100%** | Software-complete on `master`; zkANN distance-unbound documented; adversarial harness merged (PR #8). CompleteTopK store certify landed (PR #24); JL compression on production manifolds still open. |
 | **II** — Context Gate (software-only) | 6/8 | 0 | 2 | **75%** | P2-3..P2-8 done; P2-1 TEE + P2-2 enclave verify deferred. |
 | **III** — Accountability scaffolding | 2/4 | 0 | 2 | **~50%** | P3-1/P3-2 store paths done (feature-gated, default off); P3-3 Lean + P3-4 trust-ops **deferred**. |
-| **IV** — Scale & standard (research) | 0/4 | 4/4 | 0/4 | **~50%** | PIOP docs + federation verify sketch; no prover/verifier/SDK shipped. **Trick #1 (beacon spot-check):** research doc + crossref stub. **Trick #2 (context-set lock):** context_set_lock scaffold + tests + crossref wire — sidecar only, not recall/TCB. |
+| **IV** — Scale & standard (research) | 0/4 | 4/4 | 0/4 | **~50%** | PIOP docs + federation verify sketch; no prover/verifier/SDK shipped. **Trick #1 (beacon spot-check):** research doc + crossref stub. **Trick #2 (context-set lock):** `context_set_lock` scaffold + tests + crossref wire. **Trick #3 (forget-absence):** `forget_absence` prototype for post-forget verification. **Trick #4 (Byzantine inference):** field 8 wire + unanimous verify + `verify-cert --byzantine` + crossref stub. |
 | **Deep inspection WO (P0–P2)** | 20/20 | 0 | 0 | **100%** | WO-1..WO-20 merged to `master` via PR #8. |
 | **Program total (phase tasks)** | 13/21 | 4/21 | 4/21 | **~71% software ceiling** | Excludes TEE/Lean/PIOP prover/hardware. |
 

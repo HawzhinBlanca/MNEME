@@ -7,9 +7,10 @@ use mneme_core::{
 };
 use mneme_crypto::TrustConfig;
 use mneme_index::{
-    BEACON_SPOT_CHECK_HONESTY, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, audit_lottery_selected,
-    load_store_embeddings, parse_cognition_certificate, verify_audit_beacon_offline,
-    verify_cognition_certificate_v1, verify_cognition_certificate_v1_with_spot_check,
+    BEACON_SPOT_CHECK_HONESTY, BYZANTINE_INFERENCE_HONESTY, DEFAULT_AUDIT_RATE_PPM,
+    SpotCheckContext, audit_lottery_selected, load_store_embeddings, parse_cognition_certificate,
+    verify_audit_beacon_offline, verify_byzantine_inference, verify_cognition_certificate_v1,
+    verify_cognition_certificate_v1_with_spot_check,
 };
 use mneme_store::Store;
 use std::fs;
@@ -132,6 +133,32 @@ pub fn run_verify_cert_audit(
 
 pub fn verify_cert_audit_honesty_footer() -> &'static str {
     BEACON_SPOT_CHECK_HONESTY
+}
+
+pub fn run_verify_cert_byzantine(
+    path: &Path,
+    trust: &TrustConfig,
+    proc: &Procedure,
+) -> Result<String, MnemeError> {
+    let bytes = fs::read(path).map_err(|e| MnemeError::IoFailed {
+        path: path.display().to_string(),
+        kind: e.to_string(),
+    })?;
+    let parsed = parse_cognition_certificate(&bytes)?;
+    let witness = parsed
+        .inference_consistency
+        .as_ref()
+        .ok_or(MnemeError::CertificateInvalid)?;
+    verify_byzantine_inference(witness, &parsed.receipt)?;
+    let root = verify_cognition_certificate_v1_with_spot_check(&bytes, trust, proc, None)?;
+    Ok(format!(
+        "verify-cert ok: cognition certificate v1 valid offline (byzantine: unanimous inference consistency; seq {})",
+        root.sequence
+    ))
+}
+
+pub fn verify_cert_byzantine_honesty_footer() -> &'static str {
+    BYZANTINE_INFERENCE_HONESTY
 }
 
 #[cfg(test)]

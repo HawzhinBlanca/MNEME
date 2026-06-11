@@ -155,7 +155,7 @@ append-only signed checkpoint log  (mneme-root — shipped)
   + beacon-spot-checkable retrieval  (Trick #1 — prototype)
   + context-set lock scaffold       (Trick #2 — `context_gate` draft, default-off; not homomorphic)
   + forget-absence across log        (Trick #3 — research)
-  + Byzantine inference consistency  (Trick #4 — research)
+  + Byzantine inference consistency  (Trick #4 — research; see [`TRICK4_BYZANTINE_INFERENCE_CONSISTENCY.md`](TRICK4_BYZANTINE_INFERENCE_CONSISTENCY.md))
 ```
 
 Each certificate entry becomes a **CT-style log element**: publicly gossipable,

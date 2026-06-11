@@ -1,0 +1,14 @@
+[package]
+name = "mneme-pace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VDF-paced cognition log scaffold (VCP A1, alg=2 BLAKE3 sequential)"
+
+[dependencies]
+blake3.workspace = true
+mneme-core.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

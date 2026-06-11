@@ -2,10 +2,12 @@
 //!
 //! Optional field 7 (`audit_beacon`) carries a drand v2 beacon binding for Trick #1
 //! probabilistically-checkable retrieval (see `beacon_spot_check`).
+//! Optional field 8 (`inference_consistency`) — Trick #4 Byzantine inference.
 
 use crate::beacon_spot_check::{
     AuditBeacon, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, verify_beacon_spot_check,
 };
+use crate::byzantine_inference::{InferenceConsistency, verify_byzantine_inference};
 #[cfg(feature = "context_gate")]
 use crate::context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
 use crate::receipt::SemanticRecallReceipt;
@@ -37,6 +39,7 @@ const F_SEMANTIC_RECEIPT: u64 = 5;
 #[cfg(feature = "context_gate")]
 const F_CONTEXT_ATTESTATION: u64 = 6;
 const F_AUDIT_BEACON: u64 = 7;
+const F_INFERENCE_CONSISTENCY: u64 = 8;
 #[cfg(feature = "context_gate")]
 const F_CCA: u64 = 4;
 #[cfg(feature = "context_gate")]
@@ -166,6 +169,7 @@ enum CognitionCertFailure {
     VerificationObjectUnknownField,
     ZkannUnknownField,
     V1AuditBeaconSpotCheckFailed,
+    V1ByzantineInferenceFailed,
     #[cfg(feature = "context_gate")]
     V2DraftAuditBeaconSpotCheckFailed,
     #[cfg(feature = "context_gate")]
@@ -283,7 +287,8 @@ fn cognition_cert_failure_to_mneme(failure: CognitionCertFailure) -> MnemeError 
         CognitionCertFailure::ParseTextInvalid => MnemeError::CertificateInvalid,
         CognitionCertFailure::VerificationObjectUnknownField
         | CognitionCertFailure::ZkannUnknownField => MnemeError::UnknownField { field: 0 },
-        CognitionCertFailure::V1AuditBeaconSpotCheckFailed => MnemeError::CertificateInvalid,
+        CognitionCertFailure::V1AuditBeaconSpotCheckFailed
+        | CognitionCertFailure::V1ByzantineInferenceFailed => MnemeError::CertificateInvalid,
         #[cfg(feature = "context_gate")]
         CognitionCertFailure::V2DraftAuditBeaconSpotCheckFailed
         | CognitionCertFailure::V2StrictAuditBeaconSpotCheckFailed => {
@@ -384,7 +389,7 @@ pub fn assemble_cognition_certificate_v1(
     receipt: &SemanticRecallReceipt,
     as_of: Option<AsOf>,
 ) -> Result<Vec<u8>, MnemeError> {
-    assemble_cognition_certificate_v1_with_beacon(stored_root, receipt, as_of, None)
+    assemble_cognition_certificate_v1_with_extensions(stored_root, receipt, as_of, None, None)
 }
 
 /// Assemble Certificate v1 with optional drand `audit_beacon` (field 7).
@@ -393,6 +398,23 @@ pub fn assemble_cognition_certificate_v1_with_beacon(
     receipt: &SemanticRecallReceipt,
     as_of: Option<AsOf>,
     audit_beacon: Option<AuditBeacon>,
+) -> Result<Vec<u8>, MnemeError> {
+    assemble_cognition_certificate_v1_with_extensions(
+        stored_root,
+        receipt,
+        as_of,
+        audit_beacon,
+        None,
+    )
+}
+
+/// Assemble Certificate v1 with optional Trick #1 beacon and Trick #4 inference witness.
+pub fn assemble_cognition_certificate_v1_with_extensions(
+    stored_root: &StoredRoot,
+    receipt: &SemanticRecallReceipt,
+    as_of: Option<AsOf>,
+    audit_beacon: Option<AuditBeacon>,
+    inference_consistency: Option<InferenceConsistency>,
 ) -> Result<Vec<u8>, MnemeError> {
     let wire = CognitionCertWire {
         version: COGNITION_CERT_VERSION,
@@ -409,6 +431,7 @@ pub fn assemble_cognition_certificate_v1_with_beacon(
         stored_root: stored_root.clone(),
         receipt: receipt.clone(),
         audit_beacon,
+        inference_consistency,
     };
     to_bytes_canonical(&wire)
 }
@@ -533,6 +556,10 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
             spot_check,
         )
         .map_err(|_| cognition_cert_error(CognitionCertFailure::V1AuditBeaconSpotCheckFailed))?;
+    }
+    if let Some(witness) = &wire.inference_consistency {
+        verify_byzantine_inference(witness, &wire.receipt)
+            .map_err(|_| cognition_cert_error(CognitionCertFailure::V1ByzantineInferenceFailed))?;
     }
     Ok(root)
 }
@@ -782,6 +809,7 @@ struct CognitionCertWire {
     stored_root: StoredRoot,
     receipt: SemanticRecallReceipt,
     audit_beacon: Option<AuditBeacon>,
+    inference_consistency: Option<InferenceConsistency>,
 }
 
 #[cfg(feature = "context_gate")]
@@ -807,6 +835,9 @@ impl DcborEncode for CognitionCertWire {
         if self.audit_beacon.is_some() {
             n += 1;
         }
+        if self.inference_consistency.is_some() {
+            n += 1;
+        }
         enc.begin_map(n)?;
         enc.encode_unsigned(F_CERT_VERSION)?;
         enc.encode_unsigned(u64::from(self.version))?;
@@ -824,6 +855,12 @@ impl DcborEncode for CognitionCertWire {
             enc.encode_unsigned(F_AUDIT_BEACON)?;
             enc.encode_bytes(&crate::beacon_spot_check::encode_audit_beacon(beacon)?)?;
         }
+        if let Some(witness) = &self.inference_consistency {
+            enc.encode_unsigned(F_INFERENCE_CONSISTENCY)?;
+            enc.encode_bytes(&crate::byzantine_inference::encode_inference_consistency(
+                witness,
+            )?)?;
+        }
         Ok(())
     }
 }
@@ -837,6 +874,7 @@ impl DcborDecode for CognitionCertWire {
         let mut stored_root = None;
         let mut receipt = None;
         let mut audit_beacon = None;
+        let mut inference_consistency = None;
         for (key, value) in map {
             let field = parse_u64_field_key(&key)?;
             match field {
@@ -854,6 +892,12 @@ impl DcborDecode for CognitionCertWire {
                 F_AUDIT_BEACON => {
                     let bytes = parse_bytes(&value)?;
                     audit_beacon = Some(crate::beacon_spot_check::decode_audit_beacon(&bytes)?);
+                }
+                F_INFERENCE_CONSISTENCY => {
+                    let bytes = parse_bytes(&value)?;
+                    inference_consistency = Some(
+                        crate::byzantine_inference::decode_inference_consistency(&bytes)?,
+                    );
                 }
                 _ => {
                     let field_id = u16::try_from(field).unwrap_or(u16::MAX);
@@ -873,6 +917,7 @@ impl DcborDecode for CognitionCertWire {
             receipt: receipt
                 .ok_or_else(|| cognition_cert_error(CognitionCertFailure::V1WireReceiptMissing))?,
             audit_beacon,
+            inference_consistency,
         })
     }
 }
@@ -1497,6 +1542,7 @@ pub struct ParsedCognitionCert {
     pub stored_root: StoredRoot,
     pub receipt: SemanticRecallReceipt,
     pub audit_beacon: Option<AuditBeacon>,
+    pub inference_consistency: Option<InferenceConsistency>,
     #[cfg(feature = "context_gate")]
     pub attestation: Option<ContextAttestationDraft>,
 }
@@ -1512,6 +1558,7 @@ pub fn parse_cognition_certificate(bytes: &[u8]) -> Result<ParsedCognitionCert, 
                 stored_root: wire.stored_root,
                 receipt: wire.receipt,
                 audit_beacon: wire.audit_beacon,
+                inference_consistency: None,
                 attestation: Some(wire.attestation),
             });
         }
@@ -1524,6 +1571,7 @@ pub fn parse_cognition_certificate(bytes: &[u8]) -> Result<ParsedCognitionCert, 
         stored_root: wire.stored_root,
         receipt: wire.receipt,
         audit_beacon: wire.audit_beacon,
+        inference_consistency: wire.inference_consistency,
         #[cfg(feature = "context_gate")]
         attestation: None,
     })
@@ -2469,6 +2517,7 @@ mod tests {
             stored_root: stored,
             receipt,
             audit_beacon: None,
+            inference_consistency: None,
         };
         let bytes = to_bytes_canonical(&wire).unwrap();
         let trust = TrustConfig::new(operator.public_key_bytes());
