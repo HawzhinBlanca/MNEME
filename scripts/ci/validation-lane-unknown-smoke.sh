@@ -18,7 +18,7 @@ output="$(CARGO_TARGET_DIR="$sentinel_target" bash scripts/ci/validation-lane.sh
 status=$?
 set -e
 
-expected="Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full)"
+expected="Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full)"
 
 require_exit_status "$label" "$status" "2" "$output"
 require_exact_line "$label" "$output" "$expected"

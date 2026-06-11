@@ -42,6 +42,7 @@ scripts/ci/validation-lane.sh crypto       # crypto/smt fault injection
 scripts/ci/validation-lane.sh tamper       # generative tamper suite (≥150 cases)
 scripts/ci/validation-lane.sh merge        # CRDT merge property tests
 scripts/ci/validation-lane.sh determinism  # foundation-gate ×2
+scripts/ci/validation-lane.sh bounds       # Pillar B floor audit (Ω(log n / log log n) honesty)
 scripts/ci/validation-lane.sh p3-local   # P3 local scaffolds (NOT external KMS/TEE/SSH proof)
 scripts/ci/validation-lane.sh full-preflight # cheap full-lane plan + honesty check (no heavy execution)
 scripts/ci/validation-lane.sh full         # everything above + bench + fuzz + vectors
