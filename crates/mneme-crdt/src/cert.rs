@@ -39,14 +39,41 @@ pub fn verify_convergence(local: &ConvergenceCert, peer: &ConvergenceCert) -> Co
     ConvergenceVerify::Converged
 }
 
+fn encode_text_map(
+    enc: &mut Encoder,
+    mut entries: Vec<(&str, CborValue)>,
+) -> Result<(), MnemeError> {
+    entries.sort_by(|a, b| {
+        let mut ea = Encoder::new();
+        let mut eb = Encoder::new();
+        ea.encode_text(a.0).expect("key");
+        eb.encode_text(b.0).expect("key");
+        ea.finish().cmp(&eb.finish())
+    });
+    enc.begin_map(entries.len() as u64)?;
+    for (key, value) in entries {
+        enc.encode_text(key)?;
+        match value {
+            CborValue::Unsigned(v) => enc.encode_unsigned(v)?,
+            CborValue::Bytes(v) => enc.encode_bytes(&v)?,
+            _ => return Err(MnemeError::SchemaDrift),
+        }
+    }
+    Ok(())
+}
+
 pub fn encode_convergence_cert(cert: &ConvergenceCert) -> Result<Vec<u8>, MnemeError> {
     let mut enc = Encoder::new();
-    enc.begin_map(5)?;
-    enc.encode_text("dag_head_root")?; enc.encode_bytes(&cert.dag_head_root)?;
-    enc.encode_text("key_index_root")?; enc.encode_bytes(&cert.key_index_root)?;
-    enc.encode_text("object_count")?; enc.encode_unsigned(cert.object_count)?;
-    enc.encode_text("object_mset_commit")?; enc.encode_bytes(&cert.object_mset_commit)?;
-    enc.encode_text("version")?; enc.encode_unsigned(u64::from(cert.version))?;
+    encode_text_map(
+        &mut enc,
+        vec![
+            ("dag_head_root", CborValue::Bytes(cert.dag_head_root.to_vec())),
+            ("key_index_root", CborValue::Bytes(cert.key_index_root.to_vec())),
+            ("object_count", CborValue::Unsigned(cert.object_count)),
+            ("object_mset_commit", CborValue::Bytes(cert.object_mset_commit.to_vec())),
+            ("version", CborValue::Unsigned(u64::from(cert.version))),
+        ],
+    )?;
     Ok(enc.finish())
 }
 
