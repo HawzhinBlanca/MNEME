@@ -104,8 +104,8 @@ CR-1..CR-4 (exact ball-tree + tamper suite) ships on PR #15 (`cursor/complete-re
 | CR-5 JL conservative mode | **Landed** | Beacon-seeded `Φ`, `(1+ε)`-inflated pruning bound; proptest proves conservative search == brute-force on low/moderate `m`. |
 | CR-5 JL probabilistic mode | **Scaffold** | Raw projected bound implemented; empirical `δ` gate **not** closed on 768–1536-dim embedding distributions — honest ceiling. |
 | CR-6 `CompleteTopK` level | **Landed** | `RetrievalProofLevel::CompleteTopK` (tag 2); receipt field 8; `verify-cert` offline complete-kNN check; cert byte-identical ×2 test. |
-| CR-6 store `certify` path | **Parked** | `Store::issue_cognition_certificate_v1` + `mneme certify --level complete-topk` fail closed (`SemanticNotImplemented`) until semantic index wires ball-tree issuance. |
-| CR-6 crossref vector | **Parked** | `wire_cert` parses tag 2; dedicated Appendix-B CBOR vector deferred until store issuance path exists. |
+| CR-6 store `certify` path | **Landed** | `SemanticIndex::recall_receipt_zkann(CompleteTopK)` + `Store::issue_cognition_certificate_v1` / `mneme certify --level complete-topk`. |
+| CR-6 crossref vector | **Landed** | Appendix B `cognition_cert_complete_topk.cbor` (receipt field 8, level tag 2); `mneme-crossref::wire_complete_knn` verify path. |
 | CR-7 compression curve | **Landed (honest)** | Reproducible `|F|/n` snapshot in [`docs/benchmarks/COMPLETE_KNN_COMPRESSION.md`](benchmarks/COMPLETE_KNN_COMPRESSION.md): exact pruning collapses to `|F|/n → 1` by D≥128 on uniform random points; JL conservative preserves exactness but does not beat the curse of dimensionality on this baseline. |
 
 **Dimension ceiling (§3 honesty, unchanged):** complete-kNN proves *retrieval completeness over committed geometry*, not semantic truth. In raw high-D embedding space, reverse-triangle bounds rarely prune; certificates stay *correct* but not *succinct*. JL conservative mode trades compression for a sound never-wrongly-prune guarantee; finding `(m, ε)` that is both sublinear and sound on production embedding manifolds remains the open research prize — an acceptable honest outcome, not hidden.

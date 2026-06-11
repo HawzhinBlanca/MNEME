@@ -15,6 +15,7 @@ use crate::semantic_commit::{
     RetrievalProofLevel, VerificationObject, ZkannAttachment, verify_semantic_vo_zkann,
 };
 use crate::wire_beacon::{self, AuditBeacon};
+use crate::wire_complete_knn::{CompleteKnnReceipt, verify_complete_knn_receipt};
 use crate::wire_root::StoredRoot;
 
 const CERT_VERSION_V1: u16 = 1;
@@ -35,6 +36,7 @@ struct SemanticReceipt {
     semantic_commit: [u8; 32],
     vo: VerificationObject,
     zkann: Option<ZkannAttachment>,
+    complete_knn: Option<CompleteKnnReceipt>,
 }
 
 struct CognitionCert {
@@ -92,6 +94,11 @@ pub fn verify_committed_certificate(
         if att.status != CONTEXT_GATE_DRAFT_STATUS {
             return Err(CrossrefError::CertificateInvalid);
         }
+    }
+
+    if cert.level == RetrievalProofLevel::CompleteTopK {
+        verify_complete_topk_certificate(&cert.receipt)?;
+        return Ok(());
     }
 
     let committed_leaf_count = receipt.vo.candidates.len();
@@ -157,6 +164,7 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
     let mut result_ids = None;
     let mut vo_body = None;
     let mut zkann = None;
+    let mut complete_knn = None;
 
     for (key, value) in map {
         match field_key(&key)? {
@@ -167,6 +175,11 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
             5 => result_ids = Some(decode_id_list(&value)?),
             6 => vo_body = Some(decode_vo_body(&value)?),
             7 => zkann = Some(decode_zkann(&value)?),
+            8 => {
+                complete_knn = Some(crate::wire_complete_knn::decode_complete_knn_receipt_value(
+                    &value,
+                )?)
+            }
             _ => return Err(CrossrefError::SchemaDrift),
         }
     }
@@ -184,7 +197,23 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
             result_ids: result_ids.ok_or(CrossrefError::CertificateInvalid)?,
         },
         zkann,
+        complete_knn,
     })
+}
+
+fn verify_complete_topk_certificate(receipt: &SemanticReceipt) -> Result<(), CrossrefError> {
+    let zkann = receipt
+        .zkann
+        .as_ref()
+        .ok_or(CrossrefError::CertificateInvalid)?;
+    if zkann.level != RetrievalProofLevel::CompleteTopK {
+        return Err(CrossrefError::CertificateInvalid);
+    }
+    let raw = receipt
+        .complete_knn
+        .as_ref()
+        .ok_or(CrossrefError::CertificateInvalid)?;
+    verify_complete_knn_receipt(raw)
 }
 
 type NodeRow = ([u8; 32], Vec<[u8; 32]>);
