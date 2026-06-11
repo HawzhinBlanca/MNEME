@@ -1,23 +1,25 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-11 (`master` @ `f7ffbef1`; doc sync after PR #8 + PR #24 merges).
+Last updated: 2026-06-11 (`master` @ `28f3cf47`; doc sync after PR #37 P3 local scaffolds).
 This tracks items beyond the certified single-host v0 core. Each entry states what is
 in-repo, what is gated, and *why* it cannot be marked done without an external input.
 
 > **Work order (2026-06-08):** [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
 > **P0–P2 software scope: 100% complete** on `master` (merged via PR #8 @ `558af8e`;
 > WO-1..WO-20 delivered; `validation-lane.sh quick` + `tamper` + `determinism` green on master).
-> **P3 remains human/hardware-gated** (live KMS/HSM, distinct physical host convergence,
-> TEE vendor quotes, machine-checked proofs).
+> **P3 external proofs remain human/hardware-gated** (live KMS/HSM, distinct physical host
+> convergence, TEE vendor quotes, machine-checked Lean). **P3 local scaffolds landed**
+> on `master` via PR #37 @ `28f3cf47` (`validation-lane.sh p3-local`; see
+> [`docs/P3_LOCAL_SCAFFOLDS.md`](P3_LOCAL_SCAFFOLDS.md)) — substitutes only, not external proof.
 > **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — **merged** 2026-06-09 @ `558af8e`
 > (generative zkANN adversarial harness + distance-unbound finding; e2e fixes `3b44142`, `3556ed8`).
 
 ## P0–P2 closeout (2026-06-08, software-complete)
 
 All prioritized honesty, correctness, deployment-hardening, MCP, and L3-delivery items
-from the deep inspection are implemented and gated in-repo on `master`. Remaining P3 work is
-scaffold + documentation with explicit `not external P3 proof` boundaries; no further P0/P1/P2
-code tasks block the certified single-host v0 core.
+from the deep inspection are implemented and gated in-repo on `master`. P3 local scaffolds
+landed (PR #37); external P3 proofs stay operator-gated. No further P0/P1/P2 code tasks block
+the certified single-host v0 core.
 
 ## Delivered (code, tested, CI-verified)
 
@@ -56,10 +58,19 @@ code tasks block the certified single-host v0 core.
 - **2.0-E** — `scripts/demo/sync-two-peer-demo.sh`; `.github/workflows/mneme-2-nightly.yml`
   (ZK semantic, envelope, optional live MCP when `ANTHROPIC_API_KEY` secret set).
 
+## P3 local scaffolds (landed PR #37 @ `28f3cf47`, 2026-06-11)
+
+Aggregate gate: `scripts/ci/validation-lane.sh p3-local`. Scripts:
+`convergence-two-host.sh --local-smoke`, `kms/conformance-local.sh`,
+`attestation-policy-local.sh`, `formal-obligations-local.sh`. Spec:
+[`docs/P3_LOCAL_SCAFFOLDS.md`](P3_LOCAL_SCAFFOLDS.md). **Honesty:** local substitutes only;
+does not replace live KMS/HSM, distinct-host SSH, TEE enclave, or Lean verification.
+
 ## Genuinely deferred (needs a real KMS/HSM endpoint for proof, not stubs)
 
-- **B6 (cloud/HSM proof)** — Adapters ship; **continuous proof** against a live
-  `AWS_KMS_KEY_ID` remains operator-gated (nightly job compiles only). GCP/PKCS#11 still open.
+- **B6 (cloud/HSM proof)** — Adapters + `conformance-local.sh` ship; **continuous proof**
+  against a live `AWS_KMS_KEY_ID` remains operator-gated (nightly job compiles only).
+  GCP/PKCS#11 still open.
 
 ## Honesty boundary (unchanged)
 

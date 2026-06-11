@@ -1,6 +1,6 @@
 # MNEME Phase Program — Status
 
-**Date:** 2026-06-11 • **Branch:** `master` @ `f7ffbef1` • **PR #8:** [merged](https://github.com/HawzhinBlanca/MNEME/pull/8) 2026-06-09 @ `558af8e`
+**Date:** 2026-06-11 • **Branch:** `master` @ `28f3cf47` • **PR #8:** [merged](https://github.com/HawzhinBlanca/MNEME/pull/8) 2026-06-09 @ `558af8e` • **PR #37:** [merged](https://github.com/HawzhinBlanca/MNEME/pull/37) P3 local scaffolds
 
 **Honesty:** no PIOP/FRI prover; no TEE/enclave; fail-closed defaults unchanged; TCB ≤500 unchanged.
 
@@ -14,9 +14,9 @@
 | WO-9..WO-20 (P1/P2 hardening) | **DONE** | `c88f325`..`c0dbf70`, `ca522ba`, `af70b2d` |
 | CI gate fixes | **DONE** | `cb9653e`, `3b44142` (Node CLI custody), `3556ed8` (MCP SDK tool list) |
 | Local validation | **GREEN** | `validation-lane.sh quick` + `tamper` + `determinism` on `master` |
-| P3 local scaffolds | **NOT SHIPPED** | Spec in `docs/HUMAN_TASKS.md`; no scripts committed |
+| P3 local scaffolds | **LANDED** | PR #37 @ `28f3cf47`: `validation-lane.sh p3-local`, `docs/P3_LOCAL_SCAFFOLDS.md` |
 
-**P0–P2 software scope: 100% complete** on `master`. P3 remains human/hardware-gated.
+**P0–P2 software scope: 100% complete** on `master`. P3 external proofs remain human/hardware-gated; local scaffolds landed.
 
 ---
 
@@ -31,7 +31,7 @@
 | **Deep inspection WO (P0–P2)** | 20/20 | 0 | 0 | **100%** | WO-1..WO-20 merged to `master` via PR #8. |
 | **Program total (phase tasks)** | 13/21 | 4/21 | 4/21 | **~71% software ceiling** | Excludes TEE/Lean/PIOP prover/hardware. |
 
-With P0–P2 work-order delivery counted: **~85% of autonomous hardening scope** complete; remaining ~15% is P3 human-gated + unshipped P3 scaffolds.
+With P0–P2 work-order delivery + P3 scaffolds counted: **~88% of autonomous hardening scope** complete; remaining ~12% is P3 human-gated external proofs (live KMS/HSM, distinct physical host, TEE vendor quotes, Lean).
 
 ---
 
@@ -40,6 +40,7 @@ With P0–P2 work-order delivery counted: **~85% of autonomous hardening scope**
 - Generative adversarial harness for zkANN verifier (`66c4a08`) + distance-unbound finding doc (PR #8).
 - Daemon production hardening: flock single-writer, sealed operator seed, ForgetProof MCP/daemon APIs, OTel audit events, loopback bind guards.
 - CompleteTopK store `certify` + crossref vector (PR #24 @ `31a54b0`).
+- P3 local scaffolds + `validation-lane.sh p3-local` aggregate gate (PR #37 @ `28f3cf47`).
 - `HUMAN_TASKS.md`, `WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`, `REMAINING_ITEMS.md` tracking.
 - Apache-2.0 `LICENSE` (WO-8).
 
@@ -50,7 +51,7 @@ With P0–P2 work-order delivery counted: **~85% of autonomous hardening scope**
 - **Hardware / TEE**: Enclave attestation (Phase II P2-1, P2-2).
 - **Formal proof & trust ops**: Lean verifier proof + trust-ops pilot (Phase III P3-3, P3-4).
 - **Phase IV PIOP**: Global exact-NN prover not started.
-- **P3 local scaffolds**: Convergence/KMS/TEE/formal aggregate gates — planned, not committed.
+- **P3 external proofs**: Live KMS/HSM continuous proof, distinct physical host SSH, TEE vendor quotes, Lean — scaffolds landed (PR #37); external proof paths still operator-gated.
 - **SSH peer determinism**: `MNEME_SECOND_HOST` secret for continuous ops re-verification.
 
 ---
