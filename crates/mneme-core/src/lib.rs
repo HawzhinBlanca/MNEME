@@ -1,6 +1,7 @@
 //! Core types, errors, canonical serialization, and content addressing (Wave 0/1).
 
 pub mod accountability;
+pub mod cognition_bounds;
 pub mod context;
 pub mod dcbor;
 pub mod domain;
@@ -18,6 +19,11 @@ pub mod types;
 pub use accountability::{
     ACTION_RECEIPT_VERSION, ActionReceipt, FORGET_PROOF_VERSION, ForgetProof,
     decode_action_receipt, decode_forget_proof, encode_action_receipt, encode_forget_proof,
+};
+pub use cognition_bounds::{
+    EXACT_DOMINANCE_FLOOR_HONESTY, FLOOR_ATTRIBUTION_HONESTY, FLOOR_GAP_HONESTY,
+    NON_USE_EPOCH_FLOOR_HONESTY, computational_online_floor_queries, log2_ceil,
+    open_log_log_gap_factor, smt_recall_within_named_gap,
 };
 pub use context::{
     CONTEXT_ATTESTATION_VERSION, decode_context_consumption_attestation,

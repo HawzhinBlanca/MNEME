@@ -128,6 +128,26 @@ fn p3_local_scaffold_docs_honest_about_scope() {
 }
 
 #[test]
+fn validation_lane_bounds_runs_floor_audit_tests() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let bounds_lane = validation_lane
+        .split("\n  bounds)")
+        .nth(1)
+        .and_then(|t| t.split("\n  full-preflight)").next())
+        .expect("bounds lane");
+    for phrase in [
+        "Pillar B floor audit",
+        "Ω(log n / log log n)",
+        "docs/theory/PRICE_OF_VERIFIABLE_COGNITION.md",
+        "cargo test -p mneme-core --test cognition_floor_audit",
+        "cargo test -p mneme-smt --test recall_floor",
+        "cargo test -p mneme-index --test exact_dominance_floor",
+    ] {
+        assert!(bounds_lane.contains(phrase));
+    }
+}
+
+#[test]
 fn validation_lane_p3_local_runs_scaffold_scripts() {
     let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
     let p3_lane = validation_lane
@@ -160,6 +180,7 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
         "tamper",
         "merge",
         "determinism",
+        "bounds",
         "p3-local",
         "full-preflight",
         "full",
@@ -467,7 +488,7 @@ fn unknown_lane_smoke_preserves_executable_contract() {
         "CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
         "status=$?",
         "require_exit_status \"$label\" \"$status\" \"2\" \"$output\"",
-        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full)",
+        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full)",
         "if [[ -e \"$sentinel_target\" ]]",
         "validation-lane-unknown-smoke: unknown lane created target dir",
         "validation-lane-unknown-smoke: OK",
@@ -501,7 +522,7 @@ fn validation_lane_help_smoke_preserves_executable_contract() {
         "short_sentinel_target=\"$scratch/short-cargo-target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --help)\"",
         "short_output=\"$(CARGO_TARGET_DIR=\"$short_sentinel_target\" bash scripts/ci/validation-lane.sh -h)\"",
-        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full>",
+        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full>",
         "       scripts/ci/validation-lane.sh --list",
         "       scripts/ci/validation-lane.sh --help",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
@@ -541,7 +562,7 @@ fn validation_lane_list_smoke_preserves_executable_contract() {
         "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-list.XXXXXX\")\"",
         "sentinel_target=\"$scratch/cargo-target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\"",
-        "expected_output=\"quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full\"",
+        "expected_output=\"quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full\"",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
         "require_line_count \"$label\" \"$output\" \"1\"",
         "if [[ -e \"$sentinel_target\" ]]",
