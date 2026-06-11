@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MNEME validation ladder (blueprint §18).
 #
-# Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full>
+# Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full>
 # Fuzz: full → fuzz-meaningful.sh (≥30s/target, 7 targets); quick uses kill-resume only.
 #       Standalone smoke: scripts/ci/fuzz-smoke.sh (-runs=16).
 # Parallel agents: set CARGO_TARGET_DIR=out/agent-targets/ci-harness (or per-lane default applies).
@@ -13,7 +13,7 @@ cd "$ROOT"
 # shellcheck source=scripts/ci/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-VALIDATION_LANES=(quick crypto tamper merge determinism p3-local full-preflight full)
+VALIDATION_LANES=(quick crypto tamper merge determinism bounds p3-local full-preflight full)
 
 validation_lane_choices() {
   local IFS='|'
@@ -139,6 +139,13 @@ case "$LANE" in
       exec scripts/validate_reliability.sh determinism
     fi
     fail_closed "determinism foundation-gate" "§17.7 / §18 determinism"
+    ;;
+
+  bounds)
+    echo "validation-lane ($LANE): Pillar B floor audit — Ω(log n / log log n) honesty (see docs/theory/PRICE_OF_VERIFIABLE_COGNITION.md)"
+    cargo test -p mneme-core --test cognition_floor_audit -- --nocapture
+    cargo test -p mneme-smt --test recall_floor -- --nocapture
+    cargo test -p mneme-index --test exact_dominance_floor -- --nocapture
     ;;
 
   full-preflight)
