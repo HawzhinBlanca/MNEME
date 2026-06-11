@@ -86,6 +86,71 @@ fn oss_release_docs_exist_with_security_and_contributing_guides() {
 }
 
 #[test]
+fn p3_local_scaffold_docs_honest_about_scope() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let work_order = include_str!("../../../docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md");
+    let human_tasks = include_str!("../../../docs/HUMAN_TASKS.md");
+    let p3_doc = include_str!("../../../docs/P3_LOCAL_SCAFFOLDS.md");
+
+    assert!(
+        validation_lane.contains("p3-local"),
+        "validation-lane must wire the p3-local aggregate gate"
+    );
+    assert!(
+        human_tasks.contains("| `validation-lane.sh p3-local` | **Landed** |"),
+        "HUMAN_TASKS must record p3-local scaffold as landed"
+    );
+    assert!(
+        work_order.contains("| P3 local scaffolds (aggregate) | SCAFFOLD-LANDED |"),
+        "work order must record p3-local scaffolds as scaffold-landed"
+    );
+    assert!(
+        p3_doc.contains("not shipped external proof"),
+        "P3_LOCAL_SCAFFOLDS must preserve not-external-proof honesty boundary"
+    );
+    assert!(
+        p3_doc.contains("AcceptedReportPolicy"),
+        "P3_LOCAL_SCAFFOLDS must document AcceptedReportPolicy placeholder"
+    );
+
+    for forbidden in [
+        "`scripts/ci/p3-local-watch-history-summary.sh` validates",
+        "`scripts/ci/p3-local-hourly-report.sh` reruns",
+        "`scripts/ci/p3-local-hourly-report-verify.sh` verifies",
+        "verify_accepted_report_policy",
+        "run_key_vault_conformance",
+    ] {
+        assert!(
+            !work_order.contains(forbidden),
+            "work order must not claim unshipped p3-local artifact `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn validation_lane_p3_local_runs_scaffold_scripts() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let p3_lane = validation_lane
+        .split("\n  p3-local)")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  crypto)").next())
+        .expect("validation-lane must define a p3-local lane");
+
+    for phrase in [
+        "NOT external KMS/TEE/SSH proof",
+        "bash scripts/ci/convergence-two-host.sh --local-smoke",
+        "bash scripts/kms/conformance-local.sh",
+        "bash scripts/ci/attestation-policy-local.sh",
+        "bash scripts/ci/formal-obligations-local.sh",
+    ] {
+        assert!(
+            p3_lane.contains(phrase),
+            "p3-local lane must invoke scaffold `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
     let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
     let claude = include_str!("../../../CLAUDE.md");
@@ -95,6 +160,7 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
         "tamper",
         "merge",
         "determinism",
+        "p3-local",
         "full-preflight",
         "full",
     ];
@@ -401,7 +467,7 @@ fn unknown_lane_smoke_preserves_executable_contract() {
         "CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
         "status=$?",
         "require_exit_status \"$label\" \"$status\" \"2\" \"$output\"",
-        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|full-preflight|full)",
+        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full)",
         "if [[ -e \"$sentinel_target\" ]]",
         "validation-lane-unknown-smoke: unknown lane created target dir",
         "validation-lane-unknown-smoke: OK",
@@ -435,7 +501,7 @@ fn validation_lane_help_smoke_preserves_executable_contract() {
         "short_sentinel_target=\"$scratch/short-cargo-target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --help)\"",
         "short_output=\"$(CARGO_TARGET_DIR=\"$short_sentinel_target\" bash scripts/ci/validation-lane.sh -h)\"",
-        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>",
+        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full>",
         "       scripts/ci/validation-lane.sh --list",
         "       scripts/ci/validation-lane.sh --help",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
@@ -475,7 +541,7 @@ fn validation_lane_list_smoke_preserves_executable_contract() {
         "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-list.XXXXXX\")\"",
         "sentinel_target=\"$scratch/cargo-target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\"",
-        "expected_output=\"quick|crypto|tamper|merge|determinism|full-preflight|full\"",
+        "expected_output=\"quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full\"",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
         "require_line_count \"$label\" \"$output\" \"1\"",
         "if [[ -e \"$sentinel_target\" ]]",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # MNEME validation ladder (blueprint §18).
 #
-# Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>
+# Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full>
 # Fuzz: full → fuzz-meaningful.sh (≥30s/target, 7 targets); quick uses kill-resume only.
 #       Standalone smoke: scripts/ci/fuzz-smoke.sh (-runs=16).
 # Parallel agents: set CARGO_TARGET_DIR=out/agent-targets/ci-harness (or per-lane default applies).
@@ -13,7 +13,7 @@ cd "$ROOT"
 # shellcheck source=scripts/ci/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-VALIDATION_LANES=(quick crypto tamper merge determinism full-preflight full)
+VALIDATION_LANES=(quick crypto tamper merge determinism p3-local full-preflight full)
 
 validation_lane_choices() {
   local IFS='|'
@@ -99,6 +99,14 @@ case "$LANE" in
     bash scripts/ci/kill-resume-smoke.sh
     bash scripts/ci/mcp-smoke.sh
     bash scripts/ci/validation-contract-smoke.sh
+    ;;
+
+  p3-local)
+    echo "validation-lane ($LANE): P3 local scaffolds — NOT external KMS/TEE/SSH proof (see docs/P3_LOCAL_SCAFFOLDS.md)"
+    bash scripts/ci/convergence-two-host.sh --local-smoke
+    bash scripts/kms/conformance-local.sh
+    bash scripts/ci/attestation-policy-local.sh
+    bash scripts/ci/formal-obligations-local.sh
     ;;
 
   crypto)
