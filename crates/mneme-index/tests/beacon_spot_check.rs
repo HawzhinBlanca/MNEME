@@ -162,6 +162,63 @@ fn spot_check_exact_nn_accepts_true_distances() {
     let _ = stored;
 }
 
+fn beacon_spot_check_appendix_b_fixture() -> (Vec<u8>, TrustConfig, mneme_index::AuditBeacon) {
+    let operator = KeyPair::from_seed([0x55; 32]);
+    let mut index = SemanticIndex::new();
+    let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
+    index
+        .insert(
+            oid(0xac),
+            FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap(),
+        )
+        .unwrap();
+    let stored = StoredRoot::assemble(
+        [0x30; 32],
+        [0x31; 32],
+        index.semantic_commit(),
+        [0x32; 14],
+        [0x00; 32],
+        1,
+        &operator,
+    )
+    .unwrap();
+    let receipt = index
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            stored.preimage_hash,
+            RetrievalProofLevel::ExactDominance,
+        )
+        .unwrap();
+    let beacon = non_selected_audit_beacon(4_646_464, &receipt);
+    let bytes = assemble_cognition_certificate_v1_with_beacon(
+        &stored,
+        &receipt,
+        None,
+        Some(beacon.clone()),
+    )
+    .unwrap();
+    (bytes, TrustConfig::new(operator.public_key_bytes()), beacon)
+}
+
+fn non_selected_audit_beacon(
+    drand_round: u64,
+    receipt: &mneme_index::SemanticRecallReceipt,
+) -> mneme_index::AuditBeacon {
+    for salt in 0u8..=255 {
+        let randomness = vec![salt; 32];
+        let beacon = prove_audit_beacon(drand_round, randomness, receipt).unwrap();
+        if !audit_lottery_selected(
+            &beacon.beacon_randomness,
+            &beacon.binding_digest,
+            DEFAULT_AUDIT_RATE_PPM,
+        ) {
+            return beacon;
+        }
+    }
+    panic!("no lottery-not-selected beacon randomness found in 256 tries");
+}
+
 fn appendix_b_audit_beacon_fixture() -> (Vec<u8>, TrustConfig, FixedPointEmbedding) {
     let operator = KeyPair::from_seed([0x42; 32]);
     let mut index = SemanticIndex::new();
@@ -237,6 +294,75 @@ fn proof_vector_cognition_cert_v1_audit_beacon_verifies() {
     } else {
         verify_cognition_certificate_v1_with_spot_check(&bytes, &trust, &proc(), None).unwrap();
     }
+}
+
+#[test]
+fn proof_vector_beacon_spot_check_appendix_b_verifies() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../proof/vectors/certs/beacon_spot_check.cbor");
+    let bytes = std::fs::read(&path).expect("beacon_spot_check fixture must exist");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../proof/vectors/certs/manifest.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let entry = manifest["vectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"].as_str() == Some("beacon_spot_check"))
+        .expect("beacon_spot_check manifest entry");
+    assert_eq!(entry["fixture_status"].as_str(), Some("pass"));
+    let pk_hex = entry["operator_pubkey_hex"].as_str().unwrap();
+    let pk_bytes: [u8; 32] = hex::decode(pk_hex).unwrap().try_into().unwrap();
+    let trust = TrustConfig::new(pk_bytes);
+    verify_cognition_certificate_v1_with_spot_check(&bytes, &trust, &proc(), None).unwrap();
+    let parsed = parse_cognition_certificate(&bytes).unwrap();
+    let beacon = parsed.audit_beacon.as_ref().expect("field 7 audit_beacon");
+    assert!(
+        !audit_lottery_selected(
+            &beacon.beacon_randomness,
+            &beacon.binding_digest,
+            DEFAULT_AUDIT_RATE_PPM
+        ),
+        "crossref fixture must be lottery-not-selected at default audit rate"
+    );
+}
+
+#[test]
+#[ignore]
+fn dump_beacon_spot_check_fixture() {
+    let (bytes, trust, beacon) = beacon_spot_check_appendix_b_fixture();
+    let out_dir =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../proof/vectors/certs");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    std::fs::write(out_dir.join("beacon_spot_check.cbor"), &bytes).unwrap();
+    let parsed = parse_cognition_certificate(&bytes).unwrap();
+    eprintln!(
+        "beacon_spot_check_operator_pubkey_hex={}",
+        hex::encode(trust.operator_keys[0])
+    );
+    eprintln!(
+        "beacon_spot_check_preimage_hash_hex={}",
+        hex::encode(parsed.stored_root.preimage_hash)
+    );
+    eprintln!(
+        "beacon_spot_check_semantic_commit_hex={}",
+        hex::encode(parsed.stored_root.semantic_commit)
+    );
+    eprintln!("beacon_spot_check_drand_round={}", beacon.drand_round);
+    eprintln!(
+        "beacon_spot_check_randomness_hex={}",
+        hex::encode(beacon.beacon_randomness)
+    );
+    eprintln!(
+        "beacon_spot_check_binding_digest_hex={}",
+        hex::encode(beacon.binding_digest)
+    );
+    eprintln!("beacon_spot_check_wire_hex={}", hex::encode(&bytes));
 }
 
 #[test]
