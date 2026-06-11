@@ -57,7 +57,7 @@ pub fn context_hash(entries: &[([u8; 32], Vec<u8>)]) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
-fn put_str(out: &mut Vec<u8>, s: &str) -> Result<(), MnemeError> {
+pub(crate) fn put_str(out: &mut Vec<u8>, s: &str) -> Result<(), MnemeError> {
     let b = s.as_bytes();
     let len: u16 = b.len().try_into().map_err(|_| MnemeError::SchemaDrift)?;
     out.extend_from_slice(&len.to_le_bytes());
@@ -65,7 +65,7 @@ fn put_str(out: &mut Vec<u8>, s: &str) -> Result<(), MnemeError> {
     Ok(())
 }
 
-fn put_id_list(out: &mut Vec<u8>, ids: &[[u8; 32]]) -> Result<(), MnemeError> {
+pub(crate) fn put_id_list(out: &mut Vec<u8>, ids: &[[u8; 32]]) -> Result<(), MnemeError> {
     let len: u16 = ids.len().try_into().map_err(|_| MnemeError::SchemaDrift)?;
     out.extend_from_slice(&len.to_le_bytes());
     for id in ids {
@@ -189,42 +189,42 @@ impl ReplayCertV1 {
 }
 
 /// Strict cursor: every read is bounds-checked; trailing bytes are rejected.
-struct Reader<'a> {
+pub(crate) struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Reader<'a> {
-    fn new(buf: &'a [u8]) -> Self {
+    pub(crate) fn new(buf: &'a [u8]) -> Self {
         Self { buf, pos: 0 }
     }
-    fn consumed(&self) -> usize {
+    pub(crate) fn consumed(&self) -> usize {
         self.pos
     }
-    fn take(&mut self, n: usize) -> Result<&'a [u8], MnemeError> {
+    pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], MnemeError> {
         let end = self.pos.checked_add(n).ok_or(MnemeError::SchemaDrift)?;
         let s = self.buf.get(self.pos..end).ok_or(MnemeError::SchemaDrift)?;
         self.pos = end;
         Ok(s)
     }
-    fn take_arr<const N: usize>(&mut self) -> Result<[u8; N], MnemeError> {
+    pub(crate) fn take_arr<const N: usize>(&mut self) -> Result<[u8; N], MnemeError> {
         let s = self.take(N)?;
         let mut out = [0u8; N];
         out.copy_from_slice(s);
         Ok(out)
     }
-    fn expect(&mut self, tag: &[u8]) -> Result<(), MnemeError> {
+    pub(crate) fn expect(&mut self, tag: &[u8]) -> Result<(), MnemeError> {
         if self.take(tag.len())? != tag {
             return Err(MnemeError::SchemaDrift);
         }
         Ok(())
     }
-    fn take_str(&mut self) -> Result<String, MnemeError> {
+    pub(crate) fn take_str(&mut self) -> Result<String, MnemeError> {
         let len = u16::from_le_bytes(self.take_arr::<2>()?);
         let bytes = self.take(usize::from(len))?;
         String::from_utf8(bytes.to_vec()).map_err(|_| MnemeError::SchemaDrift)
     }
-    fn take_id_list(&mut self) -> Result<Vec<[u8; 32]>, MnemeError> {
+    pub(crate) fn take_id_list(&mut self) -> Result<Vec<[u8; 32]>, MnemeError> {
         let len = u16::from_le_bytes(self.take_arr::<2>()?);
         let mut out = Vec::with_capacity(usize::from(len));
         for _ in 0..len {
@@ -232,7 +232,7 @@ impl<'a> Reader<'a> {
         }
         Ok(out)
     }
-    fn expect_end(&self) -> Result<(), MnemeError> {
+    pub(crate) fn expect_end(&self) -> Result<(), MnemeError> {
         if self.pos != self.buf.len() {
             return Err(MnemeError::SchemaDrift);
         }

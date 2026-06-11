@@ -4,6 +4,7 @@ mod attest;
 mod cert;
 mod determinism;
 mod replay;
+mod shapley;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
@@ -162,6 +163,41 @@ enum Commands {
     VerifyReplay {
         cert: PathBuf,
         /// Optional pinned operator public key (64 hex chars) carried out-of-band
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
+    /// CCR-Shapley: certified Monte-Carlo attribution of a verified context
+    /// against a supplied judge command (hash-bound, execution not attested)
+    Shapley {
+        store: PathBuf,
+        /// Comma-separated logical key names forming the context, in order
+        #[arg(long)]
+        keys: String,
+        /// Judge command (split on whitespace); context piped on stdin
+        #[arg(long)]
+        judge: String,
+        /// Permutation samples (deterministic from --seed)
+        #[arg(long, default_value_t = 16)]
+        samples: u32,
+        /// Sampling seed (64 hex chars)
+        #[arg(
+            long,
+            default_value = "0000000000000000000000000000000000000000000000000000000000000042"
+        )]
+        seed: String,
+        /// Logical key namespace (default: user)
+        #[arg(long, default_value = "user")]
+        namespace: String,
+        #[arg(long = "min-tier", default_value = "trusted")]
+        min_tier: TrustTierArg,
+        /// Output path for the attribution certificate
+        #[arg(long, default_value = "shapley-cert.bin")]
+        out: PathBuf,
+    },
+    /// Offline verify a CCR-Shapley certificate (signature + consistency)
+    VerifyShapley {
+        cert: PathBuf,
+        /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
     },
@@ -390,6 +426,122 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 );
             }
             println!("honesty: {}", replay::REPLAY_HONESTY);
+            Ok(())
+        }
+        Commands::Shapley {
+            store,
+            keys,
+            judge,
+            samples,
+            seed,
+            namespace,
+            min_tier,
+            out,
+        } => {
+            let key_names: Vec<String> = keys
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if key_names.is_empty() || judge.trim().is_empty() || samples == 0 {
+                eprintln!("mneme: shapley requires --keys, --judge, and --samples > 0");
+                return Err(CliErrorKind::Usage);
+            }
+            let seed_bytes = parse_seed_hex(&seed)?;
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            let cap =
+                agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
+            mneme_store
+                .trust_mut()
+                .authorized_writers
+                .push(operator.public_key_bytes());
+            let mut entries: Vec<([u8; 32], Vec<u8>)> = Vec::new();
+            for name in &key_names {
+                let q = Query {
+                    logical_key: LogicalKey {
+                        namespace: namespace.clone(),
+                        name: name.clone(),
+                    },
+                    min_tier: min_tier.into(),
+                    embedding: None,
+                };
+                let recalled = mneme_store
+                    .recall_verified_default(&q, &cap)
+                    .map_err(CliErrorKind::Kernel)?;
+                for e in recalled {
+                    entries.push((e.id.0, e.plaintext.clone()));
+                }
+            }
+            let counts = shapley::sample_counts(&judge, &entries, &seed_bytes, samples)
+                .map_err(CliErrorKind::Kernel)?;
+            let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
+            let cert = shapley::ShapleyCertV1 {
+                root_seq: root.sequence,
+                root_preimage: root.preimage_hash,
+                namespace,
+                keys: key_names.clone(),
+                ids: entries.iter().map(|(id, _)| *id).collect(),
+                judge_hash: shapley::judge_hash(&judge),
+                seed: seed_bytes,
+                samples,
+                counts: counts.clone(),
+                operator_pk: operator.public_key_bytes(),
+                sig: [0u8; 64],
+            };
+            let wire = cert
+                .sign_and_encode(&operator)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "shapley cert written: {} ({} bytes) root_seq={} samples={}",
+                out.display(),
+                wire.len(),
+                root.sequence,
+                samples
+            );
+            for (idx, (id, _)) in entries.iter().enumerate() {
+                println!(
+                    "  {} marginal_impact={}/{}",
+                    hex::encode(id),
+                    counts[idx],
+                    samples
+                );
+            }
+            println!("honesty: {}", shapley::SHAPLEY_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyShapley { cert, operator_pk } => {
+            let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = shapley::ShapleyCertV1::verify(&wire, pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            println!(
+                "verify-shapley ok: root_seq={} entries={} samples={} judge_hash={} operator_pk={}",
+                parsed.root_seq,
+                parsed.ids.len(),
+                parsed.samples,
+                hex::encode(parsed.judge_hash),
+                hex::encode(parsed.operator_pk)
+            );
+            for (idx, id) in parsed.ids.iter().enumerate() {
+                println!(
+                    "  {} marginal_impact={}/{}",
+                    hex::encode(id),
+                    parsed.counts[idx],
+                    parsed.samples
+                );
+            }
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", shapley::SHAPLEY_HONESTY);
             Ok(())
         }
         Commands::Init { path } => {
