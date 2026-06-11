@@ -11,6 +11,7 @@
 #![deny(warnings)]
 
 mod beacon_spot_check;
+mod byzantine_inference;
 mod cognition_cert;
 mod commit;
 mod complete_knn;
@@ -98,6 +99,13 @@ pub use beacon_spot_check::{
 };
 #[cfg(feature = "beacon_online")]
 pub use beacon_spot_check::{fetch_drand_beacon_randomness, verify_audit_beacon_online};
+pub use byzantine_inference::{
+    BYZANTINE_INFERENCE_BIND_TAG, BYZANTINE_INFERENCE_HONESTY, BYZANTINE_INFERENCE_STATUS,
+    InferenceConsistency, InferenceReplica, MIN_BYZANTINE_REPLICAS,
+    decode_inference_consistency, encode_inference_consistency,
+    inference_consistency_binding_digest, model_identity_digest, prove_inference_consistency,
+    verify_byzantine_inference, verify_inference_consistency_binding,
+};
 #[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
@@ -106,7 +114,8 @@ pub use cognition_cert::{
 };
 pub use cognition_cert::{
     ParsedCognitionCert, assemble_cognition_certificate_v1,
-    assemble_cognition_certificate_v1_with_beacon, fuzz_cognition_cert_wire,
+    assemble_cognition_certificate_v1_with_beacon,
+    assemble_cognition_certificate_v1_with_extensions, fuzz_cognition_cert_wire,
     parse_cognition_certificate, verify_cognition_certificate_v1,
     verify_cognition_certificate_v1_with_spot_check,
 };
@@ -118,9 +127,9 @@ pub use federation_cert::{
     fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
 };
 pub use forget_absence::{
-    COGNITION_CERT_COMMIT_TAG, FORGET_ABSENCE_HONESTY, FORGET_ABSENCE_STATUS, ForgetAbsenceRequest,
-    PostForgetCert, PreForgetAnchorCert, certified_used_commits, cognition_certificate_commit,
-    object_id_target_commit, verify_forget_absence,
+    COGNITION_CERT_COMMIT_TAG, FORGET_ABSENCE_HONESTY, FORGET_ABSENCE_STATUS,
+    ForgetAbsenceRequest, PostForgetCert, PreForgetAnchorCert, certified_used_commits,
+    cognition_certificate_commit, object_id_target_commit, verify_forget_absence,
 };
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::{

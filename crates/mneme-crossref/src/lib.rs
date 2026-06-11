@@ -15,6 +15,7 @@ pub mod procedure;
 pub mod semantic_commit;
 pub mod smt;
 pub mod wire_beacon;
+pub mod wire_byzantine;
 pub mod wire_cap;
 pub mod wire_cert;
 pub mod wire_complete_knn;
@@ -24,6 +25,7 @@ pub mod wire_root;
 pub use error::CrossrefError;
 pub use semantic_commit::HONESTY_PROCEDURE;
 pub use wire_beacon::BEACON_SPOT_CHECK_HONESTY;
+pub use wire_byzantine::BYZANTINE_INFERENCE_HONESTY;
 pub use wire_complete_knn::COMPLETE_KNN_HONESTY;
 pub use wire_context_lock::CONTEXT_SET_LOCK_HONESTY;
 
