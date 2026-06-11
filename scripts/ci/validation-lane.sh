@@ -100,6 +100,7 @@ case "$LANE" in
     bash scripts/ci/mcp-smoke.sh
     bash scripts/ci/validation-contract-smoke.sh
     bash scripts/ci/vcp-integration-smoke.sh
+    bash scripts/ci/vcp-c2-smoke.sh
     ;;
 
   p3-local)

@@ -1,0 +1,23 @@
+[package]
+name = "mneme-accum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Jewel C class-group universal accumulator scaffold (VCP C2, research, off by default)"
+
+[features]
+default = []
+# Connection 2 / Jewel C: RSA/class-group accumulator for constant-size non-membership.
+# Research scaffold only — not wired into recall, receipt, or cognition-cert verify paths.
+jewel_c = ["dep:num-bigint", "dep:num-integer", "dep:num-traits", "dep:blake3"]
+
+[dependencies]
+mneme-core.workspace = true
+blake3 = { version = "1.8", optional = true }
+num-bigint = { version = "0.4", optional = true, features = ["std"] }
+num-integer = { version = "0.1", optional = true }
+num-traits = { version = "0.2", optional = true }
+
+[[test]]
+name = "jewel_c_scaffold"
+required-features = ["jewel_c"]

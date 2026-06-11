@@ -78,6 +78,10 @@ name = "beacon_spot_check"
 path = "tests/beacon_spot_check.rs"
 
 [[test]]
+name = "byzantine_inference"
+path = "tests/byzantine_inference.rs"
+
+[[test]]
 name = "zkann_exact_dominance"
 path = "tests/zkann_exact_dominance.rs"
 

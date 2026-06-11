@@ -124,6 +124,9 @@ enum Commands {
         /// Enable Trick #1 audit-beacon spot-check (requires `audit_beacon` on cert)
         #[arg(long)]
         audit: bool,
+        /// Enable Trick #4 Byzantine inference consistency (requires field 8 on cert)
+        #[arg(long)]
+        byzantine: bool,
         /// Store directory for true-distance recompute when audit is selected
         #[arg(long)]
         store: Option<PathBuf>,
@@ -543,6 +546,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
         Commands::VerifyCert {
             cert,
             audit,
+            byzantine,
             store,
             components,
             dim,
@@ -565,7 +569,13 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 distance: DistanceMetric::SquaredL2I64,
                 seed: 0,
             };
-            if audit {
+            if byzantine {
+                let msg = cert::run_verify_cert_byzantine(&cert, &trust, &proc).map_err(|e| {
+                    eprintln!("honesty: {}", cert::verify_cert_byzantine_honesty_footer());
+                    CliErrorKind::VerifyFailed(e)
+                })?;
+                println!("{msg}");
+            } else if audit {
                 let store_path = store.as_deref();
                 let query = cert::certify_embedding_from_components(
                     &parse_i16_list(&components)?,
