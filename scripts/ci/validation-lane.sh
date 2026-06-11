@@ -99,6 +99,7 @@ case "$LANE" in
     bash scripts/ci/kill-resume-smoke.sh
     bash scripts/ci/mcp-smoke.sh
     bash scripts/ci/validation-contract-smoke.sh
+    bash scripts/ci/vcp-c2-smoke.sh
     ;;
 
   p3-local)
