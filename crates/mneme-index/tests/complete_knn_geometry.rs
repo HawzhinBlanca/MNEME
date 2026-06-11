@@ -14,8 +14,11 @@ proptest! {
         raw_points in prop::collection::vec(-10.0f64..10.0, 2..=144),
         raw_query in prop::collection::vec(-10.0f64..10.0, 2..=24),
     ) {
-        let n = n.min(raw_points.len() / dim.max(2)).max(1);
         let dim = dim.max(2);
+        let max_n = raw_points.len() / dim;
+        prop_assume!(max_n >= 1);
+        let n = n.min(max_n);
+        prop_assume!(raw_query.len() >= dim);
         let pts: Vec<Vec<f64>> = (0..n)
             .map(|i| {
                 let start = i * dim;
