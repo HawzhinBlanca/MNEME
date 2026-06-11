@@ -148,6 +148,7 @@ fn validation_lane_tamper_is_wired_to_in_repo_tamper_suites() {
         "cargo test -p mneme-verify --test tamper_cap -- --nocapture",
         "cargo test -p mneme-verify --test tamper_checkpoint -- --nocapture",
         "cargo test -p mneme-verify --test tamper_tombstone -- --nocapture",
+        "cargo test -p mneme-index --test complete_knn_tamper -- --nocapture",
     ] {
         assert!(
             validate_reliability.contains(phrase),
