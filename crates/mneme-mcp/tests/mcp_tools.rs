@@ -233,6 +233,64 @@ fn mcp_forget_proof_failure_returns_is_error_with_honesty_footer() {
 }
 
 #[test]
+fn mcp_protocol_validation_errors_include_honesty_footer() {
+    let dir = tempdir().unwrap();
+    let rt = test_runtime(dir.path());
+    let h = &rt.handlers;
+
+    let err = dispatch(
+        h,
+        "tools/call",
+        &json!({
+            "name": "memory.recall",
+            "arguments": { "min_tier": "quarantine" }
+        }),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("missing argument: key"),
+        "expected missing key error, got: {err}"
+    );
+    assert_honesty_footer(&err);
+
+    let err = dispatch(
+        h,
+        "tools/call",
+        &json!({
+            "name": "memory.remember",
+            "arguments": { "kind": "semantic", "namespace": "user" }
+        }),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("missing argument: content"),
+        "expected missing content error, got: {err}"
+    );
+    assert_honesty_footer(&err);
+
+    let err = dispatch(
+        h,
+        "tools/call",
+        &json!({ "name": "memory.nope", "arguments": {} }),
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("unknown tool"),
+        "expected unknown tool error, got: {err}"
+    );
+    assert_honesty_footer(&err);
+}
+
+fn assert_honesty_footer(err: &str) {
+    for phrase in ["authenticated", "procedure-faithfulness"] {
+        assert!(
+            err.contains(phrase),
+            "protocol validation error missing `{phrase}`: {err}"
+        );
+    }
+}
+
+#[test]
 fn initialize_returns_server_info() {
     let dir = tempdir().unwrap();
     let rt = test_runtime(dir.path());

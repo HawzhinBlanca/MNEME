@@ -3,7 +3,7 @@
 use crate::handlers::{self, MemoryHandlers};
 use crate::honesty::{
     AINJ_MITIGATION, FORGET_DESCRIPTION, FORGET_PROOF_DESCRIPTION, HONESTY_FOOTER,
-    RECALL_DESCRIPTION, REMEMBER_DESCRIPTION, tool_error_message,
+    RECALL_DESCRIPTION, REMEMBER_DESCRIPTION, protocol_error_message, tool_error_message,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -119,7 +119,9 @@ pub fn dispatch(handlers: &MemoryHandlers, method: &str, params: &Value) -> Resu
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             call_tool(handlers, name, &args)
         }
-        _ => Err(format!("method not found: {method}")),
+        _ => Err(protocol_error_message(format!(
+            "method not found: {method}"
+        ))),
     }
 }
 
@@ -253,20 +255,22 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
                 "root": out.root,
             })))
         }
-        _ => Err(format!("unknown tool: {name}")),
+        _ => Err(protocol_error_message(format!("unknown tool: {name}"))),
     }
 }
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("missing argument: {key}"))
+        .ok_or_else(|| protocol_error_message(format!("missing argument: {key}")))
 }
 
 fn bounded_arg_str<'a>(args: &'a Value, key: &str, max_bytes: usize) -> Result<&'a str, String> {
     let value = arg_str(args, key)?;
     if value.len() > max_bytes {
-        return Err(format!("argument `{key}` exceeds {max_bytes} byte limit"));
+        return Err(protocol_error_message(format!(
+            "argument `{key}` exceeds {max_bytes} byte limit"
+        )));
     }
     Ok(value)
 }
@@ -277,13 +281,15 @@ fn recall_key_arg(args: &Value) -> Result<String, String> {
     }
     if let Some(query) = args.get("query").and_then(|v| v.as_str()) {
         if query.len() > MAX_TOOL_QUERY_BYTES {
-            return Err(format!(
+            return Err(protocol_error_message(format!(
                 "argument `query` exceeds {MAX_TOOL_QUERY_BYTES} byte limit"
-            ));
+            )));
         }
         return Ok(query.to_string());
     }
-    Err("missing argument: key (exact logical key name; semantic search is not supported)".into())
+    Err(protocol_error_message(
+        "missing argument: key (exact logical key name; semantic search is not supported)",
+    ))
 }
 
 fn tool_result_json(value: Value) -> Value {

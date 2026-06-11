@@ -23,6 +23,11 @@ pub const FORGET_DESCRIPTION: &str =
 
 pub const FORGET_PROOF_DESCRIPTION: &str = "Cryptographic forget (shred) with tombstone plus canonical ForgetProof CBOR and signed-root metadata for offline deletion-certificate verification. ";
 
+/// Append §3 honesty boundary to protocol-level tool errors (missing args, size caps, etc.).
+pub fn protocol_error_message(message: impl AsRef<str>) -> String {
+    format!("{} {HONESTY_FOOTER}", message.as_ref())
+}
+
 /// Append §3 honesty boundary to tool-call error messages (not footnotes).
 pub fn tool_error_message(err: mneme_core::MnemeError) -> String {
     let base = format!("{err:?}");

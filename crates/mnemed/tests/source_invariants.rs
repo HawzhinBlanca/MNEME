@@ -135,6 +135,93 @@ fn audit_observability_exports_otlp_when_configured() {
 }
 
 #[test]
+fn blueprint_15_4_audit_events_are_wired_to_emitters() {
+    let store_audit = include_str!("../../mneme-store/src/audit.rs");
+    let store_lib = include_str!("../../mneme-store/src/lib.rs");
+    let forget = include_str!("../../mneme-store/src/forget.rs");
+    let daemon_audit = include_str!("../src/audit.rs");
+    let sync_client = include_str!("../src/sync_client.rs");
+    let sync_server = include_str!("../src/sync.rs");
+
+    for event in [
+        "verify_recall.rejected",
+        "promote.committed",
+        "forget.committed",
+        "sync.peer_dropped",
+    ] {
+        let in_store = store_audit.contains(&format!("event = \"{event}\""));
+        let in_daemon = daemon_audit.contains(&format!("event = \"{event}\""));
+        assert!(
+            in_store || in_daemon,
+            "blueprint §15.4 audit event `{event}` should be declared in store or daemon audit module"
+        );
+    }
+
+    assert!(
+        store_lib.contains("audit::emit_verify_recall_rejection("),
+        "recall_verified rejections should emit verify_recall.rejected audit events"
+    );
+    assert!(
+        store_lib.contains("audit::emit_promote("),
+        "promote commits should emit promote.committed audit events"
+    );
+    assert!(
+        forget.contains("audit::emit_forget("),
+        "forget commits should emit forget.committed audit events"
+    );
+    assert!(
+        sync_client.contains("audit::emit_sync_peer_dropped(")
+            && sync_server.contains("audit::emit_sync_peer_dropped("),
+        "sync peer drops should emit sync.peer_dropped from client and server paths"
+    );
+}
+
+#[test]
+fn inv5_agent_reads_use_recall_verified_only() {
+    let recall = include_str!("../../mneme-store/src/recall.rs");
+    let handlers = include_str!("../../mneme-mcp/src/handlers.rs");
+    let mcp_lib = include_str!("../../mneme-mcp/src/lib.rs");
+
+    assert!(
+        recall.contains("pub(crate) fn recall("),
+        "Store::recall must stay pub(crate); agent-facing reads use recall_verified (INV-5)"
+    );
+    assert!(
+        handlers.contains("recall_verified_default(") && !handlers.contains("store.recall("),
+        "MCP handlers must call recall_verified only, never the untrusted recall path (INV-5)"
+    );
+    assert!(
+        mcp_lib.contains("recall_verified"),
+        "mneme-mcp crate docs should document the recall_verified-only seam (INV-5)"
+    );
+}
+
+#[test]
+fn inv6_cold_open_rejects_replay_and_takes_store_lock() {
+    let store = include_str!("../../mneme-store/src/lib.rs");
+    let atomic = include_str!("../../mneme-store/src/atomic.rs");
+    let root = include_str!("../../mneme-root/src/lib.rs");
+    let checkpoint = include_str!("../../mneme-root/src/checkpoint.rs");
+
+    assert!(
+        store.contains("open_store_lock(") && store.contains("RootReplayed"),
+        "Store::open must take the advisory lock and reject A-REPLAY rollback (INV-6)"
+    );
+    assert!(
+        atomic.contains("flock") || atomic.contains("LockHeld"),
+        "open_store_lock should use advisory flock and surface LockHeld for concurrent writers"
+    );
+    assert!(
+        root.contains("cmp_wire") && root.contains("check_replay"),
+        "check_replay must compare HLC high-water marks numerically, not lexicographically (INV-6)"
+    );
+    assert!(
+        checkpoint.contains("hlc_max") && checkpoint.contains("Cold-open A-REPLAY"),
+        "checkpoint log should expose hlc_max for cold-open replay defense (INV-6)"
+    );
+}
+
+#[test]
 fn source_invariant_async_outcome_signature_checks_are_not_whitespace_brittle() {
     let source_invariants = include_str!("source_invariants.rs");
     let quoted_async_fn = ["\"", "async fn "].concat();

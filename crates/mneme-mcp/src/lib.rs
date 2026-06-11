@@ -17,6 +17,6 @@ pub use handlers::MemoryHandlers;
 pub use handlers::normalize_tool_namespace;
 pub use honesty::{
     AINJ_MITIGATION, FORGET_DESCRIPTION, FORGET_PROOF_DESCRIPTION, HONESTY_FOOTER,
-    RECALL_DESCRIPTION, REMEMBER_DESCRIPTION, tool_error_message,
+    RECALL_DESCRIPTION, REMEMBER_DESCRIPTION, protocol_error_message, tool_error_message,
 };
 pub use store_open::{McpRuntime, default_store_path, open_runtime};
