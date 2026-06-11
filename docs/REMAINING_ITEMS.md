@@ -1,35 +1,23 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-11 (CR-5..CR-7 complete-retrieval frontier on `cursor/complete-retrieval-cr5-7`).
+Last updated: 2026-06-11 (`master` @ `f7ffbef1`; doc sync after PR #8 + PR #24 merges).
 This tracks items beyond the certified single-host v0 core. Each entry states what is
 in-repo, what is gated, and *why* it cannot be marked done without an external input.
 
 > **Work order (2026-06-08):** [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
-> **P0–P2 software scope: 100% complete** on branch `harden/differential-adversarial`
-> (WO-1..WO-20 delivered; local `validation-lane.sh quick` + `tamper` + `determinism` green;
-> `cargo test -p mnemed` 299/299). **P3 remains human/hardware-gated**
-> (live KMS/HSM, distinct physical host convergence, TEE vendor quotes, machine-checked proofs).
-> **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — head @ `3556ed8`; CI green after e2e fixes
-> (`3b44142` CLI custody, `3556ed8` MCP `memory.forget_proof` tool list).
-
-## PR #8 merge readiness
-
-| Check | Status @ session end |
-|---|---|
-| Head SHA | `3556ed8` |
-| Local tamper | GREEN |
-| Local determinism | GREEN |
-| Local CLI e2e | GREEN (4/4) |
-| Local MCP SDK e2e | GREEN |
-| GitHub CI gate | **GREEN** |
-| Merge | **Ready** — awaiting explicit operator merge ask |
+> **P0–P2 software scope: 100% complete** on `master` (merged via PR #8 @ `558af8e`;
+> WO-1..WO-20 delivered; `validation-lane.sh quick` + `tamper` + `determinism` green on master).
+> **P3 remains human/hardware-gated** (live KMS/HSM, distinct physical host convergence,
+> TEE vendor quotes, machine-checked proofs).
+> **PR #8:** https://github.com/HawzhinBlanca/MNEME/pull/8 — **merged** 2026-06-09 @ `558af8e`
+> (generative zkANN adversarial harness + distance-unbound finding; e2e fixes `3b44142`, `3556ed8`).
 
 ## P0–P2 closeout (2026-06-08, software-complete)
 
 All prioritized honesty, correctness, deployment-hardening, MCP, and L3-delivery items
-from the deep inspection are implemented and gated in-repo. Remaining P3 work is scaffold +
-documentation with explicit `not external P3 proof` boundaries; no further P0/P1/P2 code
-tasks block merge readiness on this branch.
+from the deep inspection are implemented and gated in-repo on `master`. Remaining P3 work is
+scaffold + documentation with explicit `not external P3 proof` boundaries; no further P0/P1/P2
+code tasks block the certified single-host v0 core.
 
 ## Delivered (code, tested, CI-verified)
 
@@ -90,14 +78,16 @@ compression gate: `cargo test -p mneme-index --test complete_knn_compression -- 
 (`|F|/n → 1`); JL conservative may help in moderate `D` on synthetic data but **does not**
 close the open problem of sublinear **and** sound pruning on production embedding manifolds
 (768–1536-d). Probabilistic JL mode is empirical-only (δ heuristic test, not a theorem on real
-embeddings). Offline `verify-cert` for `CompleteTopK` is landed; store `certify` issuance remains parked.
+embeddings). `CompleteTopK` offline `verify-cert` and store `certify` issuance are **landed**
+on `master` (PR #24 @ `31a54b0`); JL probabilistic mode and real 768–1536-d compression sweeps
+remain open.
 
 ## Provably-complete retrieval (CR-5..CR-7, 2026-06-11)
 
 Work order: [`docs/WORK_ORDER_COMPLETE_RETRIEVAL.md`](WORK_ORDER_COMPLETE_RETRIEVAL.md).
 CR-1..CR-4 (exact ball-tree + tamper suite) ships on PR #15 (`cursor/complete-retrieval-cr1-4`).
 
-**Delivered on CR-5..CR-7 branch**
+**Delivered on `master` (CR-5..CR-7 + PR #24)**
 
 | Item | Status | Notes |
 |---|---|---|

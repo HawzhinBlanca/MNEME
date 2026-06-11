@@ -50,8 +50,10 @@ error ≤ δ+margin; beacon binding re-derivable offline. Proof sketch:
 ### CR-6 — Distortion bound + cert wire ✅ 2026-06-11
 Distortion proof sketch in [`docs/research/JL_DISTORTION_BOUND.md`](research/JL_DISTORTION_BOUND.md).
 `RetrievalProofLevel::CompleteTopK`, receipt field 8, `verify-cert` offline path, and
-`complete_knn_cert_v1` round-trip. **Parked:** `SemanticIndex::recall` wiring + cross-impl vector
-(see `docs/HUMAN_TASKS.md`).
+`complete_knn_cert_v1` round-trip. **Store wiring landed** (PR #24 @ `31a54b0`):
+`SemanticIndex::recall_receipt_zkann(CompleteTopK)`, `Store::issue_cognition_certificate_v1`,
+`mneme certify --level complete-topk`, and Appendix B `cognition_cert_complete_topk.cbor`
+crossref vector.
 
 ### CR-7 — Honest compression + sequencing ✅ 2026-06-11 (synthetic gate)
 Reproducible `|F|/n` benchmark on synthetic cubes (`complete_knn_compression` test + CSV stderr).
