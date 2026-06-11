@@ -36,11 +36,11 @@ explicit `not external P3 proof` boundaries and must not weaken fail-closed defa
 | Scaffold | Status @ `3b44142` | Notes |
 |---|---|---|
 | OSS release docs | **Landed** | Root `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md`; tag/release decision still human-gated |
-| Convergence local smoke | Not committed | Same-host merge digest compare; distinct-host still needs `MNEME_SECOND_HOST` |
-| KMS/HSM conformance harness | Not committed | Local vault round-trip; live endpoint proof still operator-gated |
-| TEE attestation policy gate | Not committed | Fail-closed policy over placeholder reports; live vendor quotes human-gated |
-| Formal obligations scan | Not committed | TCB guard self-test + budget scan; Lean proof human-gated |
-| `validation-lane.sh p3-local` | Not committed | Aggregate of the above local gates |
+| Convergence local smoke | **Landed** | `scripts/ci/convergence-two-host.sh --local-smoke`; distinct-host still needs `MNEME_SECOND_HOST` |
+| KMS/HSM conformance harness | **Landed** | `scripts/kms/conformance-local.sh` local vault round-trip; live endpoint proof still operator-gated |
+| TEE attestation policy gate | **Landed** | `scripts/ci/attestation-policy-local.sh` fail-closed parser; live vendor quotes human-gated |
+| Formal obligations scan | **Landed** | `scripts/ci/formal-obligations-local.sh` TCB guard + budget inventory; Lean proof human-gated |
+| `validation-lane.sh p3-local` | **Landed** | Aggregate local gates — see `docs/P3_LOCAL_SCAFFOLDS.md` |
 
 Do not mark these done until the scripts/docs exist and local gates pass.
 

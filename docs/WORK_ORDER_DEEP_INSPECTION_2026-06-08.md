@@ -197,31 +197,23 @@ tests/tamper/determinism/cross-impl) stays green after each change.
 - **L2 two-host CONVERGENCE proof:** A1 already proves cross-host *root* determinism (macOS/arm64 ↔
   Windows/x86_64, `XHOST_DETERMINISM_PROOF.md`). The gap is that the determinism scripts run only
   single-node `foundation-gate`; the **CRDT merge/anti-entropy** path is never run cross-host and
-  convergence is asserted on roots, not the object SET. `scripts/ci/convergence-two-host.sh` now
-  compares deterministic object-set digests after merge convergence, supports same-host
-  `--local-smoke`, and fails closed under `MNEME_STRICT_CROSS_HOST=1` unless
-  `MNEME_SECOND_HOST` is set. The real proof still needs a distinct physical host.
+  convergence is asserted on roots, not the object SET. `scripts/ci/convergence-two-host.sh`
+  supports same-host `--local-smoke` (CRDT merge + two-peer sync tests) and an optional
+  `MNEME_SECOND_HOST` SSH gate. The real proof still needs a distinct physical host.
 - **Real KMS/HSM adapter:** AWS+GCP+PKCS#11 envelope, two-tier KEK rotation, conformance harness.
-  `mneme_crypto::run_key_vault_conformance` and `scripts/kms/conformance-local.sh` now provide
-  the no-secret adapter contract scaffold, including same-id/different-key conflict rejection.
+  `scripts/kms/conformance-local.sh` provides the no-secret `EnvelopeKeyVault` round-trip scaffold.
   Live AWS/GCP/PKCS#11 proof and two-tier KEK rotation remain external-endpoint work.
 - **TEE attestation:** off by default, Nitro first (COSE/CBOR, simplest single root), then SGX-DCAP /
   SEV-SNP; a frozen `AcceptedReportPolicy` (pinned root, measurement allowlist, nonce/freshness).
-  `mneme-attest` now has `verify_accepted_report_policy` and
-  `scripts/ci/attestation-policy-local.sh` for local fail-closed policy checks over already-verified
-  claims; real vendor quote verification and hardware evidence remain external.
-- **Formal methods:** `docs/FORMAL_METHODS_SCAFFOLD.md` and
-  `scripts/ci/formal-obligations-local.sh` now inventory the local proof-obligation scaffold: TCB
-  guard self-test, current TCB guard scan, TCB line-budget test, and honesty-doc boundary test.
-  Real Lean/F*/Kani/Bolero proof artifacts remain human-gated.
+  `scripts/ci/attestation-policy-local.sh` runs fail-closed PEM/DER parser tests and documents the
+  policy placeholder in `docs/P3_LOCAL_SCAFFOLDS.md`; real vendor quote verification and hardware
+  evidence remain external.
+- **Formal methods:** `scripts/ci/formal-obligations-local.sh` inventories the local proof-obligation
+  scaffold: TCB guard, line-budget test, and INVARIANT/PROOF-OBLIGATION comment markers. Real
+  Lean/F*/Kani/Bolero proof artifacts remain human-gated.
 - **P3 local aggregate gate:** `docs/P3_LOCAL_SCAFFOLDS.md` and
   `scripts/ci/validation-lane.sh p3-local` run the no-secret convergence, KMS/HSM, TEE policy, and
   formal-obligation scaffolds together while preserving the human-gated proof boundaries.
-  `scripts/ci/p3-local-watch-history-summary.sh` validates retained watch history rows and emits
-  the recent pass/fail streak for hourly reports. `scripts/ci/p3-local-hourly-report.sh` reruns
-  the local lane and writes a durable local-only `hourly-report.json` artifact, retained snapshots,
-  and compact `hourly-report-index.json` with retained `reports` plus `latest_report_sha256`;
-  `scripts/ci/p3-local-hourly-report-verify.sh` verifies that saved report without rerunning the lane.
 - **OSS release:** LICENSE (WO-8), `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, and
   `POSITIONING.md` are present with guarded honesty strings. Remaining release actions are human
   content review, merge/release decision, and tag.
@@ -260,8 +252,8 @@ documented in the readiness review. Cross-reference: `docs/REMAINING_ITEMS.md`, 
 | WO-18 | DONE | Tool failures return `isError:true` + honesty footer; content/query size caps; idempotent tool-writer derivation; `mneme-crypto::operator_seed` seals/migrates `keys/operator_seed.sealed` under `MNEME_KMS_MASTER_KEY_HEX`; round-trip/tamper/wrong-master tests + CLI init fail-closed + frontend custody invariant |
 | WO-19 | DONE | `mneme forget --emit-proof`; MCP `memory.forget_proof` (full ForgetProof CBOR + signed-root fields, `isError:true` + honesty footer on failures); mnemed HTTP `DELETE /v1/forget-proof/{namespace}/{name}`; mnemed Unix `ForgetProof`; smoke: `mcp_forget_proof_tool_returns_verifiable_cbor_and_signed_root_fields`, `stdio_forget_proof_returns_verifiable_cbor_and_signed_root_fields`, `mcp_forget_proof_failure_returns_is_error_with_honesty_footer` |
 | WO-20 | DONE | `mneme.audit` tracing events on verify_recall rejection, promote, forget, and mnemed sync peer drops; daemon client/server hooks wired and dead store stub removed |
-| P3 OSS docs | NOT-SHIPPED | Planned: root `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md` + honesty-doc guards. No files on branch @ `3b44142`; tracked in `docs/HUMAN_TASKS.md`. |
-| P3 local scaffolds (aggregate) | NOT-SHIPPED | Planned research/scaffold only: convergence-two-host local smoke, KMS/HSM conformance harness, TEE attestation policy gate, formal-obligations scan, `validation-lane.sh p3-local` aggregate. Spec sketched in prior session notes; **no scripts or docs committed** on branch @ `3b44142`. Human-gated external proofs unchanged. |
+| P3 OSS docs | **Landed** | Root `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md` @ master merge |
+| P3 local scaffolds (aggregate) | SCAFFOLD-LANDED | Local substitutes only: `convergence-two-host.sh --local-smoke`, `kms/conformance-local.sh`, `attestation-policy-local.sh`, `formal-obligations-local.sh`, `validation-lane.sh p3-local`, `docs/P3_LOCAL_SCAFFOLDS.md`. Human-gated external KMS/TEE/SSH/Lean proofs unchanged. |
 | P0 gate | GREEN | `scripts/ci/validation-lane.sh quick` after all P0 fixes |
 | P1/P2 gate | GREEN | `scripts/ci/validation-lane.sh quick` + `tamper` after WO-9..WO-20 feasible slice |
 | P1/P2 closeout | SOFTWARE-COMPLETE | WO-1..WO-20 done; `cargo test -p mnemed` 299/299; stale `source_invariants` refs refreshed after `decode_hex32` + `load_content_addressed_objects` refactor (no symbol restore needed) |

@@ -18,6 +18,7 @@ pub fn verify_root(
         hlc_max: root.hlc_max,
         prev_root: root.prev_root,
     };
+    // INVARIANT: Preimage hash must exactly match the recomputed preimage struct hash.
     if bound.hash() != root.preimage_hash {
         return Err(MnemeError::RootSigInvalid);
     }
@@ -32,7 +33,9 @@ pub fn verify_root(
     if !verified {
         return Err(MnemeError::RootSigInvalid);
     }
+    // PROOF-OBLIGATION: Verify chain succession (prev_root matches previous root's signature).
     verify_root_chain(root, previous)?;
+    // INVARIANT: Replay gate check (last_seen_hlc <= root.hlc_max) to close rollback vector.
     check_replay(root, trust.last_seen_hlc)?;
     Ok(())
 }
