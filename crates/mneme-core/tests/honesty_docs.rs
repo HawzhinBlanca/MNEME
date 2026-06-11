@@ -101,11 +101,16 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
 
     for phrase in [
         "validation_lane_choices()",
+        "validation_lane_usage()",
         "local IFS='|'",
         "echo \"${VALIDATION_LANES[*]}\"",
         "if [[ \"${1:-}\" == \"--list\" ]]",
         "validation_lane_choices",
         "exit 0",
+        "if [[ \"${1:-}\" == \"--help\" || \"${1:-}\" == \"-h\" ]]",
+        "validation_lane_usage",
+        "validation_lane_is_known()",
+        "if [[ \"$LANE\" != \"full-preflight\" ]]",
         "echo \"Unknown lane: $LANE (expected $(validation_lane_choices))\" >&2",
     ] {
         assert!(
@@ -120,7 +125,13 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
         &[
             "if [[ \"${1:-}\" == \"--list\" ]]",
             "exit 0",
+            "if [[ \"${1:-}\" == \"--help\" || \"${1:-}\" == \"-h\" ]]",
+            "validation_lane_usage",
+            "exit 0",
             "LANE=\"${1:-quick}\"",
+            "if ! validation_lane_is_known \"$LANE\"",
+            "exit 2",
+            "if [[ \"$LANE\" != \"full-preflight\" ]]",
             "mneme_ci_init \"$ROOT\" \"$LANE\"",
         ],
     );
@@ -128,6 +139,10 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
     assert!(
         claude.contains("scripts/ci/validation-lane.sh --list"),
         "CLAUDE validation ladder must document the non-executing lane list mode"
+    );
+    assert!(
+        claude.contains("scripts/ci/validation-lane.sh --help"),
+        "CLAUDE validation ladder must document the non-executing lane help mode"
     );
 }
 
@@ -326,12 +341,16 @@ fn full_preflight_smoke_preserves_executable_contract() {
         std::fs::read_to_string(smoke_path).expect("full-preflight smoke script must exist");
 
     for phrase in [
-        "bash scripts/ci/validation-lane.sh full-preflight",
+        "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-full-preflight.XXXXXX\")\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh full-preflight)\"",
         "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism",
         "validation-lane (full-preflight): heavy checks are NOT executed by this lane.",
         "validation-lane (full-preflight): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host).",
         "validation-lane (full-preflight): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host.",
         "validation-lane (full-preflight): OK",
+        "if [[ -e \"$sentinel_target\" ]]",
+        "full-preflight-smoke: full-preflight created target dir",
         "full-preflight-smoke: OK",
     ] {
         assert!(
@@ -350,10 +369,14 @@ fn unknown_lane_smoke_preserves_executable_contract() {
     let smoke = std::fs::read_to_string(smoke_path).expect("unknown-lane smoke script must exist");
 
     for phrase in [
-        "bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
+        "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-unknown.XXXXXX\")\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
         "status=$?",
         "require_exit_status \"$label\" \"$status\" \"2\" \"$output\"",
         "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|full-preflight|full)",
+        "if [[ -e \"$sentinel_target\" ]]",
+        "validation-lane-unknown-smoke: unknown lane created target dir",
         "validation-lane-unknown-smoke: OK",
     ] {
         assert!(
@@ -364,13 +387,103 @@ fn unknown_lane_smoke_preserves_executable_contract() {
 }
 
 #[test]
+fn validation_lane_help_smoke_preserves_executable_contract() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/validation-lane-help-smoke.sh"),
+        "validation contract smoke must run the validation-lane --help smoke"
+    );
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-help-smoke.sh"
+    );
+    let smoke = std::fs::read_to_string(smoke_path).expect("validation-lane help smoke must exist");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-help.XXXXXX\")\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "short_sentinel_target=\"$scratch/short-cargo-target\"",
+        "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --help)\"",
+        "short_output=\"$(CARGO_TARGET_DIR=\"$short_sentinel_target\" bash scripts/ci/validation-lane.sh -h)\"",
+        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>",
+        "       scripts/ci/validation-lane.sh --list",
+        "       scripts/ci/validation-lane.sh --help",
+        "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
+        "require_exact_output \"$label\" \"$short_output\" \"$expected_output\"",
+        "require_line_count \"$label\" \"$output\" \"3\"",
+        "require_line_count \"$label\" \"$short_output\" \"3\"",
+        "if [[ -e \"$sentinel_target\" ]]",
+        "if [[ -e \"$short_sentinel_target\" ]]",
+        "validation-lane-help-smoke: --help created target dir",
+        "validation-lane-help-smoke: -h created target dir",
+        "validation-lane-help-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation-lane help smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_lane_list_smoke_preserves_executable_contract() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/validation-lane-list-smoke.sh"),
+        "validation contract smoke must run the validation-lane --list smoke"
+    );
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-list-smoke.sh"
+    );
+    let smoke = std::fs::read_to_string(smoke_path).expect("validation-lane list smoke must exist");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-list.XXXXXX\")\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\"",
+        "expected_output=\"quick|crypto|tamper|merge|determinism|full-preflight|full\"",
+        "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
+        "require_line_count \"$label\" \"$output\" \"1\"",
+        "if [[ -e \"$sentinel_target\" ]]",
+        "validation-lane-list-smoke: --list created target dir",
+        "validation-lane-list-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation-lane list smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn validation_smoke_scripts_share_assertion_helpers() {
     let full_preflight_smoke = include_str!("../../../scripts/ci/full-preflight-smoke.sh");
     let unknown_lane_smoke = include_str!("../../../scripts/ci/validation-lane-unknown-smoke.sh");
+    let help_smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-help-smoke.sh"
+    );
+    let help_smoke =
+        std::fs::read_to_string(help_smoke_path).expect("validation-lane help smoke must exist");
+    let list_smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-list-smoke.sh"
+    );
+    let list_smoke =
+        std::fs::read_to_string(list_smoke_path).expect("validation-lane list smoke must exist");
 
     for (name, smoke) in [
         ("full-preflight-smoke", full_preflight_smoke),
         ("validation-lane-unknown-smoke", unknown_lane_smoke),
+        ("validation-lane-help-smoke", help_smoke.as_str()),
+        ("validation-lane-list-smoke", list_smoke.as_str()),
     ] {
         assert!(
             smoke.contains("source scripts/ci/smoke-assertions.sh"),
@@ -451,6 +564,8 @@ fn validation_contract_smoke_enforces_exact_component_output() {
         "source scripts/ci/smoke-assertions.sh",
         "expected_output=\"$(cat <<'EOF'",
         "smoke-assertions-smoke: OK",
+        "validation-lane-list-smoke: OK",
+        "validation-lane-help-smoke: OK",
         "full-preflight-smoke: OK",
         "validation-lane-unknown-smoke: OK",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
@@ -496,6 +611,8 @@ fn validation_lane_quick_runs_aggregate_validation_contract_smoke() {
         std::fs::read_to_string(smoke_path).expect("validation contract smoke script must exist");
 
     for phrase in [
+        "bash scripts/ci/validation-lane-list-smoke.sh",
+        "bash scripts/ci/validation-lane-help-smoke.sh",
         "bash scripts/ci/full-preflight-smoke.sh",
         "bash scripts/ci/validation-lane-unknown-smoke.sh",
         "validation-contract-smoke: OK",

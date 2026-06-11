@@ -20,13 +20,39 @@ validation_lane_choices() {
   echo "${VALIDATION_LANES[*]}"
 }
 
+validation_lane_usage() {
+  echo "Usage: scripts/ci/validation-lane.sh <$(validation_lane_choices)>"
+  echo "       scripts/ci/validation-lane.sh --list"
+  echo "       scripts/ci/validation-lane.sh --help"
+}
+
+validation_lane_is_known() {
+  local candidate="$1"
+  local lane
+  for lane in "${VALIDATION_LANES[@]}"; do
+    if [[ "$candidate" == "$lane" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ "${1:-}" == "--list" ]]; then
   validation_lane_choices
   exit 0
 fi
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  validation_lane_usage
+  exit 0
+fi
+
 LANE="${1:-quick}"
-mneme_ci_init "$ROOT" "$LANE"
+
+if ! validation_lane_is_known "$LANE"; then
+  echo "Unknown lane: $LANE (expected $(validation_lane_choices))" >&2
+  exit 2
+fi
 
 fail_closed() {
   local suite="$1"
@@ -54,6 +80,10 @@ run_full_sublanes() {
     bash "$0" "$sublane"
   done
 }
+
+if [[ "$LANE" != "full-preflight" ]]; then
+  mneme_ci_init "$ROOT" "$LANE"
+fi
 
 case "$LANE" in
   quick)
