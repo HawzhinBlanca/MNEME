@@ -13,6 +13,11 @@ mneme-dag.workspace = true
 mneme-crypto.workspace = true
 mneme-forget.workspace = true
 blake3.workspace = true
+curve25519-dalek = { version = "4.1.3", default-features = false, features = ["alloc", "precomputed-tables"], optional = true }
+
+[features]
+default = []
+convergence_cert = ["dep:curve25519-dalek"]
 
 [dev-dependencies]
 proptest = "1.6"
