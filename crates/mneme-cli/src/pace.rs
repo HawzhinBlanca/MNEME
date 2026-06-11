@@ -1,9 +1,9 @@
 //! VCP A1 pace log CLI (`mneme pace calibrate|run|verify`).
 
 use mneme_pace::{
-    PACE_ALG_BLAKE3_SEQUENTIAL, PACE_HONESTY_BOUNDARY, PACE_T5_MIN_INTERVAL_ONLY, PACE_T7_NO_PQ,
-    PaceError, append_segment, calibrate_blake3, create_log, load_calibration, load_log,
-    save_calibration, save_log, verify_log,
+    PACE_HONESTY_BOUNDARY, PACE_T5_MIN_INTERVAL_ONLY, PACE_T7_NO_PQ, PaceError, append_segment,
+    calibrate_blake3, create_log, load_calibration, load_log, save_calibration, save_log,
+    verify_log,
 };
 use std::path::Path;
 
