@@ -40,22 +40,24 @@ Adversary must **fail closed** on: (a) omit a branch from the cover; (b) inflate
 over-prune; (c) understate `τ`; (d) return a non-member; (e) forge a pivot.
 **Accept:** ≥150 generated cases, 100% rejected with typed errors (mirror `validation-lane tamper`).
 
-### CR-5 — JL-projected variant  **[research frontier]**
-Beacon-seeded projection `Φ: R^D→R^m` (commit beacon round + seed). Implement **sound-conservative**
-(`> (1+ε)·τ`, never wrongly prunes) AND **probabilistic** (raw bound, error ≤ δ) modes.
-**Accept:** conservative never wrongly prunes (property test vs exact); probabilistic empirical
-error ≤ δ; beacon value bound + re-derivable offline.
+### CR-5 — JL-projected variant ✅ 2026-06-11
+Beacon-seeded projection `Φ: R^D→R^m` (`jl_projection.rs`; commit via `JlProjector::commitment()`).
+**Sound-conservative** (`lb_Φ > (1+ε)·√τ_orig`) AND **probabilistic** (raw projected bound) modes.
+**Accept:** conservative never wrongly prunes (proptest + 1000 queries); probabilistic empirical
+error ≤ δ+margin; beacon binding re-derivable offline. Proof sketch:
+[`docs/research/JL_DISTORTION_BOUND.md`](research/JL_DISTORTION_BOUND.md).
 
-### CR-6 — Certificate integration
-Add `RetrievalProofLevel::CompleteTopK` (`mneme-core`); emit the proof in `cognition_cert`; extend
-`mneme verify-cert` with the offline complete-k-NN check.
-**Accept:** `certify`/`verify-cert` round-trip green; cert byte-identical ×2; cross-impl vector added.
+### CR-6 — Distortion bound + cert wire ✅ 2026-06-11
+Distortion proof sketch in [`docs/research/JL_DISTORTION_BOUND.md`](research/JL_DISTORTION_BOUND.md).
+`RetrievalProofLevel::CompleteTopK`, receipt field 8, `verify-cert` offline path, and
+`complete_knn_cert_v1` round-trip. **Parked:** `SemanticIndex::recall` wiring + cross-impl vector
+(see `docs/HUMAN_TASKS.md`).
 
-### CR-7 — Honest compression curve
-Benchmark `|F|/n` vs dimension `D`, projected dim `m`, `ε` on real embeddings. Publish the regime
-where it works **and where it doesn't**.
-**Accept:** reproducible plot + one-paragraph honest disposition in `REMAINING_ITEMS.md` (modes,
-proven properties, dimension ceiling).
+### CR-7 — Honest compression + sequencing ✅ 2026-06-11 (synthetic gate)
+Reproducible `|F|/n` benchmark on synthetic cubes (`complete_knn_compression` test + CSV stderr).
+Disposition in [`REMAINING_ITEMS.md`](REMAINING_ITEMS.md) and
+[`docs/benchmarks/COMPLETE_KNN_COMPRESSION.md`](benchmarks/COMPLETE_KNN_COMPRESSION.md).
+**Not done:** real 768–1536-d embedding sweep (needs operator embedding corpus).
 
 ---
 

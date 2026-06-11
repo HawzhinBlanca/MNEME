@@ -170,6 +170,8 @@ enum CognitionCertFailure {
     V2DraftAuditBeaconSpotCheckFailed,
     #[cfg(feature = "context_gate")]
     V2StrictAuditBeaconSpotCheckFailed,
+    CompleteKnnMissing,
+    CompleteKnnBindingMismatch,
 }
 
 fn cognition_cert_failure_to_mneme(failure: CognitionCertFailure) -> MnemeError {
@@ -182,7 +184,9 @@ fn cognition_cert_failure_to_mneme(failure: CognitionCertFailure) -> MnemeError 
         CognitionCertFailure::V1WireDecode
         | CognitionCertFailure::V1AsOfSequenceMismatch
         | CognitionCertFailure::V1ZkannLevelMismatch
-        | CognitionCertFailure::V1ZkannMissingForLevel => MnemeError::CertificateInvalid,
+        | CognitionCertFailure::V1ZkannMissingForLevel
+        | CognitionCertFailure::CompleteKnnMissing
+        | CognitionCertFailure::CompleteKnnBindingMismatch => MnemeError::CertificateInvalid,
         #[cfg(feature = "context_gate")]
         CognitionCertFailure::UnsupportedV2DraftVersion { version } => {
             MnemeError::UnsupportedVersion { got: version }
@@ -506,12 +510,16 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
                 CognitionCertFailure::V1ZkannLevelMismatch,
             ));
         }
-        None if wire.level != RetrievalProofLevel::ExactDominance => {
+        None if wire.level == RetrievalProofLevel::HnswAuditOnDemand => {
             return Err(cognition_cert_error(
                 CognitionCertFailure::V1ZkannMissingForLevel,
             ));
         }
         _ => {}
+    }
+    if wire.level == RetrievalProofLevel::CompleteTopK {
+        verify_complete_topk_certificate(&wire.receipt)?;
+        return Ok(root);
     }
     let committed_leaf_count = wire.receipt.verification_object.candidates.len();
     verify_semantic_receipt_vo_zkann(&wire.receipt, proc, committed_leaf_count)?;
@@ -527,6 +535,29 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
         .map_err(|_| cognition_cert_error(CognitionCertFailure::V1AuditBeaconSpotCheckFailed))?;
     }
     Ok(root)
+}
+
+fn verify_complete_topk_certificate(receipt: &SemanticRecallReceipt) -> Result<(), MnemeError> {
+    let zkann = receipt
+        .zkann
+        .as_ref()
+        .ok_or_else(|| cognition_cert_error(CognitionCertFailure::V1ZkannMissingForLevel))?;
+    if zkann.level != RetrievalProofLevel::CompleteTopK {
+        return Err(cognition_cert_error(
+            CognitionCertFailure::V1ZkannLevelMismatch,
+        ));
+    }
+    let raw = receipt
+        .complete_knn
+        .as_ref()
+        .ok_or_else(|| cognition_cert_error(CognitionCertFailure::CompleteKnnMissing))?;
+    let att = crate::complete_knn_cert::decode_complete_knn_attachment(&raw.proof_bytes)?;
+    if att.commitment != raw.commitment || att.query != raw.query || att.k != raw.k {
+        return Err(cognition_cert_error(
+            CognitionCertFailure::CompleteKnnBindingMismatch,
+        ));
+    }
+    att.verify_offline()
 }
 
 /// Offline verification for the Phase II draft certificate.
@@ -743,7 +774,7 @@ fn stored_root_to_root(stored: &StoredRoot) -> Result<Root, MnemeError> {
     })
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct CognitionCertWire {
     version: u16,
     level: RetrievalProofLevel,
@@ -754,7 +785,7 @@ struct CognitionCertWire {
 }
 
 #[cfg(feature = "context_gate")]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 struct CognitionCertWireV2Draft {
     version: u16,
     level: RetrievalProofLevel,
@@ -1020,7 +1051,13 @@ impl DcborDecode for ContextAttestationDraft {
 fn encode_semantic_receipt(receipt: &SemanticRecallReceipt) -> Result<Vec<u8>, MnemeError> {
     let vo = &receipt.verification_object;
     let mut enc = Encoder::new();
-    let map_len = if receipt.zkann.is_some() { 7 } else { 6 };
+    let mut map_len = 6u64;
+    if receipt.zkann.is_some() {
+        map_len += 1;
+    }
+    if receipt.complete_knn.is_some() {
+        map_len += 1;
+    }
     enc.begin_map(map_len)?;
     enc.encode_unsigned(1)?;
     enc.encode_bytes(&receipt.root_bound)?;
@@ -1042,7 +1079,88 @@ fn encode_semantic_receipt(receipt: &SemanticRecallReceipt) -> Result<Vec<u8>, M
         enc.encode_unsigned(2)?;
         encode_object_id_list(&mut enc, &z.visited_order)?;
     }
+    if let Some(ck) = &receipt.complete_knn {
+        enc.encode_unsigned(8)?;
+        enc.begin_map(4)?;
+        enc.encode_unsigned(1)?;
+        enc.encode_bytes(&ck.commitment)?;
+        enc.encode_unsigned(2)?;
+        encode_f64_coords(&mut enc, &ck.query)?;
+        enc.encode_unsigned(3)?;
+        enc.encode_unsigned(u64::from(ck.k))?;
+        enc.encode_unsigned(4)?;
+        enc.encode_bytes(&ck.proof_bytes)?;
+    }
     Ok(enc.finish())
+}
+
+fn encode_f64_coords(enc: &mut Encoder, values: &[f64]) -> Result<(), MnemeError> {
+    enc.begin_array(values.len() as u64)?;
+    for v in values {
+        enc.encode_unsigned(v.to_bits())?;
+    }
+    Ok(())
+}
+
+fn decode_f64_coords(value: &CborValue) -> Result<Vec<f64>, MnemeError> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| cognition_cert_error(CognitionCertFailure::ParseBytesInvalid))?;
+    arr.iter()
+        .map(|v| {
+            let bits = parse_u64(v)?;
+            let f = f64::from_bits(bits);
+            if f.is_finite() {
+                Ok(f)
+            } else {
+                Err(cognition_cert_error(
+                    CognitionCertFailure::ParseBytesInvalid,
+                ))
+            }
+        })
+        .collect()
+}
+
+fn decode_complete_knn_receipt(
+    value: &CborValue,
+) -> Result<crate::receipt::CompleteKnnAttachment, MnemeError> {
+    let map = value
+        .as_map()
+        .ok_or_else(|| cognition_cert_error(CognitionCertFailure::ParseBytesInvalid))?;
+    let mut commitment = None;
+    let mut query = None;
+    let mut k = None;
+    let mut proof_bytes = None;
+    for (key, value) in map {
+        match parse_u64_field_key(key)? {
+            1 => commitment = Some(parse_fixed32(value)?),
+            2 => query = Some(decode_f64_coords(value)?),
+            3 => {
+                k =
+                    Some(u32::try_from(parse_u64(value)?).map_err(|_| {
+                        cognition_cert_error(CognitionCertFailure::ParseU16OutOfRange)
+                    })?);
+            }
+            4 => proof_bytes = Some(parse_bytes(value)?),
+            _ => {
+                return Err(cognition_cert_error(
+                    CognitionCertFailure::SemanticReceiptUnknownField { field: 0 },
+                ));
+            }
+        }
+    }
+    Ok(crate::receipt::CompleteKnnAttachment {
+        commitment: commitment.ok_or_else(|| {
+            cognition_cert_error(CognitionCertFailure::SemanticReceiptRootBoundMissing)
+        })?,
+        query: query.ok_or_else(|| {
+            cognition_cert_error(CognitionCertFailure::SemanticReceiptQueryMissing)
+        })?,
+        k: k.ok_or_else(|| cognition_cert_error(CognitionCertFailure::ParseU16OutOfRange))?,
+        proof_bytes: proof_bytes.ok_or_else(|| {
+            cognition_cert_error(CognitionCertFailure::SemanticReceiptVoBodyMissing)
+        })?,
+    })
 }
 
 fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeError> {
@@ -1055,6 +1173,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
     let mut result_ids = None;
     let mut vo_body = None;
     let mut zkann = None;
+    let mut complete_knn = None;
     for (key, value) in map {
         let field = parse_u64_field_key(&key)?;
         match field {
@@ -1065,6 +1184,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
             5 => result_ids = Some(decode_result_ids(&value)?),
             6 => vo_body = Some(decode_vo_body(&value)?),
             7 => zkann = Some(decode_zkann(&value)?),
+            8 => complete_knn = Some(decode_complete_knn_receipt(&value)?),
             _ => {
                 let field_id = u16::try_from(field).unwrap_or(u16::MAX);
                 return Err(cognition_receipt_unknown_field_error(field_id));
@@ -1096,6 +1216,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
         },
         zk_retrieval: None,
         zkann,
+        complete_knn,
         provenance: None,
     })
 }
@@ -1150,6 +1271,7 @@ fn level_tag(level: RetrievalProofLevel) -> u64 {
     match level {
         RetrievalProofLevel::ExactDominance => 0,
         RetrievalProofLevel::HnswAuditOnDemand => 1,
+        RetrievalProofLevel::CompleteTopK => 2,
     }
 }
 
@@ -1158,6 +1280,7 @@ fn parse_level(value: &CborValue) -> Result<RetrievalProofLevel, MnemeError> {
     match n {
         0 => Ok(RetrievalProofLevel::ExactDominance),
         1 => Ok(RetrievalProofLevel::HnswAuditOnDemand),
+        2 => Ok(RetrievalProofLevel::CompleteTopK),
         _ => Err(cognition_cert_error(
             CognitionCertFailure::ParseLevelUnknownTag,
         )),

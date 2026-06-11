@@ -14,6 +14,7 @@ mod beacon_spot_check;
 mod cognition_cert;
 mod commit;
 mod complete_knn;
+mod complete_knn_cert;
 #[cfg(feature = "context_gate")]
 mod context_gate;
 mod distance;
@@ -49,9 +50,14 @@ mod piop_research;
 
 pub use commit::{SemanticMerkleTree, empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 pub use complete_knn::{
-    AuthenticatedBallTree, BallTree, COMPLETE_KNN_HONESTY, CompleteKnnProof, ExcludedLeaf,
-    FrontierNode, ReturnedPoint, brute_force_knn, knn_with_pruning, prove_complete_knn,
-    squared_euclidean, verify_complete_knn, verify_complete_knn_cost_bounded,
+    AuthenticatedBallTree, BallTree, BeaconSeed, COMPLETE_KNN_HONESTY, CompleteKnnProof,
+    ExcludedLeaf, FrontierNode, JlProjector, JlPruningMode, ReturnedPoint, brute_force_knn,
+    build_projected_tree, conservative_matches_exact, exact_pruning_matches_brute,
+    frontier_fraction, jl_conservative_frontier_fraction, knn_with_jl_pruning, knn_with_pruning,
+    prove_complete_knn, squared_euclidean, verify_complete_knn, verify_complete_knn_cost_bounded,
+};
+pub use complete_knn_cert::{
+    CompleteKnnCertAttachment, decode_complete_knn_attachment, encode_complete_knn_attachment,
 };
 pub use error::IndexError;
 pub use key_index::KeyIndex;
@@ -65,7 +71,7 @@ pub use provenance::{
 };
 pub use receipt::SemanticRecallReceipt;
 pub use receipt::ZkRetrievalAttachment;
-pub use receipt::{ProvenanceAttestation, ZkannAttachment};
+pub use receipt::{CompleteKnnAttachment, ProvenanceAttestation, ZkannAttachment};
 pub use semantic::SemanticIndex;
 pub use semantic_load::{load_semantic_commit, load_store_embeddings};
 pub use verify::{

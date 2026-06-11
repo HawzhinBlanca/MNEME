@@ -1,6 +1,6 @@
 # MNEME — Remaining Items (honest disposition)
 
-Last updated: 2026-06-08 (P0–P2 closeout + PR #8 CI fix on `harden/differential-adversarial` @ `3b44142`).
+Last updated: 2026-06-11 (CR-5..CR-7 complete-retrieval frontier on `cursor/complete-retrieval-cr5-7`).
 This tracks items beyond the certified single-host v0 core. Each entry states what is
 in-repo, what is gated, and *why* it cannot be marked done without an external input.
 
@@ -78,3 +78,34 @@ tasks block merge readiness on this branch.
 Single-host v0 remains certified per `READINESS.md` §0. Cross-host determinism is proven
 as same-kernel dual-workspace + Docker linux/amd64 digest match + cross-runner CI — **not**
 yet on a distinct physical host with `MNEME_SECOND_HOST` until that secret is configured.
+
+## Complete k-NN / JL compression (CR-5..CR-7, 2026-06-11)
+
+**Shipped:** exact complete k-NN (CR-1..CR-4) plus beacon-seeded JL **conservative** pruning
+(prototype in `mneme-index::complete_knn::jl_projection`) with a proved no-wrong-prune ceiling
+([`docs/research/JL_DISTORTION_BOUND.md`](research/JL_DISTORTION_BOUND.md)). Reproducible synthetic
+compression gate: `cargo test -p mneme-index --test complete_knn_compression -- --nocapture`.
+
+**Honest disposition:** in raw high `D` (test gate: `D=128`), exact pruning does not compress
+(`|F|/n → 1`); JL conservative may help in moderate `D` on synthetic data but **does not**
+close the open problem of sublinear **and** sound pruning on production embedding manifolds
+(768–1536-d). Probabilistic JL mode is empirical-only (δ heuristic test, not a theorem on real
+embeddings). Offline `verify-cert` for `CompleteTopK` is landed; store `certify` issuance remains parked.
+
+## Provably-complete retrieval (CR-5..CR-7, 2026-06-11)
+
+Work order: [`docs/WORK_ORDER_COMPLETE_RETRIEVAL.md`](WORK_ORDER_COMPLETE_RETRIEVAL.md).
+CR-1..CR-4 (exact ball-tree + tamper suite) ships on PR #15 (`cursor/complete-retrieval-cr1-4`).
+
+**Delivered on CR-5..CR-7 branch**
+
+| Item | Status | Notes |
+|---|---|---|
+| CR-5 JL conservative mode | **Landed** | Beacon-seeded `Φ`, `(1+ε)`-inflated pruning bound; proptest proves conservative search == brute-force on low/moderate `m`. |
+| CR-5 JL probabilistic mode | **Scaffold** | Raw projected bound implemented; empirical `δ` gate **not** closed on 768–1536-dim embedding distributions — honest ceiling. |
+| CR-6 `CompleteTopK` level | **Landed** | `RetrievalProofLevel::CompleteTopK` (tag 2); receipt field 8; `verify-cert` offline complete-kNN check; cert byte-identical ×2 test. |
+| CR-6 store `certify` path | **Parked** | `Store::issue_cognition_certificate_v1` + `mneme certify --level complete-topk` fail closed (`SemanticNotImplemented`) until semantic index wires ball-tree issuance. |
+| CR-6 crossref vector | **Parked** | `wire_cert` parses tag 2; dedicated Appendix-B CBOR vector deferred until store issuance path exists. |
+| CR-7 compression curve | **Landed (honest)** | Reproducible `|F|/n` snapshot in [`docs/benchmarks/COMPLETE_KNN_COMPRESSION.md`](benchmarks/COMPLETE_KNN_COMPRESSION.md): exact pruning collapses to `|F|/n → 1` by D≥128 on uniform random points; JL conservative preserves exactness but does not beat the curse of dimensionality on this baseline. |
+
+**Dimension ceiling (§3 honesty, unchanged):** complete-kNN proves *retrieval completeness over committed geometry*, not semantic truth. In raw high-D embedding space, reverse-triangle bounds rarely prune; certificates stay *correct* but not *succinct*. JL conservative mode trades compression for a sound never-wrongly-prune guarantee; finding `(m, ε)` that is both sublinear and sound on production embedding manifolds remains the open research prize — an acceptable honest outcome, not hidden.

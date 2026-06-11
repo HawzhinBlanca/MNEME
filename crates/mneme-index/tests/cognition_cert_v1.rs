@@ -52,6 +52,7 @@ fn retrieval_level_tag(level: RetrievalProofLevel) -> u64 {
     match level {
         RetrievalProofLevel::ExactDominance => 0,
         RetrievalProofLevel::HnswAuditOnDemand => 1,
+        RetrievalProofLevel::CompleteTopK => 2,
     }
 }
 

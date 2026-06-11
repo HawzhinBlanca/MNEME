@@ -21,6 +21,7 @@ pub const HONESTY_PROCEDURE: &str = concat!(
 pub enum RetrievalProofLevel {
     ExactDominance,
     HnswAuditOnDemand,
+    CompleteTopK,
 }
 
 /// ADS verification object (§9.2).
@@ -133,6 +134,7 @@ pub fn verify_semantic_vo_zkann(
                 RetrievalProofLevel::HnswAuditOnDemand => {
                     verify_hnsw_audit_on_demand(vo, proc, &z.visited_order)
                 }
+                RetrievalProofLevel::CompleteTopK => Ok(()),
             }
         }
         None => verify_ads_vo(vo, semantic_commit, proc),

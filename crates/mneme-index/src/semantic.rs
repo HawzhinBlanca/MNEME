@@ -234,6 +234,9 @@ impl SemanticIndex {
             mneme_core::RetrievalProofLevel::HnswAuditOnDemand => {
                 self.search_deterministic_on_visited(proc, query)?
             }
+            mneme_core::RetrievalProofLevel::CompleteTopK => {
+                return Err(IndexError::SemanticNotImplemented);
+            }
         };
         let mut receipt = SemanticRecallReceipt::new(root_bound, self.semantic_commit(), vo);
         receipt.zkann = Some(ZkannAttachment {
