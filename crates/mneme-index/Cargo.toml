@@ -63,6 +63,7 @@ plonky2_prover = ["pedersen_schnorr_zk"]
 piop_research = []
 # Trick #1 online drand fetch (optional; offline path uses carried beacon bytes).
 beacon_online = ["dep:ureq", "dep:hex"]
+context_set_lock = ["pedersen_schnorr_zk"]
 
 [[test]]
 name = "semantic_zk_recall"
@@ -80,6 +81,15 @@ path = "tests/beacon_spot_check.rs"
 [[test]]
 name = "byzantine_inference"
 path = "tests/byzantine_inference.rs"
+
+[[test]]
+name = "context_set_lock"
+path = "tests/context_set_lock.rs"
+required-features = ["context_set_lock"]
+
+[[test]]
+name = "forget_absence"
+path = "tests/forget_absence.rs"
 
 [[test]]
 name = "zkann_exact_dominance"
