@@ -11,7 +11,7 @@ and update this file only when a genuinely human-gated item changes.
 
 | Task | Human input needed | Current in-repo substitute |
 |---|---|---|
-| Live LLM MCP loop | Provide `ANTHROPIC_API_KEY`, install `@anthropic-ai/sdk`, and set `MNEME_MCP_BIN` if the default binary is not used. | `scripts/ci/mcp-agent-sim.sh` and `e2e/mcp/sdk-client.test.mjs` cover deterministic and SDK-client paths without credentials. |
+| Live LLM MCP loop | Provide `ANTHROPIC_API_KEY`, install `@anthropic-ai/sdk`, and set `MNEME_MCP_BIN` if the default binary is not used. | DELIVERED 2026-06-11 — live loop proven (`e2e/mcp/live-agent.test.mjs`, pass 1/fail 0). No-credential substitutes still run in CI. |
 | SSH peer re-verification | Configure a distinct physical peer and CI secrets: `MNEME_SECOND_HOST` and `MNEME_DETERMINISM_SSH_KEY`. | Cross-runner determinism proof and dual-workspace checks remain the no-secret proof path; SSH is for continuous ops re-verification. |
 | Cloud KMS/HSM continuous proof | Provide a real `AWS_KMS_KEY_ID`, cloud credentials, or a GCP/PKCS#11 endpoint. | `EnvelopeKeyVault`, `scripts/kms/dek-from-aws.sh`, and the HSM/KMS adapter contract compile and document the seam. |
 
