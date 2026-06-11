@@ -329,6 +329,9 @@ impl Store {
             if let Some(peer_path) = peer_vault_path {
                 copy_peer_vault_keys(peer_snapshot, peer_path, &self.objects, &mut *self.vault)?;
             }
+            // VCP D2 / survivor-D T5: drop tombstone orphans so bilateral manifest-delta
+            // merge lands on identical object sets (not just matching key-index roots).
+            prune_to_converged_object_set(self)?;
             // Write only newly-merged object blobs with one directory fsync per shard
             // (§22 merge-transaction barrier — avoids O(merged) parent-dir fsyncs).
             let new_objects: Vec<([u8; 32], &[u8])> = self
@@ -391,4 +394,175 @@ fn copy_peer_vault_keys(
         }
     }
     Ok(())
+}
+
+/// Live object closure: MST winners, OR-set alternates (same logical-key hash), parents.
+fn converged_object_ids(
+    key_index: &mneme_smt::SparseMerkleTree,
+    key_to_object: &std::collections::HashMap<[u8; 32], [u8; 32]>,
+    object_keys: &std::collections::HashMap<[u8; 32], LogicalKey>,
+    objects: &std::collections::HashMap<[u8; 32], Vec<u8>>,
+) -> std::collections::HashSet<[u8; 32]> {
+    let mut keep = std::collections::HashSet::new();
+    for (key_hash, &winner) in key_to_object {
+        if key_index.is_tombstoned(key_hash) {
+            continue;
+        }
+        keep.insert(winner);
+        for (object_id, lk) in object_keys {
+            if lk.hash() == *key_hash {
+                keep.insert(*object_id);
+            }
+        }
+    }
+    let mut stack: Vec<[u8; 32]> = keep.iter().copied().collect();
+    while let Some(id) = stack.pop() {
+        let Some(bytes) = objects.get(&id) else {
+            continue;
+        };
+        let Ok(record) = from_bytes_strict::<ObjectRecord>(bytes) else {
+            continue;
+        };
+        for parent in &record.parent_ids {
+            if keep.insert(*parent) {
+                stack.push(*parent);
+            }
+        }
+    }
+    keep
+}
+
+fn prune_to_converged_object_set(store: &mut Store) -> Result<usize, MnemeError> {
+    let keep = converged_object_ids(
+        store.key_index.tree(),
+        store.key_to_object_ref(),
+        store.object_keys_ref(),
+        &store.objects,
+    );
+    let to_remove: Vec<[u8; 32]> = store
+        .objects
+        .keys()
+        .filter(|id| !keep.contains(*id))
+        .copied()
+        .collect();
+    if to_remove.is_empty() {
+        return Ok(0);
+    }
+    for id in &to_remove {
+        store.objects.remove(id);
+        store.object_keys.remove(id);
+        store.embeddings.remove(id);
+        layout::remove_object(&store.path, id)?;
+    }
+    let entries: Vec<(mneme_core::ObjectId, Vec<[u8; 32]>)> = store
+        .objects
+        .iter()
+        .filter_map(|(id, bytes)| {
+            from_bytes_strict::<ObjectRecord>(bytes)
+                .ok()
+                .map(|record| (mneme_core::ObjectId(*id), record.parent_ids))
+        })
+        .collect();
+    store.dag.rebuild_from(&entries)?;
+    Ok(to_remove.len())
+}
+
+#[cfg(test)]
+mod d2_object_set_convergence_tests {
+    use super::*;
+    use mneme_cap::agent_cap;
+    use mneme_core::{Draft, ForgetMode, ForgetTarget, MemoryKind};
+    use mneme_crypto::KeyPair;
+    use std::collections::HashSet;
+    use tempfile::tempdir;
+    fn test_cap(o: &KeyPair) -> mneme_cap::Capability {
+        agent_cap(o, o.public_key_bytes()).unwrap()
+    }
+    fn test_draft(ns: &str, name: &str, body: &[u8]) -> Draft {
+        Draft {
+            namespace: ns.into(),
+            logical_name: name.into(),
+            kind: MemoryKind::Episodic,
+            body: body.to_vec(),
+            parent_ids: vec![],
+            session: [0x01; 16],
+            trust_tier: None,
+            embedding: None,
+            valid_time_ms: None,
+        }
+    }
+    fn object_id_set(s: &Store) -> HashSet<[u8; 32]> {
+        s.export_sync_manifest().object_ids.into_iter().collect()
+    }
+    fn merge_both_ways(a: &mut Store, b: &mut Store) {
+        let mb = b.export_sync_manifest();
+        a.merge_from_manifest(&mb, b.export_objects(&a.missing_object_ids(&mb)))
+            .unwrap();
+        let ma = a.export_sync_manifest();
+        b.merge_from_manifest(&ma, a.export_objects(&b.missing_object_ids(&ma)))
+            .unwrap();
+    }
+    #[test]
+    fn manifest_delta_disjoint_keys_object_sets_converge() {
+        let op = KeyPair::from_seed([0xd2; 32]);
+        let cap = test_cap(&op);
+        let da = tempdir().unwrap();
+        let db = tempdir().unwrap();
+        let mut a = Store::create(da.path(), op.clone()).unwrap();
+        let mut b = Store::create(db.path(), op).unwrap();
+        a.trust_mut().authorized_writers.push(cap.subject);
+        b.trust_mut().authorized_writers.push(cap.subject);
+        a.remember(test_draft("peer", "only-a", b"alpha"), &cap)
+            .unwrap();
+        b.remember(test_draft("peer", "only-b", b"beta"), &cap)
+            .unwrap();
+        merge_both_ways(&mut a, &mut b);
+        assert_eq!(object_id_set(&a), object_id_set(&b));
+    }
+    #[test]
+    fn manifest_delta_conflicting_episodic_object_sets_converge_with_alts() {
+        let op = KeyPair::from_seed([0xd3; 32]);
+        let cap = test_cap(&op);
+        let da = tempdir().unwrap();
+        let db = tempdir().unwrap();
+        let mut a = Store::create(da.path(), op.clone()).unwrap();
+        let mut b = Store::create(db.path(), op).unwrap();
+        a.trust_mut().authorized_writers.push(cap.subject);
+        b.trust_mut().authorized_writers.push(cap.subject);
+        a.remember(test_draft("peer", "shared", b"from-A"), &cap)
+            .unwrap();
+        b.remember(test_draft("peer", "shared", b"from-B"), &cap)
+            .unwrap();
+        merge_both_ways(&mut a, &mut b);
+        assert_eq!(object_id_set(&a), object_id_set(&b));
+        assert_eq!(object_id_set(&a).len(), 2);
+    }
+    #[test]
+    fn manifest_delta_prunes_tombstone_orphans_and_converges() {
+        let op = KeyPair::from_seed([0xd4; 32]);
+        let cap = test_cap(&op);
+        let da = tempdir().unwrap();
+        let db = tempdir().unwrap();
+        let mut a = Store::create(da.path(), op.clone()).unwrap();
+        let mut b = Store::create(db.path(), op).unwrap();
+        a.trust_mut().authorized_writers.push(cap.subject);
+        b.trust_mut().authorized_writers.push(cap.subject);
+        a.remember(test_draft("peer", "forgotten", b"orphan-me"), &cap)
+            .unwrap();
+        a.forget(
+            ForgetTarget::LogicalKey(LogicalKey {
+                namespace: "peer".into(),
+                name: "forgotten".into(),
+            }),
+            &cap,
+            ForgetMode::Shred,
+        )
+        .unwrap();
+        assert_eq!(object_id_set(&a).len(), 1);
+        b.remember(test_draft("peer", "live", b"beta"), &cap)
+            .unwrap();
+        merge_both_ways(&mut a, &mut b);
+        assert_eq!(object_id_set(&a), object_id_set(&b));
+        assert_eq!(object_id_set(&a).len(), 1);
+    }
 }

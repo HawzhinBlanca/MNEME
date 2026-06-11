@@ -135,10 +135,19 @@ pub fn apply_peer_snapshot(
                     .get(&local_id)
                     .ok_or(MnemeError::ObjectTampered)?;
                 let winner = merge_object_versions(local_id, local_bytes, peer_id, peer_bytes)?;
+                let logical = peer
+                    .object_keys
+                    .get(&peer_id)
+                    .or_else(|| local_object_keys.get(&local_id))
+                    .or_else(|| local_object_keys.get(&peer_id))
+                    .cloned();
                 for (alt_id, alt_bytes) in winner.retained_alternatives {
                     verify_object_bytes(&alt_id, &alt_bytes)?;
                     authorize_writer(&alt_bytes, trust)?;
                     ingest_object_bytes(local_objects, local_dag, alt_id, &alt_bytes)?;
+                    if let Some(logical) = &logical {
+                        local_object_keys.insert(alt_id, logical.clone());
+                    }
                     result.objects_inserted += 1;
                 }
                 ingest_object(
