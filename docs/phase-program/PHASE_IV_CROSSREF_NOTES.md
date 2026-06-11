@@ -57,7 +57,7 @@ External SDKs should not paraphrase retrieval limits:
 
 ## 6. Trick #1 — beacon spot-check (prototype extension)
 
-**Status:** Wire + CLI prototype in flight; crossref carries decode/selector sketch only.
+**Status:** Wire + CLI + pinned Appendix B fixture landed; crossref runs stub after cert verify.
 
 | Surface | In `mneme-index` | In `mneme-crossref` |
 |---|---|---|
@@ -65,11 +65,11 @@ External SDKs should not paraphrase retrieval limits:
 | Full exact-NN replay on selected audits | `verify-cert --audit` (store-backed) | **Not started** — returns `UnsupportedVersion` when selected |
 | drand / NIST BLS offline verify | documented in research memo | **Deferred** — zero new deps in crossref v0 |
 
-Planned mirror steps when fixture bytes pin:
+Integration mirror (landed):
 
-1. Extend `wire_cert::decode_cert` to accept optional field `7` without breaking v1-only certs.
-2. Call `wire_beacon::verify_beacon_spot_check_stub` after standard cert verify.
-3. Add `crossref_beacon_spot_check_fixture` test reading `beacon_spot_check.cbor` once `fixture_status` is `pass`.
+1. `wire_cert::decode_cert` accepts optional field `7` without breaking v1-only certs.
+2. `wire_beacon::verify_beacon_spot_check_stub` runs after standard cert verify.
+3. `crossref_beacon_spot_check_fixture` reads `beacon_spot_check.cbor` (`fixture_status: pass`).
 
 Honesty string: `mneme_crossref::BEACON_SPOT_CHECK_HONESTY` (copy verbatim in external SDKs).
 

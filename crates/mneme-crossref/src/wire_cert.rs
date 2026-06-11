@@ -98,16 +98,20 @@ pub fn verify_committed_certificate(
 
     if cert.level == RetrievalProofLevel::CompleteTopK {
         verify_complete_topk_certificate(&cert.receipt)?;
-        return Ok(());
+    } else {
+        let committed_leaf_count = receipt.vo.candidates.len();
+        verify_semantic_vo_zkann(
+            &receipt.vo,
+            &receipt.semantic_commit,
+            proc,
+            receipt.zkann.as_ref(),
+            committed_leaf_count,
+        )?;
     }
 
-    let committed_leaf_count = receipt.vo.candidates.len();
-    verify_semantic_vo_zkann(
-        &receipt.vo,
-        &receipt.semantic_commit,
-        proc,
-        receipt.zkann.as_ref(),
-        committed_leaf_count,
+    wire_beacon::verify_beacon_spot_check_stub(
+        cert._audit_beacon.as_ref(),
+        wire_beacon::DEFAULT_AUDIT_RATE_PPM,
     )
 }
 

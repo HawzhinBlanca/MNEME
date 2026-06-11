@@ -304,6 +304,69 @@ fn crossref_identity_digests_exclude_nondeterministic_inputs() {
 }
 
 #[test]
+fn crossref_beacon_spot_check_fixture() {
+    use mneme_crossref::procedure::{DistanceMetric, Procedure, ProcedureAlgo};
+    use mneme_crossref::wire_beacon::{self, AuditBeacon};
+    use mneme_crossref::wire_cert;
+
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(vectors_root().join("certs/manifest.json")).unwrap(),
+    )
+    .unwrap();
+    let entry = manifest["vectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"].as_str() == Some("beacon_spot_check"))
+        .expect("beacon_spot_check manifest entry");
+    assert_eq!(
+        entry["fixture_status"].as_str(),
+        Some("pass"),
+        "beacon_spot_check fixture must be pinned before crossref verify"
+    );
+
+    let path = vectors_root()
+        .join("certs")
+        .join(entry["cbor_file"].as_str().unwrap());
+    let bytes = fs::read(&path).unwrap();
+    let proc_spec = &entry["procedure"];
+    let proc = Procedure {
+        algo: match proc_spec["algo"].as_str().unwrap() {
+            "hnsw" => ProcedureAlgo::Hnsw,
+            other => panic!("beacon_spot_check: unknown algo {other}"),
+        },
+        ef_search: proc_spec["ef_search"].as_u64().unwrap() as u32,
+        k: proc_spec["k"].as_u64().unwrap() as u32,
+        distance: match proc_spec["distance"].as_str().unwrap() {
+            "squared_l2_i64" => DistanceMetric::SquaredL2I64,
+            other => panic!("beacon_spot_check: unknown distance {other}"),
+        },
+        seed: proc_spec["seed"].as_u64().unwrap(),
+    };
+    let operator = read_hex32(entry["operator_pubkey_hex"].as_str().unwrap());
+    wire_cert::verify_committed_certificate(&bytes, &operator, &proc)
+        .unwrap_or_else(|e| panic!("beacon_spot_check: {e:?}"));
+
+    let beacon_spec = &entry["audit_beacon"];
+    let randomness = wire_root::hex32(beacon_spec["randomness_hex"].as_str().unwrap()).unwrap();
+    let binding_digest =
+        wire_root::hex32(beacon_spec["binding_digest_hex"].as_str().unwrap()).unwrap();
+    let beacon = AuditBeacon {
+        drand_round: beacon_spec["drand_round"].as_u64().unwrap(),
+        beacon_randomness: randomness,
+        binding_digest,
+    };
+    assert!(
+        !wire_beacon::audit_lottery_selected(
+            &beacon.beacon_randomness,
+            &beacon.binding_digest,
+            wire_beacon::DEFAULT_AUDIT_RATE_PPM
+        ),
+        "fixture must be lottery-not-selected for crossref stub path"
+    );
+}
+
+#[test]
 fn crossref_beacon_spot_check_manifest_pins_audit_beacon_fields() {
     use mneme_crossref::wire_beacon::{
         AuditBeacon, F_BEACON_RANDOMNESS, F_BINDING_DIGEST, F_DRAND_ROUND, decode_audit_beacon,
@@ -321,8 +384,8 @@ fn crossref_beacon_spot_check_manifest_pins_audit_beacon_fields() {
         .expect("beacon_spot_check manifest entry");
     assert_eq!(
         entry["fixture_status"].as_str(),
-        Some("prototype"),
-        "prototype until wire bytes pin field 7 audit_beacon"
+        Some("pass"),
+        "beacon_spot_check fixture must be pinned"
     );
     let ext = &entry["wire_extension"];
     assert_eq!(ext["field_name"].as_str(), Some("audit_beacon"));

@@ -82,6 +82,8 @@ run_phase_one_targets() {
     cargo test -p mneme-cli verify_cert -- --nocapture
   run_step "Crossref cognition cert vectors" \
     bash scripts/ci/cross-implementation-vectors.sh
+  run_step "VCP integration smoke (beacon + complete-kNN + CLI)" \
+    bash scripts/ci/vcp-integration-smoke.sh
 }
 
 run_phase_two_redteam_quick() {

@@ -208,6 +208,29 @@ fn verify_cert_audit_beacon_fixture_succeeds() {
 }
 
 #[test]
+fn verify_cert_complete_topk_fixture_succeeds() {
+    let cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../proof/vectors/certs/cognition_cert_complete_topk.cbor");
+    let seed = [0x51; 32];
+    let seed_hex = hex::encode(seed);
+
+    mneme()
+        .args([
+            "verify-cert",
+            cert_path.to_str().unwrap(),
+            "--ef-search",
+            "64",
+            "--k",
+            "2",
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify-cert ok"));
+}
+
+#[test]
 fn verify_cert_is_fail_closed() {
     let dir = tempdir().unwrap();
     let cert = dir.path().join("cert.json");

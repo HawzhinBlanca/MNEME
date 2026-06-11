@@ -673,6 +673,35 @@ fn validation_contract_smoke_enforces_exact_component_output() {
 }
 
 #[test]
+fn validation_lane_quick_runs_vcp_integration_smoke() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let quick_lane = validation_lane
+        .split("\n  quick)")
+        .nth(1)
+        .and_then(|tail| tail.split("\n  crypto)").next())
+        .expect("validation-lane must define a quick lane");
+
+    assert!(
+        quick_lane.contains("bash scripts/ci/vcp-integration-smoke.sh"),
+        "quick lane must run VCP integration smoke after validation contract"
+    );
+
+    let smoke = include_str!("../../../scripts/ci/vcp-integration-smoke.sh");
+    for phrase in [
+        "cargo test -p mneme-index --test beacon_spot_check",
+        "cargo test -p mneme-index --test complete_knn_cert_v1",
+        "crossref_",
+        "cargo test -p mneme-cli verify_cert",
+        "vcp-integration-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "vcp-integration-smoke must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn validation_lane_quick_runs_aggregate_validation_contract_smoke() {
     let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
     let quick_lane = validation_lane
