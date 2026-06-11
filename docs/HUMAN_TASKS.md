@@ -1,6 +1,6 @@
 # MNEME Human Tasks
 
-Last updated: 2026-06-08
+Last updated: 2026-06-11
 
 This file is the parking lot for reliability and readiness work that cannot be
 completed by a local autonomous agent without external credentials, hardware, or
@@ -35,7 +35,7 @@ explicit `not external P3 proof` boundaries and must not weaken fail-closed defa
 
 | Scaffold | Status @ `3b44142` | Notes |
 |---|---|---|
-| OSS release docs | Not committed | `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md` |
+| OSS release docs | **Landed** | Root `SECURITY.md`, `CONTRIBUTING.md`, `THREAT_MODEL.md`, `POSITIONING.md`; tag/release decision still human-gated |
 | Convergence local smoke | Not committed | Same-host merge digest compare; distinct-host still needs `MNEME_SECOND_HOST` |
 | KMS/HSM conformance harness | Not committed | Local vault round-trip; live endpoint proof still operator-gated |
 | TEE attestation policy gate | Not committed | Fail-closed policy over placeholder reports; live vendor quotes human-gated |

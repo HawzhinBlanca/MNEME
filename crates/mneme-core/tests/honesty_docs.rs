@@ -56,6 +56,33 @@ fn standing_honesty_docs_preserve_exact_dominance_distance_caveat() {
         "cross-host determinism proof doc",
         include_str!("../../../docs/benchmarks/XHOST_DETERMINISM_PROOF.md"),
     );
+    assert_distance_caveat("OSS threat model", include_str!("../../../THREAT_MODEL.md"));
+    assert_distance_caveat(
+        "OSS positioning doc",
+        include_str!("../../../POSITIONING.md"),
+    );
+}
+
+#[test]
+fn oss_release_docs_exist_with_security_and_contributing_guides() {
+    for (surface, text) in [
+        ("SECURITY.md", include_str!("../../../SECURITY.md")),
+        ("CONTRIBUTING.md", include_str!("../../../CONTRIBUTING.md")),
+    ] {
+        assert!(
+            text.contains("authenticated ≠ true") || text.contains("Authenticated ≠ true"),
+            "{surface} must preserve authenticated-not-true honesty boundary"
+        );
+        assert!(
+            text.contains("validation-lane.sh quick"),
+            "{surface} must point contributors at validation-lane quick"
+        );
+    }
+
+    assert!(
+        include_str!("../../../SECURITY.md").contains("GitHub Security Advisories"),
+        "SECURITY.md must use GitHub private advisory reporting (no fabricated contact endpoints)"
+    );
 }
 
 #[test]
