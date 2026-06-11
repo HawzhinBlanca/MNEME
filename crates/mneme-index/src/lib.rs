@@ -11,6 +11,7 @@
 #![deny(warnings)]
 
 mod beacon_spot_check;
+mod byzantine_inference;
 mod cognition_cert;
 mod commit;
 mod complete_knn;
@@ -21,6 +22,7 @@ mod context_gate;
 mod distance;
 mod error;
 mod federation_cert;
+mod forget_absence;
 mod hnsw_backend;
 mod key_index;
 mod key_index_load;
@@ -44,6 +46,9 @@ mod pedersen_schnorr_zk;
 
 #[cfg(feature = "pedersen_schnorr_zk")]
 mod semantic_zk;
+
+#[cfg(feature = "context_set_lock")]
+mod homomorphic_context_lock;
 
 // Phase IV-A research seam — UNIMPLEMENTED, off by default, wired into no recall path.
 #[cfg(feature = "piop_research")]
@@ -94,6 +99,13 @@ pub use beacon_spot_check::{
 };
 #[cfg(feature = "beacon_online")]
 pub use beacon_spot_check::{fetch_drand_beacon_randomness, verify_audit_beacon_online};
+pub use byzantine_inference::{
+    BYZANTINE_INFERENCE_BIND_TAG, BYZANTINE_INFERENCE_HONESTY, BYZANTINE_INFERENCE_STATUS,
+    InferenceConsistency, InferenceReplica, MIN_BYZANTINE_REPLICAS,
+    decode_inference_consistency, encode_inference_consistency,
+    inference_consistency_binding_digest, model_identity_digest, prove_inference_consistency,
+    verify_byzantine_inference, verify_inference_consistency_binding,
+};
 #[cfg(feature = "context_gate")]
 pub use cognition_cert::{
     CONTEXT_GATE_DRAFT_STATUS, ContextAttestationDraft, assemble_cognition_certificate_v2_draft,
@@ -102,7 +114,8 @@ pub use cognition_cert::{
 };
 pub use cognition_cert::{
     ParsedCognitionCert, assemble_cognition_certificate_v1,
-    assemble_cognition_certificate_v1_with_beacon, fuzz_cognition_cert_wire,
+    assemble_cognition_certificate_v1_with_beacon,
+    assemble_cognition_certificate_v1_with_extensions, fuzz_cognition_cert_wire,
     parse_cognition_certificate, verify_cognition_certificate_v1,
     verify_cognition_certificate_v1_with_spot_check,
 };
@@ -112,6 +125,11 @@ pub use federation_cert::{
     FEDERATION_CERT_DRAFT_STATUS, FEDERATION_COGNITION_CERT_VERSION, FederationCognitionCertWire,
     PHASE_IV_FEDERATION_GATE_OPEN, decode_federation_cognition_cert_wire,
     fuzz_federation_cert_verify, fuzz_federation_cert_wire, verify_federation_cognition_cert_wire,
+};
+pub use forget_absence::{
+    COGNITION_CERT_COMMIT_TAG, FORGET_ABSENCE_HONESTY, FORGET_ABSENCE_STATUS,
+    ForgetAbsenceRequest, PostForgetCert, PreForgetAnchorCert, certified_used_commits,
+    cognition_certificate_commit, object_id_target_commit, verify_forget_absence,
 };
 #[cfg(feature = "context_gate")]
 pub use mneme_gate::{
@@ -137,6 +155,13 @@ pub use pedersen_schnorr_zk::{
 // *deferral* (Plonky2/FRI SNARK target not shipped), not the actual backend.
 #[cfg(feature = "pedersen_schnorr_zk")]
 pub use pedersen_schnorr_zk::B3_DEFERRAL_STATUS;
+
+#[cfg(feature = "context_set_lock")]
+pub use homomorphic_context_lock::{
+    CONTEXT_SET_LOCK_HONESTY, CONTEXT_SET_LOCK_PROOF_LEN, CONTEXT_SET_LOCK_STATUS,
+    ContextSetLockProof, decode_context_set_lock_sidecar, encode_context_set_lock_sidecar,
+    hash_entry_scalar, prove_context_set_lock, verify_context_set_lock,
+};
 
 // Phase IV-A research seam (UNIMPLEMENTED). Exported only so the honesty
 // constants are inspectable; `prove_exact_nn_piop` fails closed and proves nothing.
@@ -282,6 +307,12 @@ mod tests {
             !cfg!(feature = "piop_research"),
             "piop_research must remain off-by-default and research-only; remove it from default features."
         );
+    }
+
+    #[cfg(not(feature = "context_set_lock"))]
+    #[test]
+    fn context_set_lock_feature_is_not_default() {
+        assert!(!cfg!(feature = "context_set_lock"));
     }
 
     #[test]

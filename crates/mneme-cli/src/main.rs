@@ -3,6 +3,7 @@
 mod attest;
 mod cert;
 mod determinism;
+mod forget_absence;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
@@ -123,6 +124,9 @@ enum Commands {
         /// Enable Trick #1 audit-beacon spot-check (requires `audit_beacon` on cert)
         #[arg(long)]
         audit: bool,
+        /// Enable Trick #4 Byzantine inference consistency (requires field 8 on cert)
+        #[arg(long)]
+        byzantine: bool,
         /// Store directory for true-distance recompute when audit is selected
         #[arg(long)]
         store: Option<PathBuf>,
@@ -133,6 +137,23 @@ enum Commands {
         dim: u16,
         #[arg(long, default_value_t = 0)]
         scale: i8,
+        #[arg(long = "ef-search", default_value_t = 64)]
+        ef_search: u32,
+        #[arg(long, default_value_t = 1)]
+        k: u32,
+    },
+    /// Offline verify post-forget non-use across cognition certificates (Trick #3 prototype)
+    VerifyForgetAbsence {
+        #[arg(long = "forget-seq")]
+        forget_sequence: u64,
+        #[arg(long = "target-commit")]
+        target_commit: String,
+        #[arg(long = "cert")]
+        post_certs: Vec<PathBuf>,
+        #[arg(long = "anchor-cert")]
+        anchor_cert: Option<PathBuf>,
+        #[arg(long = "cognition-cert-commit")]
+        cognition_cert_commit: Option<String>,
         #[arg(long = "ef-search", default_value_t = 64)]
         ef_search: u32,
         #[arg(long, default_value_t = 1)]
@@ -504,9 +525,62 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("cognition certificate v1 written to {}", out.display());
             Ok(())
         }
+        Commands::VerifyForgetAbsence {
+            forget_sequence,
+            target_commit,
+            post_certs,
+            anchor_cert,
+            cognition_cert_commit,
+            ef_search,
+            k,
+        } => {
+            if post_certs.is_empty() {
+                eprintln!("mneme: verify-forget-absence requires at least one --cert");
+                return Err(CliErrorKind::Usage);
+            }
+            for path in &post_certs {
+                require_file_exists(path, "cognition certificate")?;
+            }
+            if let Some(path) = &anchor_cert {
+                require_file_exists(path, "anchor cognition certificate")?;
+            }
+            if cognition_cert_commit.is_some() && anchor_cert.is_none() {
+                eprintln!("mneme: --cognition-cert-commit requires --anchor-cert");
+                return Err(CliErrorKind::Usage);
+            }
+            let pk = if let Some(ref seed) = cli.operator_seed {
+                let operator = KeyPair::from_seed(parse_seed_hex(seed)?);
+                operator.public_key_bytes()
+            } else {
+                return Err(CliErrorKind::Usage);
+            };
+            let trust = TrustConfig::new(pk);
+            let proc = forget_absence::default_procedure(ef_search, k);
+            let target = parse_seed_hex(&target_commit)?;
+            let cert_commit = match cognition_cert_commit {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            forget_absence::run_verify_forget_absence(
+                forget_sequence,
+                target,
+                cert_commit,
+                &post_certs,
+                anchor_cert.as_deref(),
+                &trust,
+                &proc,
+            )
+            .map_err(|e| {
+                eprintln!("honesty: {}", forget_absence::verify_forget_absence_honesty_footer());
+                CliErrorKind::VerifyFailed(e)
+            })?;
+            println!("verify-forget-absence ok: target not in authenticated post-forget used set");
+            Ok(())
+        }
         Commands::VerifyCert {
             cert,
             audit,
+            byzantine,
             store,
             components,
             dim,
@@ -529,7 +603,13 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 distance: DistanceMetric::SquaredL2I64,
                 seed: 0,
             };
-            if audit {
+            if byzantine {
+                let msg = cert::run_verify_cert_byzantine(&cert, &trust, &proc).map_err(|e| {
+                    eprintln!("honesty: {}", cert::verify_cert_byzantine_honesty_footer());
+                    CliErrorKind::VerifyFailed(e)
+                })?;
+                println!("{msg}");
+            } else if audit {
                 let store_path = store.as_deref();
                 let query = cert::certify_embedding_from_components(
                     &parse_i16_list(&components)?,
