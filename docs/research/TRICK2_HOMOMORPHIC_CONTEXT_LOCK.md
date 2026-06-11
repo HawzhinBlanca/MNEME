@@ -1,6 +1,6 @@
 # Trick #2 — Homomorphic Context-Set Lock (research scaffold)
 
-**Status:** scaffold + documentation only — **not shipped** as a homomorphic lock.
+**Status:** feature-gated scaffold + tests — **not shipped** on recall/TCB paths.
 **Honesty:** do not conflate this with Pedersen/Schnorr ZK retrieval match proofs
 (`pedersen_schnorr_zk`, off by default) or with the Phase II strict context gate
 (`context_gate`, off by default).
@@ -67,7 +67,13 @@ Until then, documentation and feature-gated scaffolds are the only honest postur
 
 ---
 
-## 5. Related docs
+## 5. Scaffold implementation (2026-06-11)
+
+Feature context_set_lock (off by default): Pedersen sum + Schnorr NIZK sidecar, tests, crossref wire. Parked: cert v2 field, recall_verified/TCB, enclave proof.
+
+---
+
+## 6. Related docs
 
 - Phase II task spec: [`docs/PHASE_II_TASK_SPEC.md`](../PHASE_II_TASK_SPEC.md)
 - Context gate red-team notes: [`docs/redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md`](../redteam/PHASE_II_CONTEXT_GATE_NO_INJECTION.md)

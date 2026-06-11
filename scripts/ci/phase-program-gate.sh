@@ -70,6 +70,10 @@ run_phase_one_targets() {
   section "Phase I targeted tests"
   run_step "zkANN dominance + audit (mneme-index, pedersen_schnorr_zk)" \
     cargo test -p mneme-index --features pedersen_schnorr_zk -- zkann --nocapture
+  run_step "Trick #2 context-set lock scaffold (mneme-index, context_set_lock)" \
+    cargo test -p mneme-index --features context_set_lock --test context_set_lock -- --nocapture
+  run_step "Trick #2 context-set lock crossref wire (mneme-crossref)" \
+    cargo test -p mneme-crossref wire_context_lock -- --nocapture
   run_step "Cognition certificate (mneme-index)" \
     cargo test -p mneme-index --features pedersen_schnorr_zk -- cognition_cert --nocapture
   run_step "Bi-temporal recall (mneme-store recall_verified_at)" \
