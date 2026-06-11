@@ -3,6 +3,7 @@
 mod attest;
 mod cert;
 mod determinism;
+mod replay;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
@@ -138,6 +139,32 @@ enum Commands {
         #[arg(long, default_value_t = 1)]
         k: u32,
     },
+    /// Certified Counterfactual Replay (weak mode): assemble a verified context from
+    /// KEYS with and without one entry; emit a signed offline-verifiable certificate
+    Replay {
+        store: PathBuf,
+        /// Comma-separated logical key names forming the context, in order
+        #[arg(long)]
+        keys: String,
+        /// Object id (64 hex chars) to exclude in the counterfactual pass
+        #[arg(long)]
+        without: String,
+        /// Logical key namespace (default: user)
+        #[arg(long, default_value = "user")]
+        namespace: String,
+        #[arg(long = "min-tier", default_value = "trusted")]
+        min_tier: TrustTierArg,
+        /// Output path for the replay certificate
+        #[arg(long, default_value = "replay-cert.bin")]
+        out: PathBuf,
+    },
+    /// Offline verify a replay certificate (signature + internal consistency)
+    VerifyReplay {
+        cert: PathBuf,
+        /// Optional pinned operator public key (64 hex chars) carried out-of-band
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
@@ -254,6 +281,117 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), CliErrorKind> {
     match cli.command {
+        Commands::Replay {
+            store,
+            keys,
+            without,
+            namespace,
+            min_tier,
+            out,
+        } => {
+            let key_names: Vec<String> = keys
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if key_names.is_empty() {
+                eprintln!("mneme: replay requires --keys with at least one key");
+                return Err(CliErrorKind::Usage);
+            }
+            let excluded = parse_seed_hex(&without)?;
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            let cap =
+                agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
+            mneme_store
+                .trust_mut()
+                .authorized_writers
+                .push(operator.public_key_bytes());
+            // Factual pass: every context entry comes through fail-closed verified recall.
+            let mut factual: Vec<([u8; 32], Vec<u8>)> = Vec::new();
+            for name in &key_names {
+                let q = Query {
+                    logical_key: LogicalKey {
+                        namespace: namespace.clone(),
+                        name: name.clone(),
+                    },
+                    min_tier: min_tier.into(),
+                    embedding: None,
+                };
+                let entries = mneme_store
+                    .recall_verified_default(&q, &cap)
+                    .map_err(CliErrorKind::Kernel)?;
+                for e in entries {
+                    factual.push((e.id.0, e.plaintext.clone()));
+                }
+            }
+            // Counterfactual pass: identical context minus the excluded entry.
+            let counterfactual: Vec<([u8; 32], Vec<u8>)> = factual
+                .iter()
+                .filter(|(id, _)| id != &excluded)
+                .cloned()
+                .collect();
+            let differs = factual.len() != counterfactual.len();
+            let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
+            let cert = replay::ReplayCertV1 {
+                root_seq: root.sequence,
+                root_preimage: root.preimage_hash,
+                namespace,
+                keys: key_names,
+                min_tier: {
+                    let t: TrustTier = min_tier.into();
+                    t as u8
+                },
+                excluded,
+                factual_ids: factual.iter().map(|(id, _)| *id).collect(),
+                counterfactual_ids: counterfactual.iter().map(|(id, _)| *id).collect(),
+                factual_hash: replay::context_hash(&factual),
+                counterfactual_hash: replay::context_hash(&counterfactual),
+                differs,
+                operator_pk: operator.public_key_bytes(),
+                sig: [0u8; 64],
+            };
+            let wire = cert
+                .sign_and_encode(&operator)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "replay cert written: {} ({} bytes) root_seq={} entries={} differs={}",
+                out.display(),
+                wire.len(),
+                root.sequence,
+                factual.len(),
+                differs
+            );
+            println!("honesty: {}", replay::REPLAY_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyReplay { cert, operator_pk } => {
+            let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = replay::ReplayCertV1::verify(&wire, pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            println!(
+                "verify-replay ok: root_seq={} keys={} factual_entries={} differs={} excluded={} operator_pk={}",
+                parsed.root_seq,
+                parsed.keys.len(),
+                parsed.factual_ids.len(),
+                parsed.differs,
+                hex::encode(parsed.excluded),
+                hex::encode(parsed.operator_pk)
+            );
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", replay::REPLAY_HONESTY);
+            Ok(())
+        }
         Commands::Init { path } => {
             if path.exists() {
                 eprintln!("mneme: init path already exists: {}", path.display());
