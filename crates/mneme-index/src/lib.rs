@@ -15,6 +15,7 @@ mod cognition_cert;
 mod commit;
 mod complete_knn;
 mod complete_knn_cert;
+mod complete_knn_receipt;
 #[cfg(feature = "context_gate")]
 mod context_gate;
 mod distance;

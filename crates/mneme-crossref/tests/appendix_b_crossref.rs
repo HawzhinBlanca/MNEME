@@ -279,7 +279,6 @@ fn crossref_cognition_cert_byte_exact() {
             .unwrap_or_else(|e| panic!("{name}: {e:?}"));
     }
 }
-
 #[test]
 fn crossref_identity_digests_exclude_nondeterministic_inputs() {
     // Foundation-gate digests are pure functions of fixture crypto + logical content.

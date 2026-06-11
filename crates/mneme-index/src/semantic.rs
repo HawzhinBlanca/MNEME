@@ -1,6 +1,7 @@
 //! Authenticated semantic index: Merkle-committed entries + wrapped HNSW (§5.6, §9.2).
 
 use crate::commit::SemanticMerkleTree;
+use crate::complete_knn_receipt::build_complete_topk_receipt;
 use crate::error::IndexError;
 use crate::hnsw_backend::HnswBackend;
 use crate::procedure::{IndexedEntry, execute_procedure_p, procedure_id};
@@ -131,6 +132,16 @@ impl SemanticIndex {
         self.entries.values().cloned().collect()
     }
 
+    fn sorted_object_ids_and_embeddings(&self) -> (Vec<ObjectId>, Vec<FixedPointEmbedding>) {
+        let mut ids: Vec<ObjectId> = self.entries.values().map(|e| e.object_id).collect();
+        ids.sort();
+        let embeddings = ids
+            .iter()
+            .map(|id| self.entries[id.as_bytes()].embedding.clone())
+            .collect();
+        (ids, embeddings)
+    }
+
     /// Deterministic semantic search (§9.2, INV-10): integer distances, ObjectId tie-break.
     pub fn search_deterministic(
         &self,
@@ -235,7 +246,15 @@ impl SemanticIndex {
                 self.search_deterministic_on_visited(proc, query)?
             }
             mneme_core::RetrievalProofLevel::CompleteTopK => {
-                return Err(IndexError::SemanticNotImplemented);
+                let (object_ids, embeddings) = self.sorted_object_ids_and_embeddings();
+                return build_complete_topk_receipt(
+                    &object_ids,
+                    &embeddings,
+                    self.semantic_commit(),
+                    root_bound,
+                    proc,
+                    query,
+                );
             }
         };
         let mut receipt = SemanticRecallReceipt::new(root_bound, self.semantic_commit(), vo);

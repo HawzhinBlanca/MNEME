@@ -94,6 +94,23 @@
         "cert_field": 7,
         "field_name": "audit_beacon"
       }
+    },
+    {
+      "cbor_file": "cognition_cert_complete_topk.cbor",
+      "level": "complete_topk",
+      "name": "cognition_cert_complete_topk",
+      "operator_pubkey_hex": "c050c5637a44fa8629fff3cccce2300cb362a63d99d95fc54145266f4332445a",
+      "preimage_hash_hex": "929d343613bf7a1853a2721fae408c3867ef592a305d242ae074870fee4e133e",
+      "procedure": {
+        "algo": "hnsw",
+        "distance": "squared_l2_i64",
+        "ef_search": 64,
+        "k": 2,
+        "seed": 0
+      },
+      "semantic_commit_hex": "b385c32fdfefdb1d79506dda7ebb0bb007370e0c9acd0d7ebdd8ac133602957c",
+      "receipt_field_8": "complete_knn",
+      "retrieval_proof_level_tag": 2
     }
   ],
   "verified_by": "cargo test -p mneme-crossref --test appendix_b_crossref crossref_cognition_cert_v1_byte_exact",
