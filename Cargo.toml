@@ -10,6 +10,7 @@ members = [
     "crates/mneme-root",
     "crates/mneme-cap",
     "crates/mneme-attest",
+    "crates/mneme-pace",
     "crates/mneme-forget",
     "crates/mneme-crdt",
     "crates/mneme-verify",
@@ -43,6 +44,7 @@ mneme-mcp = { path = "crates/mneme-mcp" }
 mneme-root = { path = "crates/mneme-root" }
 mneme-cap = { path = "crates/mneme-cap" }
 mneme-attest = { path = "crates/mneme-attest" }
+mneme-pace = { path = "crates/mneme-pace" }
 mneme-verify = { path = "crates/mneme-verify" }
 mneme-store = { path = "crates/mneme-store" }
 mneme-account = { path = "crates/mneme-account" }
