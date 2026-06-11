@@ -101,7 +101,7 @@ pub fn run_verify_cert_audit(
         DEFAULT_AUDIT_RATE_PPM,
     );
 
-    let spot_check = if selected {
+    if selected {
         let store = opts.store.ok_or(MnemeError::ProcedureMismatch)?;
         let query = opts.query.ok_or(MnemeError::ProcedureMismatch)?;
         let embeddings = load_store_embeddings(store)?;
@@ -122,9 +122,8 @@ pub fn run_verify_cert_audit(
             "verify-cert ok: cognition certificate v1 valid offline (audit: selected, true-distance dominance verified; seq {})",
             root.sequence
         ));
-    };
+    }
 
-    let _ = spot_check;
     let root = verify_cognition_certificate_v1_with_spot_check(&bytes, trust, proc, None)?;
     Ok(format!(
         "verify-cert ok: cognition certificate v1 valid offline (audit: not selected; seq {})",
