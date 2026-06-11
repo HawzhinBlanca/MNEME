@@ -153,7 +153,7 @@ described in the founder memo:
 ```
 append-only signed checkpoint log  (mneme-root — shipped)
   + beacon-spot-checkable retrieval  (Trick #1 — prototype)
-  + homomorphic context-set lock     (Trick #2 — Pedersen/Schnorr shipped)
+  + context-set lock scaffold       (Trick #2 — `context_gate` draft, default-off; not homomorphic)
   + forget-absence across log        (Trick #3 — research)
   + Byzantine inference consistency  (Trick #4 — research)
 ```
