@@ -8,7 +8,12 @@ cd "$ROOT"
 source scripts/ci/smoke-assertions.sh
 
 label="full-preflight-smoke"
-output="$(bash scripts/ci/validation-lane.sh full-preflight)"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/mneme-full-preflight.XXXXXX")"
+trap 'rm -rf "$scratch"' EXIT
+
+sentinel_target="$scratch/cargo-target"
+
+output="$(CARGO_TARGET_DIR="$sentinel_target" bash scripts/ci/validation-lane.sh full-preflight)"
 
 require_exact_line "$label" "$output" "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism"
 require_exact_line "$label" "$output" "validation-lane (full-preflight): heavy checks are NOT executed by this lane."
@@ -25,5 +30,10 @@ require_absent_substring "$label" "$output" "fuzz"
 require_absent_substring "$label" "$output" "bench"
 require_absent_substring "$label" "$output" "ssh "
 require_absent_substring "$label" "$output" "docker"
+
+if [[ -e "$sentinel_target" ]]; then
+  echo "full-preflight-smoke: full-preflight created target dir" >&2
+  exit 1
+fi
 
 echo "full-preflight-smoke: OK"
