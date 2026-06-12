@@ -39,6 +39,35 @@ test.describe("MNEME memory UI", () => {
   test("settings expose trust tier policy", async ({ page }) => {
     await page.getByRole("link", { name: /settings/i }).click();
     await expect(page.getByLabel(/default min tier/i)).toBeVisible();
-    await expect(page.getByText(/quarantine/i)).toBeVisible();
+    await expect(page.locator("#view-settings").getByText(/quarantine/i).first()).toBeVisible();
+  });
+
+  test("forget key generates ForgetProof and invalidates subsequent recall", async ({
+    page,
+  }) => {
+    await page.getByRole("link", { name: /forget proofs/i }).click();
+    await expect(
+      page.getByRole("heading", { name: /memory erasure & deletion proofs/i }),
+    ).toBeVisible();
+
+    await page.getByLabel(/memory key to shred/i).fill("API base URL");
+    await page.getByLabel(/namespace/i).selectOption("system");
+    await page.getByRole("button", { name: /forget key/i }).click();
+
+    const result = page.getByTestId("forget-proof-result");
+    await expect(result).toBeVisible();
+    await expect(page.getByTestId("forget-proof-status")).toHaveText(
+      /verified proof/i,
+    );
+
+    await page.getByRole("link", { name: /dashboard/i }).click();
+    await page.getByRole("searchbox", { name: /recall query/i }).fill(
+      "API base URL",
+    );
+    await page.getByRole("button", { name: /recall/i }).click();
+
+    await expect(
+      page.getByText("No matching authenticated preimages found"),
+    ).toBeVisible();
   });
 });

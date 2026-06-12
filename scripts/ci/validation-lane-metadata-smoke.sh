@@ -12,8 +12,30 @@ scratch="$(mktemp -d "${TMPDIR:-/tmp}/mneme-validation-lane-metadata.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 
 fixture_dir="$scratch/scripts/ci"
+fixture_lib_marker="$scratch/fixture-lib-sourced"
 mkdir -p "$fixture_dir"
-cp scripts/ci/lib.sh "$fixture_dir/lib.sh"
+
+install_fixture_lib() {
+  cp scripts/ci/lib.sh "$fixture_dir/lib.sh"
+  cat >> "$fixture_dir/lib.sh" <<'EOF'
+if [[ -n "${MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER:-}" ]]; then
+  printf '%s\n' "${BASH_SOURCE[0]}" > "$MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER"
+fi
+EOF
+}
+
+require_fixture_lib_sourced() {
+  local output="$1"
+
+  if [[ ! -f "$fixture_lib_marker" ]]; then
+    echo "$label: fixture did not source copied lib.sh" >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
+  require_exact_output "$label" "$(cat "$fixture_lib_marker")" "$fixture_dir/lib.sh"
+}
+
+install_fixture_lib
 
 make_fixture() {
   local fixture="$1"
@@ -31,11 +53,13 @@ expect_metadata_failure() {
   shift 3
 
   local output status
+  rm -f "$fixture_lib_marker"
   set +e
-  output="$(bash "$fixture" "$@" 2>&1)"
+  output="$(MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER="$fixture_lib_marker" bash "$fixture" "$@" 2>&1)"
   status=$?
   set -e
 
+  require_fixture_lib_sourced "$output"
   require_exit_status "$label" "$status" "1" "$output"
   require_exact_line "$label" "$output" "$expected_fragment"
   require_line_count "$label" "$output" "1"
@@ -47,11 +71,17 @@ duplicate_lane_fixture="$fixture_dir/duplicate-validation-lane.sh"
 invalid_lane_fixture="$fixture_dir/invalid-validation-lane.sh"
 missing_sentinel_fixture="$fixture_dir/missing-sentinel-validation-lane.sh"
 first_sentinel_fixture="$fixture_dir/first-sentinel-validation-lane.sh"
+empty_lanes_fixture="$fixture_dir/empty-validation-lane.sh"
 
 make_fixture "$duplicate_lane_fixture" "(quick quick full-preflight full)"
 make_fixture "$invalid_lane_fixture" "(quick BAD full-preflight full)"
 make_fixture "$missing_sentinel_fixture" "(quick crypto full)"
 make_fixture "$first_sentinel_fixture" "(full-preflight full)"
+make_fixture "$empty_lanes_fixture" "()"
+
+expect_metadata_failure "empty lane metadata" \
+  "MNEME validation-lane metadata invalid: VALIDATION_LANES is empty" \
+  "$empty_lanes_fixture" --list
 
 expect_metadata_failure "duplicate --list lane metadata" \
   "MNEME validation-lane metadata invalid: duplicate VALIDATION_LANES token: quick" \

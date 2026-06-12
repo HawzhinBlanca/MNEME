@@ -41,6 +41,14 @@
           </svg>
           Settings
         </a>
+        <a href="/forget" class="nav-item" id="nav-forget">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+          Forget Proofs
+        </a>
       </nav>
       <div class="sidebar-footer">
         <div class="version">Version 2.0.0-Beta</div>
@@ -152,6 +160,56 @@
             <h4 class="results-heading">Recall Result Payload</h4>
             <div class="results-grid" id="results-grid">
               <!-- Result cards will be dynamically injected here -->
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- FORGET VIEW -->
+      <div id="view-forget" class="content-view">
+        <header class="view-header">
+          <div>
+            <span class="breadcrumbs">MNEME / Forget Proofs</span>
+            <h2>Memory Erasure & Deletion Proofs</h2>
+          </div>
+        </header>
+
+        <!-- Forget Form -->
+        <section class="card forget-card" aria-labelledby="forget-title">
+          <h3 id="forget-title" class="card-title">Issue Deletion Certificate</h3>
+          <div class="settings-control-desc">
+            Crypto-shred memory keys and generate an offline-verifiable, signed proof of absence (ForgetProof).
+          </div>
+          <form class="forget-form" id="forget-form">
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="forget-key">Memory Key to Shred</label>
+                <div class="input-wrapper">
+                  <input type="text" id="forget-key" name="key" placeholder="Enter logical key name (e.g., API base URL)..." required>
+                </div>
+              </div>
+              <div class="form-group flex-1">
+                <label for="forget-namespace">Namespace</label>
+                <select id="forget-namespace" name="namespace">
+                  <option value="system">System</option>
+                  <option value="agent-session">Agent Session</option>
+                  <option value="quarantine-injected">Quarantine</option>
+                </select>
+              </div>
+              <div class="form-group align-bottom">
+                <button type="submit" class="btn btn-primary" id="btn-forget" style="background-color: var(--accent-orange);">
+                  <span class="btn-text" style="color: white;">Forget Key</span>
+                  <span class="spinner" id="forget-spinner" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <!-- Forget Proof Result -->
+          <div class="recall-results-container hidden" id="forget-results-area">
+            <h4 class="results-heading">Generated Deletion Certificate (ForgetProof)</h4>
+            <div class="results-grid" id="forget-results-grid">
+              <!-- Dynamically injected ForgetProof -->
             </div>
           </div>
         </section>

@@ -2,8 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements
   const navDashboard = document.getElementById('nav-dashboard');
   const navSettings = document.getElementById('nav-settings');
+  const navForget = document.getElementById('nav-forget');
   const viewDashboard = document.getElementById('view-dashboard');
   const viewSettings = document.getElementById('view-settings');
+  const viewForget = document.getElementById('view-forget');
 
   const btnOpenStore = document.getElementById('btn-open-store');
   const storeStatus = document.getElementById('store-status');
@@ -15,10 +17,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultsArea = document.getElementById('results-area');
   const resultsGrid = document.getElementById('results-grid');
 
+  const forgetForm = document.getElementById('forget-form');
+  const btnForget = document.getElementById('btn-forget');
+  const forgetResultsArea = document.getElementById('forget-results-area');
+  const forgetResultsGrid = document.getElementById('forget-results-grid');
+
   const defaultMinTier = document.getElementById('default-min-tier');
 
   // --- Mock Database ---
-  const mockMemories = [
+  let mockMemories = [
     {
       namespace: 'system',
       logicalName: 'API base URL',
@@ -41,17 +48,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Routing / View Switcher ---
   function switchView(viewName) {
+    navDashboard.classList.remove('active');
+    navSettings.classList.remove('active');
+    navForget.classList.remove('active');
+    viewDashboard.classList.remove('active');
+    viewSettings.classList.remove('active');
+    viewForget.classList.remove('active');
+
     if (viewName === 'settings') {
-      navDashboard.classList.remove('active');
       navSettings.classList.add('active');
-      viewDashboard.classList.remove('active');
       viewSettings.classList.add('active');
       window.history.pushState({}, '', '/settings');
+    } else if (viewName === 'forget') {
+      navForget.classList.add('active');
+      viewForget.classList.add('active');
+      window.history.pushState({}, '', '/forget');
     } else {
       navDashboard.classList.add('active');
-      navSettings.classList.remove('active');
       viewDashboard.classList.add('active');
-      viewSettings.classList.remove('active');
       window.history.pushState({}, '', '/');
     }
   }
@@ -66,10 +80,17 @@ document.addEventListener('DOMContentLoaded', () => {
     switchView('settings');
   });
 
+  navForget.addEventListener('click', (e) => {
+    e.preventDefault();
+    switchView('forget');
+  });
+
   // Handle browser back/forward navigation
   window.addEventListener('popstate', () => {
     if (window.location.pathname.startsWith('/settings')) {
       switchView('settings');
+    } else if (window.location.pathname.startsWith('/forget')) {
+      switchView('forget');
     } else {
       switchView('dashboard');
     }
@@ -78,6 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Handle initial load based on path
   if (window.location.pathname.startsWith('/settings')) {
     switchView('settings');
+  } else if (window.location.pathname.startsWith('/forget')) {
+    switchView('forget');
   }
 
   // --- Store Lifecycle (Open/Close) ---
@@ -200,6 +223,75 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       resultsArea.classList.remove('hidden');
+    }, 500);
+  });
+
+  // --- Forget Form Submission ---
+  forgetForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+
+    const key = document.getElementById('forget-key').value.trim();
+    const namespace = document.getElementById('forget-namespace').value;
+
+    btnForget.classList.add('loading');
+    btnForget.disabled = true;
+    forgetResultsArea.classList.add('hidden');
+
+    setTimeout(() => {
+      btnForget.classList.remove('loading');
+      btnForget.disabled = false;
+
+      // Find the memory to mock-shred
+      const targetIndex = mockMemories.findIndex(
+        m => m.logicalName.toLowerCase() === key.toLowerCase() && m.namespace === namespace
+      );
+
+      let foundMemory = null;
+      if (targetIndex !== -1) {
+        foundMemory = mockMemories[targetIndex];
+        // Shred/remove from mock database
+        mockMemories.splice(targetIndex, 1);
+      }
+
+      const displayedKey = foundMemory ? foundMemory.logicalName : key;
+      const preimageHash = foundMemory 
+        ? `blake3:${Array.from({length: 40}, (_, i) => (i % 16).toString(16)).join('')}`
+        : 'absent';
+
+      // Generate a mock ForgetProof CBOR hex
+      const mockCborHex = `a70103024c666f726765745f70726f6f66035820${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}045840${Array.from({length: 128}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
+
+      forgetResultsGrid.innerHTML = '';
+      const card = document.createElement('div');
+      card.className = 'result-card';
+      card.setAttribute('data-testid', 'forget-proof-result');
+
+      card.innerHTML = `
+        <div class="result-main">
+          <div class="result-header-row">
+            <span class="result-ns" style="background-color: var(--accent-orange-glow); color: var(--accent-orange); border: 1px solid hsla(24, 90%, 50%, 0.3);">${namespace}</span>
+            <span class="result-name">${displayedKey} (Shredded)</span>
+          </div>
+          <div class="settings-control-desc" style="margin-top: 8px;">
+            <strong>Preimage Hash:</strong> <code style="color: var(--text-secondary);">${preimageHash}</code>
+          </div>
+          <div class="result-body-container" style="font-size: 0.8rem; margin-top: 8px; max-width: 100%;">
+            <div style="color: var(--accent-orange); font-weight: 600; margin-bottom: 4px;">ForgetProof CBOR Envelope:</div>
+            ${mockCborHex}
+          </div>
+        </div>
+        <div class="result-verdict">
+          <span class="tier-badge shredded" style="background-color: hsla(24, 90%, 50%, 0.15); color: var(--accent-orange); border-color: hsla(24, 90%, 50%, 0.25);">SHREDDED</span>
+          <span class="receipt-badge" data-testid="forget-proof-status" style="background-color: hsla(142, 70%, 45%, 0.15); color: var(--accent-green); border-color: hsla(142, 70%, 45%, 0.25);">
+            <svg class="receipt-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            Verified Proof
+          </span>
+        </div>
+      `;
+      forgetResultsGrid.appendChild(card);
+      forgetResultsArea.classList.remove('hidden');
     }, 500);
   });
 
