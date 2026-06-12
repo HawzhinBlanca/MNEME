@@ -12,6 +12,7 @@ scratch="$(mktemp -d "${TMPDIR:-/tmp}/mneme-validation-lane-metadata.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
 
 fixture_dir="$scratch/scripts/ci"
+fixture_target_dir="$scratch/cargo-target"
 fixture_lib_marker="$scratch/fixture-lib-sourced"
 mkdir -p "$fixture_dir"
 
@@ -53,13 +54,19 @@ expect_metadata_failure() {
   shift 3
 
   local output status
+  rm -rf "$fixture_target_dir"
   rm -f "$fixture_lib_marker"
   set +e
-  output="$(MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER="$fixture_lib_marker" bash "$fixture" "$@" 2>&1)"
+  output="$(CARGO_TARGET_DIR="$fixture_target_dir" MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER="$fixture_lib_marker" bash "$fixture" "$@" 2>&1)"
   status=$?
   set -e
 
   require_fixture_lib_sourced "$output"
+  if [[ -e "$fixture_target_dir" ]]; then
+    echo "$label: $name created CARGO_TARGET_DIR during metadata rejection" >&2
+    printf '%s\n' "$output" >&2
+    exit 1
+  fi
   require_exit_status "$label" "$status" "1" "$output"
   require_exact_line "$label" "$output" "$expected_fragment"
   require_line_count "$label" "$output" "1"
@@ -69,12 +76,14 @@ expect_metadata_failure() {
 
 duplicate_lane_fixture="$fixture_dir/duplicate-validation-lane.sh"
 invalid_lane_fixture="$fixture_dir/invalid-validation-lane.sh"
+underscore_lane_fixture="$fixture_dir/underscore-validation-lane.sh"
 missing_sentinel_fixture="$fixture_dir/missing-sentinel-validation-lane.sh"
 first_sentinel_fixture="$fixture_dir/first-sentinel-validation-lane.sh"
 empty_lanes_fixture="$fixture_dir/empty-validation-lane.sh"
 
 make_fixture "$duplicate_lane_fixture" "(quick quick full-preflight full)"
 make_fixture "$invalid_lane_fixture" "(quick BAD full-preflight full)"
+make_fixture "$underscore_lane_fixture" "(quick bad_lane full-preflight full)"
 make_fixture "$missing_sentinel_fixture" "(quick crypto full)"
 make_fixture "$first_sentinel_fixture" "(full-preflight full)"
 make_fixture "$empty_lanes_fixture" "()"
@@ -90,6 +99,10 @@ expect_metadata_failure "duplicate --list lane metadata" \
 expect_metadata_failure "invalid --help lane metadata" \
   "MNEME validation-lane metadata invalid: invalid VALIDATION_LANES token: BAD" \
   "$invalid_lane_fixture" --help
+
+expect_metadata_failure "underscore token lane metadata" \
+  "MNEME validation-lane metadata invalid: invalid VALIDATION_LANES token: bad_lane" \
+  "$underscore_lane_fixture" --list
 
 expect_metadata_failure "missing sentinel unknown-lane metadata" \
   "MNEME validation-lane metadata invalid: VALIDATION_LANES missing full-preflight sentinel" \

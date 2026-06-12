@@ -14,6 +14,7 @@ cd "$ROOT"
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 VALIDATION_LANES=(quick crypto tamper merge determinism bounds p3-local full-preflight full)
+VALIDATION_LANE_TOKEN_PATTERN='[a-z0-9][a-z0-9-]*'
 
 validation_lane_metadata_fail_closed() {
   local message="$1"
@@ -38,7 +39,7 @@ validate_validation_lanes() {
     validation_lane_metadata_fail_closed "VALIDATION_LANES is empty"
   fi
 
-  validation_lane_token_pattern='^[a-z0-9][a-z0-9-]*$'
+  validation_lane_token_pattern="^${VALIDATION_LANE_TOKEN_PATTERN}$"
   for lane in "${VALIDATION_LANES[@]}"; do
     if [[ ! "$lane" =~ $validation_lane_token_pattern ]]; then
       validation_lane_metadata_fail_closed "invalid VALIDATION_LANES token: $lane"

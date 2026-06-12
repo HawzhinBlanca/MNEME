@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Shared assertions for cheap CI smoke scripts. Source from the repository root.
 
+VALIDATION_LANE_TOKEN_PATTERN='[a-z0-9][a-z0-9-]*'
+
 require_exact_line() {
   local label="$1"
   local output="$2"
@@ -79,7 +81,7 @@ require_validation_lane_choices() {
   local seen_validation_lanes=()
   local IFS
 
-  validation_lane_choice_pattern='^[a-z0-9][a-z0-9-]*(\|[a-z0-9][a-z0-9-]*)*$'
+  validation_lane_choice_pattern="^${VALIDATION_LANE_TOKEN_PATTERN}(\\|${VALIDATION_LANE_TOKEN_PATTERN})*$"
   if [[ ! "$lane_choices" =~ $validation_lane_choice_pattern ]]; then
     echo "$label: invalid validation lane choices: $lane_choices" >&2
     exit 1
@@ -105,7 +107,7 @@ validation_lane_choices_from_source() {
   local validation_lanes_line
   local validation_lanes_pattern
   local validation_lanes_tokens
-  local validation_lane_token_pattern
+  local validation_lanes_token_pattern
   local validation_lane
   local seen_validation_lane
   local validation_lanes=()
@@ -130,8 +132,8 @@ validation_lane_choices_from_source() {
   fi
 
   validation_lanes_tokens="${BASH_REMATCH[1]}"
-  validation_lane_token_pattern='^[a-z0-9][a-z0-9-]*( [a-z0-9][a-z0-9-]*)*$'
-  if [[ ! "$validation_lanes_tokens" =~ $validation_lane_token_pattern ]]; then
+  validation_lanes_token_pattern="^${VALIDATION_LANE_TOKEN_PATTERN}( ${VALIDATION_LANE_TOKEN_PATTERN})*$"
+  if [[ ! "$validation_lanes_tokens" =~ $validation_lanes_token_pattern ]]; then
     echo "$label: invalid VALIDATION_LANES tokens" >&2
     printf '%s\n' "$validation_lanes_line" >&2
     exit 1

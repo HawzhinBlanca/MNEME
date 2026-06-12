@@ -405,6 +405,37 @@ fn validation_lane_full_and_preflight_share_one_sublane_source() {
 }
 
 #[test]
+fn validation_lane_token_grammar_has_single_atom_contract() {
+    let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
+    let smoke_assertions = include_str!("../../../scripts/ci/smoke-assertions.sh");
+
+    for (name, source) in [
+        ("validation-lane", validation_lane),
+        ("smoke-assertions", smoke_assertions),
+    ] {
+        assert!(
+            source.contains("VALIDATION_LANE_TOKEN_PATTERN='[a-z0-9][a-z0-9-]*'"),
+            "{name} must define the shared validation lane token atom"
+        );
+        assert!(
+            !source.contains("'^[a-z0-9][a-z0-9-]*$'"),
+            "{name} must not duplicate the single-token regex literal"
+        );
+    }
+
+    for phrase in [
+        "validation_lane_token_pattern=\"^${VALIDATION_LANE_TOKEN_PATTERN}$\"",
+        "validation_lane_choice_pattern=\"^${VALIDATION_LANE_TOKEN_PATTERN}(\\\\|${VALIDATION_LANE_TOKEN_PATTERN})*$\"",
+        "validation_lanes_token_pattern=\"^${VALIDATION_LANE_TOKEN_PATTERN}( ${VALIDATION_LANE_TOKEN_PATTERN})*$\"",
+    ] {
+        assert!(
+            validation_lane.contains(phrase) || smoke_assertions.contains(phrase),
+            "validation lane token grammar must preserve `{phrase}`"
+        );
+    }
+}
+
+#[test]
 fn validation_lane_metadata_smoke_preserves_executable_contract() {
     let validation_contract_smoke =
         include_str!("../../../scripts/ci/validation-contract-smoke.sh");
@@ -422,6 +453,7 @@ fn validation_lane_metadata_smoke_preserves_executable_contract() {
 
     for phrase in [
         "source scripts/ci/smoke-assertions.sh",
+        "fixture_target_dir=\"$scratch/cargo-target\"",
         "fixture_lib_marker=\"$scratch/fixture-lib-sourced\"",
         "install_fixture_lib()",
         "cp scripts/ci/lib.sh \"$fixture_dir/lib.sh\"",
@@ -430,14 +462,18 @@ fn validation_lane_metadata_smoke_preserves_executable_contract() {
         "require_exact_output \"$label\" \"$(cat \"$fixture_lib_marker\")\" \"$fixture_dir/lib.sh\"",
         "sed \"s/^VALIDATION_LANES=.*/VALIDATION_LANES=$validation_lanes/\"",
         "expect_metadata_failure()",
+        "rm -rf \"$fixture_target_dir\"",
         "rm -f \"$fixture_lib_marker\"",
-        "MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER=\"$fixture_lib_marker\" bash \"$fixture\" \"$@\"",
+        "CARGO_TARGET_DIR=\"$fixture_target_dir\" MNEME_VALIDATION_LANE_FIXTURE_LIB_MARKER=\"$fixture_lib_marker\" bash \"$fixture\" \"$@\"",
+        "if [[ -e \"$fixture_target_dir\" ]]",
+        "created CARGO_TARGET_DIR during metadata rejection",
         "require_exit_status \"$label\" \"$status\" \"1\" \"$output\"",
         "require_absent_substring \"$label\" \"$output\" \"Usage: scripts/ci/validation-lane.sh\"",
         "require_absent_substring \"$label\" \"$output\" \"Unknown lane:\"",
         "empty_lanes_fixture=\"$fixture_dir/empty-validation-lane.sh\"",
         "make_fixture \"$duplicate_lane_fixture\" \"(quick quick full-preflight full)\"",
         "make_fixture \"$invalid_lane_fixture\" \"(quick BAD full-preflight full)\"",
+        "make_fixture \"$underscore_lane_fixture\" \"(quick bad_lane full-preflight full)\"",
         "make_fixture \"$missing_sentinel_fixture\" \"(quick crypto full)\"",
         "make_fixture \"$first_sentinel_fixture\" \"(full-preflight full)\"",
         "make_fixture \"$empty_lanes_fixture\" \"()\"",
@@ -447,6 +483,8 @@ fn validation_lane_metadata_smoke_preserves_executable_contract() {
         "MNEME validation-lane metadata invalid: duplicate VALIDATION_LANES token: quick",
         "expect_metadata_failure \"invalid --help lane metadata\"",
         "MNEME validation-lane metadata invalid: invalid VALIDATION_LANES token: BAD",
+        "expect_metadata_failure \"underscore token lane metadata\"",
+        "MNEME validation-lane metadata invalid: invalid VALIDATION_LANES token: bad_lane",
         "expect_metadata_failure \"missing sentinel unknown-lane metadata\"",
         "MNEME validation-lane metadata invalid: VALIDATION_LANES missing full-preflight sentinel",
         "expect_metadata_failure \"empty sublane plan metadata\"",
@@ -875,6 +913,8 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
         "require_exact_output \"$label\" \"$full_sublanes\" \"quick crypto tamper merge determinism bounds p3-local\"",
         "multiline_lane_list=\"$scratch/multiline-lane-list.sh\"",
         "invalid_token_lane_list=\"$scratch/invalid-token-lane-list.sh\"",
+        "underscore_runtime_lane_list=\"$scratch/underscore-runtime-lane-list.sh\"",
+        "printf '%s\\n' \"printf '%s\\n' 'quick|bad_lane|full-preflight'\" > \"$underscore_runtime_lane_list\"",
         "duplicate_runtime_lane_list=\"$scratch/duplicate-runtime-lane-list.sh\"",
         "malformed_validation_lane=\"$scratch/malformed-validation-lane.sh\"",
         "printf '%s\\n' 'VALIDATION_LANES=quick crypto' > \"$malformed_validation_lane\"",
@@ -883,6 +923,8 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
         "printf '%s\\n' 'VALIDATION_LANES=(quick full)'",
         "empty_token_validation_lane=\"$scratch/empty-token-validation-lane.sh\"",
         "printf '%s\\n' 'VALIDATION_LANES=(quick  full-preflight full)' > \"$empty_token_validation_lane\"",
+        "underscore_token_validation_lane=\"$scratch/underscore-token-validation-lane.sh\"",
+        "printf '%s\\n' 'VALIDATION_LANES=(quick bad_lane full-preflight full)' > \"$underscore_token_validation_lane\"",
         "duplicate_token_validation_lane=\"$scratch/duplicate-token-validation-lane.sh\"",
         "printf '%s\\n' 'VALIDATION_LANES=(quick quick full-preflight full)' > \"$duplicate_token_validation_lane\"",
         "expect_failure \"malformed validation lane source\"",
@@ -891,12 +933,16 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
         "validation_lane_choices_from_source \"$label\" \"$duplicate_validation_lane\"",
         "expect_failure \"empty validation lane token\"",
         "validation_lane_choices_from_source \"$label\" \"$empty_token_validation_lane\"",
+        "expect_failure \"underscore validation lane token\"",
+        "validation_lane_choices_from_source \"$label\" \"$underscore_token_validation_lane\"",
         "expect_failure \"duplicate validation lane token\"",
         "validation_lane_choices_from_source \"$label\" \"$duplicate_token_validation_lane\"",
         "expect_failure \"multi-line target lane choices\"",
         "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$multiline_lane_list\"",
         "expect_failure \"invalid target lane choices\"",
         "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$invalid_token_lane_list\"",
+        "expect_failure \"underscore target lane choice\"",
+        "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$underscore_runtime_lane_list\"",
         "expect_failure \"duplicate target lane choices\"",
         "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$duplicate_runtime_lane_list\"",
         "expect_failure \"invalid sublane choices\"",

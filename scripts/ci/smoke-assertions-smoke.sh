@@ -57,6 +57,9 @@ printf '%s\n' "printf '%s\n' 'quick|full-preflight' 'full'" > "$multiline_lane_l
 invalid_token_lane_list="$scratch/invalid-token-lane-list.sh"
 printf '%s\n' "printf '%s\n' 'quick||full-preflight'" > "$invalid_token_lane_list"
 
+underscore_runtime_lane_list="$scratch/underscore-runtime-lane-list.sh"
+printf '%s\n' "printf '%s\n' 'quick|bad_lane|full-preflight'" > "$underscore_runtime_lane_list"
+
 duplicate_runtime_lane_list="$scratch/duplicate-runtime-lane-list.sh"
 printf '%s\n' "printf '%s\n' 'quick|quick|full-preflight'" > "$duplicate_runtime_lane_list"
 
@@ -71,6 +74,9 @@ duplicate_validation_lane="$scratch/duplicate-validation-lane.sh"
 
 empty_token_validation_lane="$scratch/empty-token-validation-lane.sh"
 printf '%s\n' 'VALIDATION_LANES=(quick  full-preflight full)' > "$empty_token_validation_lane"
+
+underscore_token_validation_lane="$scratch/underscore-token-validation-lane.sh"
+printf '%s\n' 'VALIDATION_LANES=(quick bad_lane full-preflight full)' > "$underscore_token_validation_lane"
 
 duplicate_token_validation_lane="$scratch/duplicate-token-validation-lane.sh"
 printf '%s\n' 'VALIDATION_LANES=(quick quick full-preflight full)' > "$duplicate_token_validation_lane"
@@ -92,6 +98,10 @@ expect_failure "empty validation lane token" \
   "$label: invalid VALIDATION_LANES tokens" \
   validation_lane_choices_from_source "$label" "$empty_token_validation_lane"
 
+expect_failure "underscore validation lane token" \
+  "$label: invalid VALIDATION_LANES tokens" \
+  validation_lane_choices_from_source "$label" "$underscore_token_validation_lane"
+
 expect_failure "duplicate validation lane token" \
   "$label: duplicate VALIDATION_LANES token: quick" \
   validation_lane_choices_from_source "$label" "$duplicate_token_validation_lane"
@@ -103,6 +113,10 @@ expect_failure "multi-line target lane choices" \
 expect_failure "invalid target lane choices" \
   "$label: invalid validation lane choices: quick||full-preflight" \
   validation_lane_choices_for_target "$label" "$sentinel_target" "$invalid_token_lane_list"
+
+expect_failure "underscore target lane choice" \
+  "$label: invalid validation lane choices: quick|bad_lane|full-preflight" \
+  validation_lane_choices_for_target "$label" "$sentinel_target" "$underscore_runtime_lane_list"
 
 expect_failure "duplicate target lane choices" \
   "$label: duplicate validation lane choice: quick" \
