@@ -29,6 +29,25 @@ cd "$(git rev-parse --show-toplevel)"
 fail=0
 note() { printf '%s\n' "$*" >&2; }
 
+# Ancestry/existence checks need full history. CI checks out shallow (depth 1) by
+# default, where real ancestor commits legitimately resolve to no object — the very
+# shallow-clone trap this gate exists to catch in docs. Unshallow first; if we
+# cannot (offline/fork), degrade ancestry+existence to NON-FATAL warnings so we
+# never emit a FALSE phantom — a false failure that blocks a valid PR is worse than
+# a skipped check. The feature-declaration check is unaffected and always runs.
+SHA_CHECKS=1
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  note "claims-lint: shallow clone detected — fetching full history for ancestry checks…"
+  if ! git fetch --unshallow --quiet 2>/dev/null \
+     && ! git fetch --deepen=1000000 --quiet 2>/dev/null; then
+    : # fall through to the shallow re-check below
+  fi
+fi
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  SHA_CHECKS=0
+  note "claims-lint: WARNING — repository still shallow; commit-SHA checks DEGRADED to non-fatal (feature checks still enforced)."
+fi
+
 # Collect declared Cargo features across the workspace (left-hand side of `name =`
 # inside each [features] block), plus cargo built-ins.
 declared_features="$(
@@ -62,8 +81,8 @@ while IFS= read -r md; do
     # Extract every backtick-quoted token on the line.
     while IFS= read -r tok; do
       [ -n "$tok" ] || continue
-      # --- Invariant 1: commit SHA citations ---
-      if printf '%s' "$tok" | grep -qiE '^[0-9a-f]{7,40}$'; then
+      # --- Invariant 1: commit SHA citations (skipped if history is shallow) ---
+      if [ "$SHA_CHECKS" = "1" ] && printf '%s' "$tok" | grep -qiE '^[0-9a-f]{7,40}$'; then
         if git cat-file -e "${tok}^{commit}" 2>/dev/null; then
           if ! git merge-base --is-ancestor "$tok" HEAD 2>/dev/null; then
             if line_has_offmaster_marker "$line"; then
