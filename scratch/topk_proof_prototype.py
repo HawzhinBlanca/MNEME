@@ -4,6 +4,7 @@
 import hashlib
 import random
 import sys
+import time
 
 # Goldilocks Prime p = 2^64 - 2^32 + 1
 P = 2**64 - 2**32 + 1
@@ -528,6 +529,41 @@ class Verifier:
 def quantize_vector(v_float, scale=1000):
     return [int(round(x * scale)) % P for x in v_float]
 
+def serialize_proof(proof):
+    import struct
+    buf = bytearray()
+    buf.extend(struct.pack("<Q", proof["d_k"]))
+    buf.extend(struct.pack("<I", len(proof["S_indices"])))
+    for idx in proof["S_indices"]:
+        buf.extend(struct.pack("<Q", idx))
+    
+    buf.extend(struct.pack("<I", len(proof["proof_count"])))
+    for g0, g1 in proof["proof_count"]:
+        buf.extend(struct.pack("<QQ", g0, g1))
+        
+    buf.extend(struct.pack("<I", len(proof["proof_binary"])))
+    for g_evals in proof["proof_binary"]:
+        buf.extend(struct.pack("<QQQQ", *g_evals))
+        
+    er = proof["evals_r"]
+    buf.extend(struct.pack("<Q", er["B_r"]))
+    buf.extend(struct.pack("<I", len(er["S_r"])))
+    for s in er["S_r"]:
+        buf.extend(struct.pack("<Q", s))
+    buf.extend(struct.pack("<Q", er["N_r"]))
+    buf.extend(struct.pack("<I", len(er["V_r"])))
+    for v in er["V_r"]:
+        buf.extend(struct.pack("<Q", v))
+    buf.extend(struct.pack("<Q", er["P_r"]))
+    
+    erp = proof["evals_r_prime"]
+    buf.extend(struct.pack("<I", len(erp["S_r_prime"])))
+    for s in erp["S_r_prime"]:
+        buf.extend(struct.pack("<Q", s))
+    buf.extend(struct.pack("<QQQ", erp["B_r_prime"], erp["D_r_prime"], erp["P_r_prime"]))
+    
+    return bytes(buf)
+
 # Forgery-Test Driver
 def run_tests():
     print("--- TRUE TOP-K PROOF PROTOTYPE HARNESS ---")
@@ -737,6 +773,41 @@ def run_tests():
     assert not cheat_success, "Verifier accepted a proof violating index-order tie-breaking!"
     print("Forgery 2 successfully caught!")
     print("\n--- ALL TESTS PASSED SUCCESSFULLY ---")
+
+    # MEASUREMENT FOR N=10K (Power of 2 = 16384)
+    print("\n--- MEASURING PERFORMANCE AT SCALE (n=10k, specifically n=16384) ---")
+    n_scale = 16384
+    V_scale_floats = [[random.uniform(-1, 1) for _ in range(d)] for _ in range(n_scale)]
+    V_scale = [quantize_vector(v) for v in V_scale_floats]
+    N_scale = [sum(mul(x, x) for x in v_i) % P for v_i in V_scale]
+    
+    prover_scale = Prover(V_scale, q, k, b)
+    verifier_scale = Verifier(q, k, V_scale, N_scale, b)
+    
+    t0_prov = time.perf_counter()
+    proof_scale = prover_scale.generate_proof()
+    t1_prov = time.perf_counter()
+    prover_ms = (t1_prov - t0_prov) * 1000.0
+    
+    t0_ver = time.perf_counter()
+    iters = 10
+    for _ in range(iters):
+        verified_scale = verifier_scale.verify(proof_scale)
+    t1_ver = time.perf_counter()
+    verifier_ms = ((t1_ver - t0_ver) / iters) * 1000.0
+    
+    serialized_bytes = serialize_proof(proof_scale)
+    bare_size_kb = len(serialized_bytes) / 1024.0
+    
+    # Estimate Brakedown PCS overhead: ~150 KB for opening proofs at n=16384
+    estimated_pcs_kb = 150.0
+    real_size_kb = bare_size_kb + estimated_pcs_kb
+    
+    print(f"Outcome at n={n_scale}: {'PASSED' if verified_scale else 'FAILED'}")
+    print(f"Prover time: {prover_ms:.2f} ms")
+    print(f"Verifier time: {verifier_ms:.2f} ms")
+    print(f"Bare proof size: {bare_size_kb:.2f} KB ({len(serialized_bytes)} bytes)")
+    print(f"Estimated Real proof size (with batched Brakedown PCS): {real_size_kb:.2f} KB")
 
 if __name__ == "__main__":
     run_tests()
