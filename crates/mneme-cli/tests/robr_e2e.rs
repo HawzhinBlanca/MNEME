@@ -15,7 +15,14 @@ fn mneme() -> Command {
 fn remember(store: &str, name: &str, body: &str) {
     mneme()
         .args([
-            "remember", store, "--namespace", "user", "--name", name, "--body", body,
+            "remember",
+            store,
+            "--namespace",
+            "user",
+            "--name",
+            name,
+            "--body",
+            body,
         ])
         .assert()
         .success();

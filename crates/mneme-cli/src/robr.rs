@@ -204,7 +204,13 @@ mod tests {
         let prompt_hash = *blake3::hash(b"what is the launch date?").as_bytes();
         let weight_measurement = [0xcd; 32];
         let sampling = "model=claude-opus-4-8;temp=0;top_p=1;seed=42".to_string();
-        let env = envelope_hash(&root_preimage, &prompt_hash, &weight_measurement, &sampling, &ch);
+        let env = envelope_hash(
+            &root_preimage,
+            &prompt_hash,
+            &weight_measurement,
+            &sampling,
+            &ch,
+        );
         RobrReceiptV1 {
             root_seq: 9,
             root_preimage,
@@ -309,7 +315,9 @@ mod tests {
                 .map(|_| {
                     let id = arr32(&mut st);
                     let blen = (xorshift(&mut st) % 24) as usize;
-                    let body: Vec<u8> = (0..blen).map(|_| (xorshift(&mut st) & 0xff) as u8).collect();
+                    let body: Vec<u8> = (0..blen)
+                        .map(|_| (xorshift(&mut st) & 0xff) as u8)
+                        .collect();
                     (id, body)
                 })
                 .collect();
@@ -318,8 +326,13 @@ mod tests {
             let weight_measurement = arr32(&mut st);
             let sampling = format!("model=m{};seed={}", case, xorshift(&mut st) & 0xffff);
             let ch = context_hash(&ctx);
-            let env =
-                envelope_hash(&root_preimage, &prompt_hash, &weight_measurement, &sampling, &ch);
+            let env = envelope_hash(
+                &root_preimage,
+                &prompt_hash,
+                &weight_measurement,
+                &sampling,
+                &ch,
+            );
             let receipt = RobrReceiptV1 {
                 root_seq: xorshift(&mut st),
                 root_preimage,
