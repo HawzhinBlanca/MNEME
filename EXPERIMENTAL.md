@@ -82,7 +82,7 @@ them would have reduced coverage, the opposite of the goal.
 | `experimental/research/mneme-index-piop-research.rs` | **DELETED** — default-off research seam, no prover/recall path, no CORE dep (feature `piop_research` + `mod`/`pub use`/guard-test removed). |
 | `scripts/piop-flat-prototype` | **DELETED** — excluded prototype; the only caller (`phase-iv-cost-report.sh`) already skips when absent. |
 | `scripts/ci/crypto-fault-injection-smoke.sh` | **KEPT** — it is an active, passing step of `validation-lane crypto` (2 `fault_injection` tests exist + run). Not dead; removing it would drop a real gate. |
-| `experimental/cognition-cert/cognition_cert_v1.rs` | **KEPT** — a real `[[test]]` target (roundtrip tests, `required-features=["cognition_cert"]`), not a fixture-only helper. |
+| `experimental/cognition-cert/cognition_cert_v1.rs` | **KEPT** — a real `[[test]]` target (roundtrip tests, `required-features=["cognition_cert"]`), not a fixture-only helper. (PR #9 branch layout — not in master; in master this test is `crates/mneme-index/tests/cognition_cert_v1.rs`.) |
 
 ## Honesty Boundary
 

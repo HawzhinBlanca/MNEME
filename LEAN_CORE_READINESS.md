@@ -12,8 +12,13 @@ Top-line status: all five README LEAN acceptance conditions are now met.
 5. No public claim exceeds the honesty boundary — docs audited; README/
    EXPERIMENTAL/CLASSIFICATION carry only bounded/negated claims.
 
-Plus: the O(N) write-amplification blocker found during 1M perf is FIXED
-(commit `8ba87fc`; lean `remember` ~97× faster, digests unchanged).
+Plus: the O(N) write-amplification blocker found during 1M perf is FIXED at
+master HEAD (commit `43231ba6`): the per-commit key-index snapshot is gated
+behind an off-by-default `bitemporal_recall` feature, verified at HEAD with the
+foundation-gate digests **byte-identical** to the v0.7.0 reference (snapshots
+are sidecars, not in the signed root). The ~97× / p50 4.476 s → 46.3 ms figure
+was measured on the PR #9 branch state; the 1M wall-clock re-bench at HEAD is
+PENDING (see "Perf Finding").
 
 PR [#9](https://github.com/HawzhinBlanca/MNEME/pull/9) is fully green — every
 check passes: `Phase program gate`, `compare digests (ubuntu vs macos)`, both
@@ -33,19 +38,20 @@ parametric residue — those limits are unchanged.
 
 The local code boundary is much closer to the lean product, and the trusted
 verifier surface shrank. The headline scalability blocker (per-commit full
-key-index snapshot, O(N) time / O(N × writes) disk) has been **fixed**: the
-snapshot is now gated behind an off-by-default `bitemporal_recall` feature
-(commit `8ba87fc`). Lean `remember` dropped from p50 4.476 s to 46.3 ms (~97×)
-at 1M; the full 200-sample fsync run now completes (forget/erasure included);
-pinned determinism digests are unchanged; tamper + e2e green. See "Perf Finding
-(RESOLVED)". Remaining blockers:
+key-index snapshot, O(N) time / O(N × writes) disk) has been **fixed at master
+HEAD**: the snapshot is now gated behind an off-by-default `bitemporal_recall`
+feature (commit `43231ba6`), with foundation-gate digests verified byte-identical
+at HEAD (snapshots are sidecars, not in the signed root); tamper + e2e green in
+both `{lean, bitemporal_recall}` configs. The p50 4.476 s → 46.3 ms (~97×) at 1M
+was measured on the PR #9 branch state; the 1M wall-clock re-bench at HEAD is
+PENDING. See "Perf Finding (RESOLVED)". Remaining blockers:
 
-- RESOLVED: The full validation lane now passes from a committed, cold,
-  separate clean checkout (`git worktree` detached at `c2251db`), not just a
-  dirty worktree. See "Clean-Checkout Proof" below.
+- RESOLVED: The full validation lane passes from a committed, cold, separate
+  clean checkout. (The 1M wall-clock numbers below were captured on branch state
+  `c2251db`, PR #9 lineage — **not in master history**; re-bench at HEAD pending.)
 - RESOLVED: The O(N) per-commit key-index snapshot is gated behind
-  `bitemporal_recall` (commit `8ba87fc`). Lean `remember` is ~97× faster at 1M
-  and the full 200-sample fsync run completes; digests unchanged.
+  `bitemporal_recall` (commit `43231ba6`); foundation-gate digests byte-identical
+  at HEAD. The ~97× 1M figure is a branch measurement (re-bench at HEAD pending).
 - SUBSTANTIALLY CLOSED: Cross-OS determinism is now proven — the Linux
   container digests are byte-identical to the macOS-host pinned values (see
   "Cross-OS determinism" below). The digests are environment-independent across
@@ -56,7 +62,7 @@ pinned determinism digests are unchanged; tamper + e2e green. See "Perf Finding
 
 ## Clean-Checkout Proof
 
-The lean-core separation was committed as `c2251db` (62 git-verified renames,
+The lean-core separation was committed as `c2251db` (PR #9 branch, not in master) (62 git-verified renames,
 0 orphan deletes). A fresh detached `git worktree` of that commit was created
 at `/tmp/mneme-clean-checkout` and confirmed self-contained: the full
 `experimental/` tree is present and `git status` is clean. From that cold
@@ -155,7 +161,7 @@ Cross-OS determinism: PROVEN (containerized). `determinism-two-machine.sh
 the foundation gate there. The Linux-container digests are byte-identical to the
 macOS-host pinned values, and the script's `check-foundation-digests` confirmed
 `pinned digests match report run_a` (`DOCKER_DET_EXIT=0`,
-`out/lean-core-readiness/determinism-docker-crossos.log`, rev `2194338`):
+`out/lean-core-readiness/determinism-docker-crossos.log`, rev `2194338` — PR #9 branch, not in master):
 
 | Field | macOS pinned | Linux container |
 |---|---|---|
@@ -178,9 +184,11 @@ pretending a same-CPU run is a bare-metal peer.
 
 ## Perf Finding (RESOLVED): O(N) write amplification on every commit
 
-FIXED in commit `8ba87fc` by gating the per-commit snapshot behind
-`bitemporal_recall` (off by default). Measured effect at 1M, fsync-on, 200
-samples (`out/lean-core-readiness/bench-1m-fsync-after-snapshot-gate.log`):
+FIXED at master HEAD in commit `43231ba6` by gating the per-commit snapshot
+behind `bitemporal_recall` (off by default); foundation-gate digests verified
+byte-identical at HEAD (snapshots are sidecars, not in the signed root). The
+table below was **measured on the PR #9 branch state** (`c2251db`, not in master)
+at 1M, fsync-on, 200 samples — the HEAD wall-clock re-bench is PENDING:
 
 | Op | Before (snapshot on) | After (gated off) |
 |---|---:|---:|
@@ -196,7 +204,7 @@ against `out/ci-foundation-gate/foundation.report.json`), confirming the
 snapshot is a sidecar, not part of the signed root. Original analysis follows
 for the record.
 
-Investigating the 1M write run on the committed state (`c2251db`) surfaced a
+Investigating the 1M write run on the committed state (`c2251db`, PR #9 branch, not in master) surfaced a
 real scalability blocker, more significant than the perf sample count or the
 second-host gap:
 
@@ -255,7 +263,7 @@ Verified implementation scope (turnkey for next increment):
   `root_preimage`/`receipt`/`absent_proof` digests. Still re-run determinism +
   tamper + full after the change to confirm empirically.
 
-## Performance — committed-state 1M run (`c2251db`, fsync-on, watchdog-guarded)
+## Performance — committed-state 1M run (`c2251db`, PR #9 branch — not in master, fsync-on, watchdog-guarded)
 
 Authorized full 200-sample run; disk watchdog (floor 8 GiB free) hard-aborted
 during the forget/erasure phase and cleaned up the store. Completed, honest
@@ -362,7 +370,7 @@ Current unique normal package counts from `cargo tree`:
 |---|---:|
 | `mneme-verify` | 53 |
 | `mneme-store` | 64 |
-| `mneme-store --features erasure_receipt` | 64 |
+| `mneme-store --features erasure_receipt` (PR #9 branch feature — not in master) | 64 |
 | `mneme-mcp` | 81 |
 | `mneme-cli` | 78 |
 
@@ -387,9 +395,9 @@ scripts invoke it explicitly with `--ignored`.
 
 ## What Is Left Exactly
 
-1. DONE. True clean-checkout proof produced: committed `c2251db`, fresh
+1. DONE. True clean-checkout proof produced: committed `c2251db` (PR #9 branch, not in master), fresh
    detached worktree, `validation-lane full` PASS. See "Clean-Checkout Proof".
-2. DONE. O(N) write-amplification fixed (commit `8ba87fc`): per-commit snapshot
+2. DONE. O(N) write-amplification fixed (commit `43231ba6`): per-commit snapshot
    gated behind `bitemporal_recall`. Determinism digests unchanged, tamper +
    e2e green, remember ~97× faster. See "Perf Finding (RESOLVED)".
 3. DONE. Full 1M fsync benchmark now completes all 200 forget/erasure samples
