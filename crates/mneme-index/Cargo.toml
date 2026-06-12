@@ -31,6 +31,7 @@ rand = { version = "0.8", optional = true }
 [features]
 default = ["ads"]
 ads = []
+verify_semantic_receipt_vo = []
 # Phase II Context Gate verification; off by default.
 context_gate = ["mneme-gate", "mneme-gate/phase_ii_gate_open", "dep:mneme-context"]
 # Tagged BLAKE3 commitment-binding envelope (§9.2). Binding only — NOT zero-knowledge, NOT SNARK, NOT Plonky2.
