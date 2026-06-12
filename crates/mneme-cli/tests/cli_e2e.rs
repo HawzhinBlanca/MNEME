@@ -955,6 +955,28 @@ fn audit_pin_peak_state_creates_advances_and_rejects_rollback() {
     );
     assert!(pin.exists());
 
+    #[cfg(unix)]
+    {
+        let inside_pin = store.join("inside-valid-pin.json");
+        let symlink_pin = dir.path().join("symlink-root-history-pin.json");
+        fs::copy(&pin, &inside_pin).expect("inside pin fixture");
+        std::os::unix::fs::symlink(&inside_pin, &symlink_pin).expect("symlink pin fixture");
+
+        mneme()
+            .args([
+                "--operator-seed",
+                &seed,
+                "audit",
+                store.to_str().unwrap(),
+                "--pin-peak-state",
+                symlink_pin.to_str().unwrap(),
+            ])
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("outside STORE"));
+    }
+
     mneme()
         .args([
             "--operator-seed",

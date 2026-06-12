@@ -25,6 +25,40 @@ fn assert_phrases_in_order(surface: &str, text: &str, phrases: &[&str]) {
     }
 }
 
+#[test]
+fn readiness_doc_does_not_self_certify_absolute_readiness() {
+    let readiness = include_str!("../../../READINESS.md");
+
+    for forbidden in [
+        "AUTHORITATIVE (READY)",
+        "READY (100% Hardened Readiness)",
+        "we **certify**",
+        "fully ready, secure, and resilient",
+        "Test Success Rate**: 100%",
+        "All validation lanes, micro-benchmarks, and security invariants",
+    ] {
+        assert!(
+            !readiness.contains(forbidden),
+            "READINESS.md must not contain absolute self-certification phrase `{forbidden}`"
+        );
+    }
+
+    for required in [
+        "not an authoritative proof",
+        "fresh validation evidence",
+        "out-of-band trusted root pin or an external peak-state pin",
+        "same-host pin files can still be rolled back",
+        "do not prove semantic truth",
+        "exact-nearest-neighbor",
+        "SNARK-backed by default",
+    ] {
+        assert!(
+            readiness.contains(required),
+            "READINESS.md must preserve bounded-readiness caveat `{required}`"
+        );
+    }
+}
+
 fn bash_array_values<'a>(source: &'a str, name: &str) -> Vec<&'a str> {
     let marker = format!("{name}=(");
     source
@@ -68,6 +102,7 @@ fn validation_lane_choices_are_single_source_and_match_claude_ladder() {
         "tamper",
         "merge",
         "determinism",
+        "p3-local",
         "full-preflight",
         "full",
     ];
@@ -173,7 +208,7 @@ fn validation_lane_full_runs_required_sublanes_and_preserves_honesty_boundary() 
         "validation-lane full sublane source",
         validation_lane,
         &[
-            "FULL_SUBLANES=(quick crypto tamper merge determinism)",
+            "FULL_SUBLANES=(quick crypto tamper merge determinism p3-local)",
             "run_full_sublanes()",
             "for sublane in \"${FULL_SUBLANES[@]}\"",
             "bash \"$0\" \"$sublane\"",
@@ -236,7 +271,7 @@ fn validation_lane_full_and_preflight_share_one_sublane_source() {
     let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
 
     for phrase in [
-        "FULL_SUBLANES=(quick crypto tamper merge determinism)",
+        "FULL_SUBLANES=(quick crypto tamper merge determinism p3-local)",
         "${FULL_SUBLANES[*]}",
         "run_full_sublanes()",
         "for sublane in \"${FULL_SUBLANES[@]}\"",
@@ -356,7 +391,7 @@ fn unknown_lane_smoke_preserves_executable_contract() {
         "bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
         "status=$?",
         "require_exit_status \"$label\" \"$status\" \"2\" \"$output\"",
-        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|full-preflight|full)",
+        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full)",
         "validation-lane-unknown-smoke: OK",
     ] {
         assert!(
@@ -585,7 +620,7 @@ fn validation_lane_list_smoke_preserves_exact_list_contract() {
         "sentinel_target=\"$scratch/cargo-target\"",
         "CARGO_TARGET_DIR=\"$sentinel_target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\"",
-        "expected_output=\"quick|crypto|tamper|merge|determinism|full-preflight|full\"",
+        "expected_output=\"quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full\"",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
         "require_line_count \"$label\" \"$output\" \"1\"",
         "if [[ -e \"$sentinel_target\" ]]",
@@ -621,7 +656,7 @@ fn validation_lane_help_smoke_preserves_non_executing_usage_contract() {
         "short_sentinel_target=\"$scratch/short-cargo-target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --help)\"",
         "short_output=\"$(CARGO_TARGET_DIR=\"$short_sentinel_target\" bash scripts/ci/validation-lane.sh -h)\"",
-        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|full-preflight|full>",
+        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|p3-local|full-preflight|full>",
         "       scripts/ci/validation-lane.sh --list",
         "       scripts/ci/validation-lane.sh --help",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",

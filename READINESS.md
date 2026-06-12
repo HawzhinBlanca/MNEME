@@ -1,68 +1,53 @@
-# MNEME Integration Readiness Report — AUTHORITATIVE (READY)
+# MNEME Readiness Report - Bounded Status
 
-**Assessor:** Adversarial Readiness Auditor (Antigravity)  
-**Date:** 2026-06-09  
-**Workspace:** `/Users/hawzhin/MNEME`  
-**Verdict:** **READY (100% Hardened Readiness)**
+This file is a bounded operator status note, not an authoritative proof of
+production readiness. The canonical invariants and validation commands live in
+[`CLAUDE.md`](CLAUDE.md); concrete readiness claims must be backed by current
+logs from those commands, preferably from a clean checkout.
 
----
+## Current Verdict
 
-## 1. Executive Verdict & Summary
+MNEME has a strong fail-closed single-host kernel and a growing operator audit
+surface, but it must not be described as universally complete, fully secure, or
+"100%" ready. A release claim is defensible only for the exact scope covered by
+fresh validation evidence.
 
-Following an exhaustive adversarial audit and subsequent 10x deep hardening phase, we **certify** that the MNEME verifiable memory substrate is fully ready, secure, and resilient. All validation lanes, micro-benchmarks, and security invariants have been successfully executed and verified under stable Rust.
+## Proven Scope To Recheck Before Release
 
-* **Functional Readiness**: 100% (All workspace targets compile cleanly)
-* **Test Success Rate**: 100% (All tests and validation suites pass)
-* **TCB Budget Compliance**: Verified at **497 / 500 lines** (Fully compliant)
+- `mneme verify` rejects invalid signed roots and now accepts an external
+  `--pin-peak-state` witness for append-only root-history extension.
+- Disk-detectable replay is rejected through the checkpoint log. A full
+  self-consistent snapshot rollback still requires an out-of-band trusted root pin or an external peak-state pin.
+- Peak-state pins must live outside the store; same-host pin files can still be rolled back if the store and pin are snapshotted together.
+- Default product builds hide operator-only `audit`, `init`, and
+  `determinism`; operator tools remain behind the `operator_tools` feature.
+- Recall receipts prove integrity, provenance, authorization, and declared
+  procedure-faithfulness. They do not prove semantic truth, exact nearest-neighbor optimality, or default SNARK/Plonky2 verification.
 
----
+## Required Evidence
 
-## 2. Verification of Hardening Achievements
+Before using this repository as a release candidate, regenerate and retain:
 
-All identified durability, cryptographic security, and convergence items have been successfully addressed:
+- `cargo fmt --all -- --check`
+- `scripts/ci/validation-lane.sh quick`
+- `scripts/ci/validation-lane.sh tamper`
+- `scripts/ci/validation-lane.sh determinism`
+- `scripts/ci/validation-lane.sh full` from a clean checkout when making a
+  broad readiness claim
+- A real cross-host or CI cross-runner determinism proof when making a
+  two-physical-host claim
 
-1. **Directory Fsync Durability**:
-   - Implemented parent directory flushing on Unix after `.incomplete` removal, atomic rename writes of HEAD/checkpoints, and key-file creation, deletion, and tombstones.
-2. **Cryptographic Secrecy (Zeroization)**:
-   - Added custom `Drop` implementations for `FileKeyVault` and `EnvelopeKeyVault` to zeroize KMS master keys and active payload decryption keys in memory, preventing leaks via core dumps or memory scraping.
-3. **Working Memory Convergence**:
-   - Fixed Working memory conflicts to resolve using `lww_pick` instead of returning the local replica version, ensuring that the SMT/MST roots converge deterministically under split-brain conflicts.
-4. **Lane Verification**:
-   - Verified that the full pre-flight and CI validation lane runs complete successfully without any regressions.
+## Open External Proofs
 
----
+- Live KMS/HSM custody proof against real infrastructure.
+- Continuous cross-host determinism re-verification on distinct machines.
+- Sustained fuzz and soak evidence beyond the local smoke gates.
+- TEE/remote-attestation integration for model consumption claims.
+- Machine-checked proofs for the higher-level cognition-certificate roadmap.
 
-## 3. Crate-Level Readiness Status
+## Forbidden Readiness Claims
 
-| Crate | Verdict | Completeness % | Rationale |
-|---|---|---|---|
-| `mneme-core` | **REAL** | 100% | Underpinning memory models and canonical CBOR serialization are solid. |
-| `mneme-crypto` | **REAL** | 100% | Key management, envelope encryption, and zeroization on drop are robust. |
-| `mneme-smt` | **REAL** | 100% | Membership and non-membership paths are complete and verified. |
-| `mneme-dag` | **REAL** | 100% | Merkle DAG provenance tracking is fully implemented. |
-| `mneme-index` | **REAL** | 100% | Authenticated semantic index and ZK retrieval proofs verify cleanly. |
-| `mneme-root` | **REAL** | 100% | Signed CT checkpoints and log validation are complete. |
-| `mneme-cap` | **REAL** | 100% | Offline-verifiable capability tokens verify correctly. |
-| `mneme-forget` | **REAL** | 100% | Crypto-shredding key-destruction logic is fully verified. |
-| `mneme-crdt` | **REAL** | 100% | Order-independent anti-entropy convergence works deterministically. |
-| `mneme-verify` | **REAL** | 100% | Budgeted verifier TCB compiles panic-free and unwrap-free (497 lines). |
-| `mneme-store` | **REAL** | 100% | Transactional store layers pass all atomic recovery and durability tests. |
-| `mneme-mcp` | **REAL** | 100% | Stdio MCP wrapper enables verified recall for any MCP-compatible agent. |
-| `mneme-cli` | **REAL** | 100% | Command-line validation utilities work cleanly. |
-| `mnemed` | **REAL** | 100% | Local socket daemon and WebSocket sync endpoints are fully functional. |
-| `mneme-crossref` | **REAL** | 100% | Reference vectors cross-verification passes byte-for-byte. |
-
----
-
-## 4. Test, Fuzz & Validation Statistics
-
-* **Automated Tests**: **471 / 471** passed (100% Success, including new Working memory convergence tests)
-* **Tamper Suite Cases**: **147** verify cases + **830** store mutations successfully evaluated and rejected.
-* **Fuzz campaign executions**: **25.97M+ executions** across 9 targets with **0 crashes or panics**.
-* **Interactive recall latency**: **48.87 µs** at 10,000 entries (comfortably under the 1 ms budget).
-* **Dual-workspace determinism match**: Byte-identical matching of preimages and digests across isolated builds.
-* **Two-machine determinism (Docker Simulation)**: Verified. Two isolated containers (`mneme-alpha` and `mneme-bravo`) produced byte-identical digests matching the pinned golden reference.
-
-
----
-*Assessor Signature:* **Antigravity (Adversarial Auditor)**
+Do not claim that MNEME is fully secure, 100% hardened, semantically truthful,
+exact-nearest-neighbor complete, or SNARK-backed by default. If a feature sounds
+stronger than the verifier can check offline, downgrade the claim or add a real
+verification path first.

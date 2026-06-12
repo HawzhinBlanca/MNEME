@@ -1111,6 +1111,13 @@ fn ensure_peak_pin_outside_store(
     if create_parent {
         std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
     }
+    if path.exists() {
+        let target = std::fs::canonicalize(path).map_err(|_| CliErrorKind::Usage)?;
+        if target.starts_with(&store) {
+            eprintln!("mneme: --pin-peak-state must reference a path outside STORE");
+            return Err(CliErrorKind::Usage);
+        }
+    }
     let parent = std::fs::canonicalize(parent).map_err(|_| CliErrorKind::Usage)?;
     if parent.starts_with(&store) {
         eprintln!("mneme: --pin-peak-state must reference a path outside STORE");

@@ -187,6 +187,28 @@ fn default_verify_accepts_external_peak_state_pin_and_rejects_rollback() {
         .code(2)
         .stderr(predicate::str::contains("outside STORE"));
 
+    #[cfg(unix)]
+    {
+        let inside_pin = store.join("inside-valid-pin.json");
+        let symlink_pin = dir.path().join("symlink-peak-state.json");
+        fs::copy(&pin, &inside_pin).expect("inside pin fixture");
+        std::os::unix::fs::symlink(&inside_pin, &symlink_pin).expect("symlink pin fixture");
+
+        mneme()
+            .args([
+                "--operator-seed",
+                &seed_hex,
+                "verify",
+                store.to_str().unwrap(),
+                "--pin-peak-state",
+                symlink_pin.to_str().unwrap(),
+            ])
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("outside STORE"));
+    }
+
     Store::create(&rolled_back_store, KeyPair::from_seed(seed)).expect("rolled-back fixture");
     mneme()
         .args([
