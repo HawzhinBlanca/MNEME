@@ -1,0 +1,18 @@
+[package]
+name = "mneme-optimistic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-smt.workspace = true
+blake3.workspace = true
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
