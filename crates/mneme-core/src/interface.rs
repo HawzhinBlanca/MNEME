@@ -345,6 +345,7 @@ pub struct Query {
     pub min_tier: TrustTier,
     /// Fixed-point query vector for semantic procedure P (§9.2).
     pub embedding: Option<crate::FixedPointEmbedding>,
+    pub drand_signature: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug)]
@@ -360,6 +361,7 @@ pub struct Draft {
     pub embedding: Option<crate::FixedPointEmbedding>,
     /// Optional valid-time (world time), distinct from transaction-time (`hlc` at ingest).
     pub valid_time_ms: Option<u64>,
+    pub embargo_round: Option<u64>,
 }
 
 #[derive(Clone, Debug)]

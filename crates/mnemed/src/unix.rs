@@ -777,6 +777,7 @@ fn remember(
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     let (id, root) = store.remember(draft, &cap)?;
     Ok(serde_json::json!({
@@ -798,6 +799,7 @@ fn recall(
         logical_key: LogicalKey { namespace, name },
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let entries = store.recall_verified_default(&query, &cap)?;
     Ok(serde_json::json!({ "count": entries.len() }))

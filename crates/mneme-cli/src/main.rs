@@ -39,6 +39,10 @@ struct Cli {
     /// Key vault backend: file (default) or envelope (uses MNEME_KMS_MASTER_KEY_HEX)
     #[arg(long, global = true, env = "MNEME_KEY_VAULT", default_value = "file")]
     vault: VaultArg,
+
+    /// VDF difficulty for epoch checkpoints
+    #[arg(long, global = true)]
+    vdf_difficulty: Option<u64>,
 }
 
 #[derive(Subcommand)]
@@ -50,6 +54,9 @@ enum Commands {
         /// a full-snapshot rollback that is otherwise indistinguishable from disk (§2.4).
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
+        /// Expected minimum VDF difficulty for sequence transitions
+        #[arg(long = "min-vdf-difficulty")]
+        min_vdf_difficulty: Option<u64>,
     },
     /// [Not yet implemented] Print provenance, writers, tiers, tombstones for a root checkpoint
     Audit { root: PathBuf },
@@ -70,6 +77,12 @@ enum Commands {
         /// a full-snapshot rollback that is otherwise indistinguishable from disk (§2.4).
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
+        /// Optional drand signature for time-lock decryption (hex)
+        #[arg(long = "drand-sig")]
+        drand_sig: Option<String>,
+        /// Expected minimum VDF difficulty for sequence transitions
+        #[arg(long = "min-vdf-difficulty")]
+        min_vdf_difficulty: Option<u64>,
     },
     /// Remember one episodic entry by logical key
     Remember {
@@ -83,6 +96,9 @@ enum Commands {
         /// UTF-8 body to store
         #[arg(long)]
         body: String,
+        /// Future drand round to lock key
+        #[arg(long)]
+        embargo_round: Option<u64>,
     },
     /// Cryptographic forget (shred)
     Forget {
@@ -393,6 +409,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                     },
                     min_tier: min_tier.into(),
                     embedding: None,
+                    drand_signature: None,
                 };
                 let entries = mneme_store
                     .recall_verified_default(&q, &cap)
@@ -505,6 +522,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                     },
                     min_tier: min_tier.into(),
                     embedding: None,
+                    drand_signature: None,
                 };
                 let recalled = mneme_store
                     .recall_verified_default(&q, &cap)
@@ -594,10 +612,15 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("initialized store at {}", path.display());
             Ok(())
         }
-        Commands::Verify { store, pin_root } => {
+        Commands::Verify {
+            store,
+            pin_root,
+            min_vdf_difficulty,
+        } => {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
-            let trust = TrustConfig::new(operator.public_key_bytes());
+            let mut trust = TrustConfig::new(operator.public_key_bytes());
+            trust.min_vdf_difficulty = min_vdf_difficulty;
             let report = verify_store(&store, &trust).map_err(CliErrorKind::VerifyFailed)?;
             // §2.4 residual: reject a full-snapshot rollback against an out-of-band pin.
             if let Some(pin_hex) = pin_root {
@@ -619,6 +642,8 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             namespace,
             key,
             pin_root,
+            drand_sig,
+            min_vdf_difficulty,
         } => {
             if query.trim().is_empty() && key.is_none() {
                 eprintln!("mneme: recall requires --query or --key");
@@ -631,6 +656,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 None => None,
             };
             let mut mneme_store = open_store_pinned(&store, operator.clone(), pin, cli.vault)?;
+            mneme_store.trust_mut().min_vdf_difficulty = min_vdf_difficulty;
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             mneme_store
@@ -641,10 +667,17 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 namespace,
                 name: key.unwrap_or(query),
             };
+            let drand_signature = match drand_sig {
+                Some(hex_str) => {
+                    Some(hex::decode(hex_str.trim()).map_err(|_| CliErrorKind::Usage)?)
+                }
+                None => None,
+            };
             let q = Query {
                 logical_key,
                 min_tier: min_tier.into(),
                 embedding: None,
+                drand_signature,
             };
             let entries = mneme_store
                 .recall_verified_default(&q, &cap)
@@ -660,6 +693,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             namespace,
             name,
             body,
+            embargo_round,
         } => {
             if namespace.trim().is_empty() || name.trim().is_empty() {
                 eprintln!("mneme: remember requires non-empty --namespace and --name");
@@ -668,6 +702,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            if let Some(diff) = cli.vdf_difficulty {
+                mneme_store.set_vdf_difficulty(Some(diff));
+            }
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             let draft = Draft {
@@ -680,6 +717,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 trust_tier: Some(TrustTier::Trusted),
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round,
             };
             let (id, root) = mneme_store
                 .remember(draft, &cap)
@@ -714,6 +752,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            if let Some(diff) = cli.vdf_difficulty {
+                mneme_store.set_vdf_difficulty(Some(diff));
+            }
             let cap =
                 agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
             let logical_key = parse_logical_key(&key);
@@ -782,6 +823,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             require_store_dir(&store_b)?;
             let operator = load_or_generate_operator(&store_a, cli.operator_seed.as_deref())?;
             let mut mneme_store = open_store(&store_a, operator, cli.vault)?;
+            if let Some(diff) = cli.vdf_difficulty {
+                mneme_store.set_vdf_difficulty(Some(diff));
+            }
             let root = mneme_store
                 .merge_from_path(&store_b)
                 .map_err(CliErrorKind::Kernel)?;

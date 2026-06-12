@@ -45,6 +45,7 @@ fn forget_with_proof_emits_and_binds_post_commit_root() {
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     store.remember(draft, &cap).unwrap();
     let pre_seq = store.current_root().unwrap().sequence;
@@ -76,6 +77,7 @@ fn forget_proof_rejects_stale_root_binding() {
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     store.remember(draft, &cap).unwrap();
     let proven = store

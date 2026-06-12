@@ -55,7 +55,8 @@ pub use interface::{
     SyncMessage, TrustTier, VerificationObject,
 };
 pub use object::{
-    EXT_VALID_TIME_MS, HlcWire, MemoryKind, OBJECT_VERSION, ObjectRecord, PayloadEnc,
+    EXT_EMBARGO_ROUND, EXT_TLOCK_KEY_CIPHERTEXT, EXT_VALID_TIME_MS, HlcWire, MemoryKind,
+    OBJECT_VERSION, ObjectRecord, PayloadEnc, embargo_from_ext, ext_map_with_embargo,
     ext_map_with_valid_time, valid_time_from_ext,
 };
 pub use object_path::decode_content_addressed_object_path;

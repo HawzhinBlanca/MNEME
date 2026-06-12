@@ -188,6 +188,7 @@ fn build_fixture_run_inner(dir: &Path, operator_seed: [u8; 32]) -> Result<RunDig
             trust_tier: Some(TrustTier::Working),
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         };
         store.remember(draft, &cap)?;
     }

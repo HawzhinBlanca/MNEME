@@ -42,6 +42,7 @@ fn forgery_provenance_bearing_non_topk_result_rejected() {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
         embedding: Some(sample_query_embedding()),
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,

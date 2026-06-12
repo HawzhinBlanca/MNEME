@@ -201,3 +201,32 @@ fn hex32(s: &str) -> [u8; 32] {
 fn checkpoint_file(store: &Path, sequence: u64) -> std::path::PathBuf {
     store.join(format!("roots/{sequence}.root.cbor"))
 }
+
+#[test]
+fn real_vdf_chain_verification_succeeds() {
+    let (dag, key, sem) = sample_roots();
+    let op = operator();
+    let difficulty = 200; // Small difficulty for fast test execution
+    let first =
+        StoredRoot::assemble(dag, key, sem, sample_hlc(10), [0u8; 32], 1, &op).expect("first");
+
+    // Prover computes VDF based on the previous preimage hash
+    let (y, proof) = mneme_vdf::VdfProver::solve(&first.preimage_hash, difficulty);
+    let mut vdf_proof = y;
+    vdf_proof.extend(proof);
+
+    let second = StoredRoot::assemble_with_vdf(
+        dag,
+        key,
+        sem,
+        sample_hlc(11),
+        first.preimage_hash,
+        2,
+        &op,
+        Some(vdf_proof),
+        Some(difficulty),
+    )
+    .expect("second");
+
+    verify_root_chain(&second.to_root(), Some(&first.to_root())).expect("VDF verification failed");
+}

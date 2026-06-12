@@ -57,7 +57,7 @@ run_remote_gate() {
   local local_rev remote_rev
   local_rev="$(git -C "$ROOT" rev-parse HEAD)"
   remote_rev="$(ssh -o BatchMode=yes "$MNEME_SECOND_HOST" \
-    "git -C '$remote_root' rev-parse HEAD 2>/dev/null" || true)"
+    "export PATH=\"\$HOME/.cargo/bin:\$HOME/.local/bin:/usr/bin:\$PATH\" && git -C '$remote_root' rev-parse HEAD 2>/dev/null" || true)"
   if [[ -n "$remote_rev" && "$local_rev" != "$remote_rev" ]]; then
     echo "convergence-two-host: git HEAD mismatch (local=$local_rev remote=$remote_rev)" >&2
     exit 1
@@ -66,6 +66,7 @@ run_remote_gate() {
   cargo test -p mneme-crdt -- merge_convergence -- --nocapture
   ssh -o BatchMode=yes "$MNEME_SECOND_HOST" bash -s <<EOF
 set -euo pipefail
+export PATH="\$HOME/.cargo/bin:\$HOME/.local/bin:/usr/bin:\$PATH"
 cd "$remote_root"
 export CARGO_TARGET_DIR="\${CARGO_TARGET_DIR:-$remote_root/target}"
 cargo test -p mneme-crdt -- merge_convergence -- --nocapture

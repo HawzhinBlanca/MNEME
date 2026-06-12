@@ -20,6 +20,8 @@ mneme-robr = { workspace = true }
 mneme-forget.workspace = true
 mneme-crdt.workspace = true
 mneme-account.workspace = true
+mneme-embargo = { workspace = true }
+mneme-vdf = { workspace = true }
 mneme-context = { workspace = true, optional = true }
 mneme-gate = { workspace = true, optional = true }
 rand.workspace = true

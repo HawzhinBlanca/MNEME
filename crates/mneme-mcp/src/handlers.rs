@@ -101,6 +101,7 @@ impl MemoryHandlers {
             trust_tier: None,
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         };
         let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
         let action_receipt =
@@ -128,6 +129,7 @@ impl MemoryHandlers {
             },
             min_tier,
             embedding: None,
+            drand_signature: None,
         };
         let store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
         let entries = store.recall_verified_default(&query, &self.read_cap)?;

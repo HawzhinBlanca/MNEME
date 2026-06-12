@@ -162,7 +162,7 @@ impl Store {
             previous_root: previous,
         };
         let mut entries = verify_recall(&input, query, &self.trust, &ctx)?;
-        self.decrypt_entries(&mut entries)?;
+        self.decrypt_entries(query, &mut entries)?;
         Ok(entries)
     }
 
@@ -207,7 +207,7 @@ impl Store {
             previous_root: previous,
         };
         let mut entries = verify_semantic_recall(&input, proc, query, &self.trust, &ctx)?;
-        self.decrypt_entries(&mut entries)?;
+        self.decrypt_entries(query, &mut entries)?;
         Ok(entries)
     }
 

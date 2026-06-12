@@ -8,6 +8,7 @@ license.workspace = true
 mneme-core.workspace = true
 mneme-crypto.workspace = true
 ed25519-dalek.workspace = true
+mneme-vdf = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true

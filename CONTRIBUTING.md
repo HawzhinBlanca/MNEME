@@ -48,11 +48,15 @@ Preserve these limits in code, docs, errors, and MCP tool text:
 
 1. **Authenticated ≠ true.** MNEME proves integrity, provenance, and authorization — not
    semantic truth.
-2. **Verifiable retrieval proves procedure-faithfulness, not exact nearest neighbors.**
+2. **Verifiable retrieval proves procedure-faithfulness under the committed quantized metric, not real-valued nearest-neighbor optimality.**
    Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted
    distances; true top-k ranking is not proven, and returned items are not proven to be the
    true nearest neighbors by query-to-embedding distance until verifiers recompute candidate
-   distances from carried embeddings.
+   distances from carried embeddings. Under Candidate (b), MNEME can prove
+   exact top-k nearest neighbors under the committed quantized integer metric
+   (with deterministic index-order tie-breaking), but the quantization caveat
+   remains: top-k under the quantized metric may differ from the true real-valued
+   top-k due to quantization precision.
 
 Do not weaken or remove these strings from standing docs or exports.
 

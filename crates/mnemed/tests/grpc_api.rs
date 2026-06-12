@@ -55,6 +55,7 @@ fn seed_oversized_grpc_recall_entry(h: &TestHarness, context: &str) {
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &h.agent_cap,
         )

@@ -5,6 +5,8 @@ use mneme_crypto::{TrustConfig, public_key_from_bytes, verify_signature_bytes};
 use mneme_root::{check_replay, verify_root_chain};
 
 /// Root signature, chain succession, and replay gate.
+#[rustfmt::skip]
+#[allow(clippy::redundant_pattern_matching, clippy::manual_unwrap_or, clippy::manual_unwrap_or_default)]
 pub fn verify_root(
     root: &Root,
     trust: &TrustConfig,
@@ -35,6 +37,16 @@ pub fn verify_root(
     }
     // PROOF-OBLIGATION: Verify chain succession (prev_root matches previous root's signature).
     verify_root_chain(root, previous)?;
+    // INVARIANT: Enforce min VDF difficulty if configured in TrustConfig
+    if let Some(min_diff) = trust.min_vdf_difficulty {
+        if let Some(_) = previous {
+            let actual_diff = match root.vdf_difficulty { Some(d) => d, None => 0 };
+            if actual_diff < min_diff {
+                return Err(MnemeError::RootInconsistent);
+            }
+            if let None = root.vdf_proof { return Err(MnemeError::RootInconsistent); }
+        }
+    }
     // INVARIANT: Replay gate check (last_seen_hlc <= root.hlc_max) to close rollback vector.
     check_replay(root, trust.last_seen_hlc)?;
     Ok(())

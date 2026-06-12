@@ -88,6 +88,8 @@ mod redteam_bind {
             prev_root: [0x15; 32],
             signature: vec![0x00; 64],
             sequence: 7,
+            vdf_proof: None,
+            vdf_difficulty: None,
         }
     }
 

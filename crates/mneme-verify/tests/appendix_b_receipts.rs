@@ -146,6 +146,7 @@ fn build_fixture() -> Fixture {
             logical_key: key,
             min_tier: TrustTier::Working,
             embedding: None,
+            drand_signature: None,
         },
         trust,
         key_index,

@@ -48,6 +48,7 @@ fn remember(store: &mut Store, ns: &str, name: &str, body: &[u8], cap: &Capabili
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     let context = format!("remembering {ns}/{name}");
     expect_two_peer_remember(store.remember(draft, cap), &context);

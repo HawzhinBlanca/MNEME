@@ -33,6 +33,7 @@ fn e2e_remember_recall_verified_key_index_roundtrip() {
         logical_key: theme_key("user", "theme"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let proc = default_key_procedure();
     let entries = store.recall_verified(&query, &proc, &cap).unwrap();
@@ -64,6 +65,7 @@ fn e2e_store_reopen_after_remember_preserves_recall() {
         logical_key: theme_key("app", "config"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let entries = reopened
         .recall_verified(&query, &default_key_procedure(), &cap)
@@ -106,6 +108,7 @@ fn e2e_remember_appends_key_index_journal_without_rewriting_base() {
         logical_key: theme_key("journal", "two"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let entries = reopened
         .recall_verified(&query, &default_key_procedure(), &cap)
@@ -125,6 +128,7 @@ fn e2e_session_recall_cache_invalidated_by_forget() {
         logical_key: theme_key("session", "k"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let proc = default_key_procedure();
 
@@ -160,6 +164,7 @@ fn e2e_session_recall_cache_reflects_overwrite() {
         logical_key: theme_key("session", "k"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let proc = default_key_procedure();
     assert_eq!(
@@ -192,6 +197,7 @@ fn e2e_recall_rejects_tampered_object_bytes() {
         logical_key: theme_key("sec", "token"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let proc = default_key_procedure();
     let err = store.recall_verified(&query, &proc, &cap).unwrap_err();
@@ -209,6 +215,7 @@ fn e2e_tamper_suite_rejects_modified_object_hash() {
         logical_key: theme_key("t", "k"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert_eq!(
         store
@@ -254,6 +261,7 @@ fn e2e_forget_leaves_verifiable_tombstone_and_prove_absent() {
         logical_key: key,
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert_eq!(
         store
@@ -279,6 +287,7 @@ fn e2e_quarantine_entry_blocked_from_trusted_recall() {
         logical_key: theme_key("tools/mcp", "web"),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let err = store
         .recall_verified(&query, &default_key_procedure(), &tool_cap)
@@ -338,6 +347,7 @@ fn e2e_killer_demo_storage_tamper_rejected_at_read() {
         logical_key: key,
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let proc = default_key_procedure();
     let err = store.recall_verified(&query, &proc, &cap).unwrap_err();
@@ -388,6 +398,7 @@ fn e2e_killer_demo_agent_a_vs_agent_b_adb() {
         logical_key: key.clone(),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let err = store.recall_verified(&query, &proc, &cap).unwrap_err();
     assert_eq!(err, MnemeError::ObjectTampered);
@@ -446,6 +457,7 @@ fn e2e_killer_demo_agent_a_vs_agent_b_ainj() {
         logical_key: key.clone(),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let err = store
         .recall_verified(&trusted_query, &proc, &tool_cap)
@@ -470,6 +482,7 @@ fn e2e_killer_demo_agent_a_vs_agent_b_ainj() {
         logical_key: key,
         min_tier: TrustTier::Quarantine,
         embedding: None,
+        drand_signature: None,
     };
     let attributed = store
         .recall_verified(&quarantine_query, &proc, &tool_cap)
@@ -499,6 +512,7 @@ fn e2e_bypass_adb_recall_verified_at_trusted() {
         logical_key: key,
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let err = store
         .recall_verified(&query, &default_key_procedure(), &cap)
@@ -518,6 +532,7 @@ fn e2e_bypass_ainj_poison_recall_verified_at_trusted() {
         logical_key: theme_key("tools/mcp", "web"),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let err = store
         .recall_verified(&query, &default_key_procedure(), &tool_cap)
@@ -544,6 +559,7 @@ fn e2e_bypass_ainj_poison_recall_at_quarantine() {
         logical_key: theme_key("tools/mcp", "web"),
         min_tier: TrustTier::Quarantine,
         embedding: None,
+        drand_signature: None,
     };
     let entries = store
         .recall_verified(&query, &default_key_procedure(), &tool_cap)
@@ -565,6 +581,7 @@ fn e2e_bypass_b2_unverified_recall_surface_closed() {
         logical_key: key,
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     assert_eq!(
         store.recall_verified_default(&query, &cap).unwrap_err(),
@@ -621,6 +638,7 @@ fn e2e_bench_populate_recall_smoke() {
         logical_key: theme_key("bench-smoke", "key-00016"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let entries = store
         .recall_verified_default(&query, &cap)
@@ -848,6 +866,7 @@ fn e2e_kill_resume_recovery_after_marker_removal() {
         logical_key: theme_key("stable", "key"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let entries = reopened
         .recall_verified(&query, &default_key_procedure(), &cap)
@@ -898,6 +917,7 @@ fn e2e_kill_resume_merge_recovery_after_marker_removal() {
         logical_key: theme_key("stable", "a"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let kept = reopened
         .recall_verified(&stable, &default_key_procedure(), &cap)
@@ -908,6 +928,7 @@ fn e2e_kill_resume_merge_recovery_after_marker_removal() {
         logical_key: theme_key("merge", "b"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert!(
         reopened
@@ -943,6 +964,7 @@ fn e2e_verify_recall_never_returns_on_bad_receipt_root() {
         logical_key: theme_key("v", "r"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let root = store.current_root().unwrap();
     let proof = store.prove_membership(&query.logical_key).unwrap();
@@ -1019,6 +1041,7 @@ fn e2e_90day_promote_quarantine_to_trusted_recall() {
         logical_key: theme_key("tools/mcp", "note"),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let entries = store
         .recall_verified(&query, &default_key_procedure(), &agent_cap)
@@ -1046,6 +1069,7 @@ fn e2e_90day_forget_shred_proves_absent_and_fails_recall() {
         logical_key: key,
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert_eq!(
         store
@@ -1093,6 +1117,7 @@ fn e2e_90day_semantic_recall_verified_with_receipt() {
         logical_key: theme_key("sem", "near"),
         min_tier: TrustTier::Working,
         embedding: Some(query_vec),
+        drand_signature: None,
     };
     let proc = default_semantic_procedure();
     let entries = store.recall_verified(&query, &proc, &cap).unwrap();
@@ -1140,6 +1165,7 @@ fn hostile_areplay_rollback_resurrects_forgotten_entry_on_cold_open() {
             logical_key: theme_key("gdpr", "pii"),
             min_tier: TrustTier::Working,
             embedding: None,
+            drand_signature: None,
         };
         let err = store
             .recall_verified(&q, &default_key_procedure(), &cap)
@@ -1169,6 +1195,7 @@ fn hostile_areplay_rollback_resurrects_forgotten_entry_on_cold_open() {
                 logical_key: theme_key("gdpr", "pii"),
                 min_tier: TrustTier::Working,
                 embedding: None,
+                drand_signature: None,
             };
             match reopened.recall_verified(&q, &default_key_procedure(), &cap) {
                 Err(_) => { /* defended at recall */ }
@@ -1539,6 +1566,7 @@ fn e2e_remember_batch_durable_and_recallable() {
             logical_key: theme_key("batch", &format!("k{i:04}")),
             min_tier: TrustTier::Working,
             embedding: None,
+            drand_signature: None,
         };
         assert_eq!(
             store.recall_verified(&q, &proc, &cap).unwrap()[0].plaintext,
@@ -1553,6 +1581,7 @@ fn e2e_remember_batch_durable_and_recallable() {
         logical_key: theme_key("batch", "k0150"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert_eq!(
         re.recall_verified(&q, &proc, &cap).unwrap()[0].plaintext,
@@ -1590,6 +1619,7 @@ fn e2e_remember_batch_matches_individual_logical_keys() {
             logical_key: k,
             min_tier: TrustTier::Working,
             embedding: None,
+            drand_signature: None,
         };
         assert_eq!(
             a.recall_verified(&q, &proc, &capa).unwrap()[0].plaintext,
@@ -1664,6 +1694,7 @@ fn e2e_b4_sealed_snapshot_enables_same_operator_plaintext_recall() {
         logical_key: theme_key("peer", "secret"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let entries = b
         .recall_verified(&query, &default_key_procedure(), &cap)
@@ -1696,6 +1727,7 @@ fn e2e_b4_tampered_sealed_keys_fail_closed_but_still_converge() {
         logical_key: key,
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert!(
         b.recall_verified(&query, &default_key_procedure(), &cap)
@@ -1731,6 +1763,7 @@ fn e2e_b4_foreign_operator_cannot_open_sealed_keys() {
         logical_key: theme_key("peer", "secret"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert!(
         b.recall_verified(&query, &default_key_procedure(), &cap_y)

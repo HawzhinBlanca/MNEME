@@ -3,6 +3,7 @@
 
 pub const PAYLOAD_ALG_PLAINTEXT: u8 = 0;
 pub const PAYLOAD_ALG_XCHACHA20_POLY1305: u8 = 1;
+pub const PAYLOAD_ALG_EMBARGO: u8 = 2;
 
 pub const KEY_ID_LEN: usize = 16;
 pub const OBJECT_KEY_LEN: usize = 32;

@@ -18,7 +18,7 @@ MNEME makes two limits explicit everywhere this project speaks to users:
 
 1. **Authenticated ≠ true.** A correctly signed entry from an authorized writer verifies even when its *content* is false. MNEME proves integrity, provenance, and authorization — not truth.
 
-2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven, and returned items are not proven to be the true nearest neighbors.
+2. **Verifiable retrieval proves procedure-faithfulness under the committed quantized metric, not real-valued nearest-neighbor optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. Under Candidate (b), MNEME can prove exact top-k nearest neighbors under the committed quantized integer metric (with deterministic index-order tie-breaking), but the quantization caveat remains: top-k under the quantized metric may differ from the true real-valued top-k due to quantization precision.
 
 These limits appear in `MnemeError` messages (e.g. `ProcedureMismatch`, `BelowTierPolicy`, `ZkProofInvalid`), MCP tool descriptions (`mneme-mcp/src/honesty.rs`), and verifier exports (`HONESTY_PROCEDURE`, `BINDING_HONESTY`).
 

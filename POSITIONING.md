@@ -43,15 +43,12 @@ Vector recall in MNEME is **verifiable**, not **optimal-by-default**.
 | Membership + completeness over committed candidates | Proven (ExactDominance / CompleteTopK paths) |
 | Top-k over prover-asserted distances | Proven for the authenticated candidate set |
 | True top-k by query-to-embedding distance | **Not proven** until verifiers recompute from carried embeddings |
-| Global exact-NN optimality (no closer hidden point) | Phase IV research; no PIOP prover shipped |
+| Global exact-NN optimality (no closer hidden point) | Proven under the committed quantized metric (Candidate (b) threshold-count sumcheck) |
 
-Verifiable retrieval proves **procedure-faithfulness**, not exact nearest neighbors: the
-declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I
-`ExactDominance` proves membership/completeness plus top-k over prover-asserted distances;
-true top-k ranking is not proven, and returned items are not top-k by true query-to-embedding distance until verifiers recompute from carried embeddings.
+Verifiable retrieval proves **procedure-faithfulness under the committed quantized metric**, not real-valued nearest-neighbor optimality: the declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven, and returned items are not top-k by true query-to-embedding distance until verifiers recompute from carried embeddings. Under Candidate (b), MNEME can prove exact top-k nearest neighbors under the committed quantized integer metric (with deterministic index-order tie-breaking), but the quantization caveat remains: top-k under the quantized metric may differ from the true real-valued top-k due to quantization precision.
 
 The optional `pedersen_schnorr_zk` feature adds a transparent ZK proof of faithful
-retrieval-match execution — still not semantic truth and still not global exact-NN.
+retrieval-match execution — still not semantic truth and still not global exact-NN (except under the committed quantized metric via the sum-check path).
 
 ## Software verifier vs hardware TEE (Phase II)
 

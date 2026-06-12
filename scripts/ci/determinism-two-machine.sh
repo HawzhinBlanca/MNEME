@@ -77,7 +77,7 @@ ssh_preflight_remote() {
   fi
 
   if ! ssh -o BatchMode=yes "$MNEME_SECOND_HOST" \
-    "command -v cargo >/dev/null && command -v python3 >/dev/null"; then
+    "export PATH=\"\$HOME/.cargo/bin:\$HOME/.local/bin:/usr/bin:\$PATH\" && command -v cargo >/dev/null && command -v python3 >/dev/null"; then
     echo "determinism-two-machine: remote requires cargo and python3 on PATH." >&2
     return 1
   fi
@@ -86,7 +86,7 @@ ssh_preflight_remote() {
     local local_rev remote_rev
     local_rev="$(git -C "$ROOT" rev-parse HEAD)"
     remote_rev="$(ssh -o BatchMode=yes "$MNEME_SECOND_HOST" \
-      "git -C '$remote_root' rev-parse HEAD 2>/dev/null" || true)"
+      "export PATH=\"\$HOME/.cargo/bin:\$HOME/.local/bin:/usr/bin:\$PATH\" && git -C '$remote_root' rev-parse HEAD 2>/dev/null" || true)"
     if [[ -n "$remote_rev" && "$local_rev" != "$remote_rev" ]]; then
       echo "determinism-two-machine: git HEAD mismatch (local vs remote)." >&2
       echo "  local:  $local_rev" >&2
@@ -182,8 +182,9 @@ run_ssh_remote() {
   export LOCAL_OUT="$local_out" REMOTE_OUT="$remote_out" TS ROOT
   ssh "$MNEME_SECOND_HOST" bash -s <<EOF
 set -euo pipefail
+export PATH="\$HOME/.cargo/bin:\$HOME/.local/bin:/usr/bin:\$PATH"
 cd "$remote_root"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$remote_root/target}"
+export CARGO_TARGET_DIR="\${CARGO_TARGET_DIR:-$remote_root/target}"
 rm -rf "$REMOTE_OUT"
 cargo run -p mneme-cli -- determinism foundation-gate \\
   --out "$REMOTE_OUT" \\
@@ -191,8 +192,8 @@ cargo run -p mneme-cli -- determinism foundation-gate \\
 EOF
 
   local remote_report
-  remote_report="$(mktemp "${TMPDIR:-/tmp}/mneme-remote-report.XXXXXX.json")"
-  scp "$MNEME_SECOND_HOST:$REMOTE_OUT/foundation.report.json" "$remote_report"
+  remote_report="$(mktemp "${TMPDIR:-/tmp}/mneme-remote-report.XXXXXX")"
+  ssh -o BatchMode=yes "$MNEME_SECOND_HOST" "cat \"$REMOTE_OUT/foundation.report.json\"" > "$remote_report"
 
   compare_run_a_digests \
     "$local_out/foundation.report.json" \

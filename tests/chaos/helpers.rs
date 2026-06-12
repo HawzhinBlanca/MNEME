@@ -67,6 +67,7 @@ impl FaultStore {
             trust_tier: None,
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         };
         store.remember(draft, &cap).expect("seed remember");
         drop(store);
@@ -182,6 +183,7 @@ fn post_fault_checks_inner(
                 logical_key: target.golden_key.clone(),
                 min_tier: TrustTier::Working,
                 embedding: None,
+                drand_signature: None,
             };
             let recall_out = catch_unwind(AssertUnwindSafe(|| {
                 store.recall_verified(&query, &default_key_procedure(), target.cap)

@@ -47,15 +47,16 @@ impl Store {
         verify_semantic_receipt_vo_zkann(&receipt, proc, committed)?;
         align_scoped_receipt_results(&mut receipt, proc)?;
         verify_provenance_attestation(&receipt, proc, &objects)?;
+        let previous_root = self.load_previous_root(root.sequence)?;
         let ctx = RecallContext {
             key_index: self.key_index.tree(),
             dag: &self.dag,
             objects: &objects,
-            previous_root: self.roots.get(self.roots.len().wrapping_sub(2)),
+            previous_root: previous_root.as_ref(),
         };
         let input = SemanticRecallInput { receipt, root };
         let mut entries = verify_semantic_recall(&input, proc, query, &self.trust, &ctx)?;
-        self.decrypt_entries(&mut entries)?;
+        self.decrypt_entries(query, &mut entries)?;
         Ok(entries)
     }
 }

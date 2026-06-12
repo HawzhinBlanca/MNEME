@@ -78,6 +78,7 @@ fn forgery_recall_swaps_object_id_while_reusing_membership_path() {
         logical_key: theme_key("tamper", "key"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,
@@ -228,6 +229,7 @@ fn forgery_semantic_recall_swaps_object_bytes_under_valid_receipt() {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
         embedding: Some(sample_query_embedding()),
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,

@@ -40,6 +40,7 @@ fn working_query() -> Query {
         logical_key: theme_key("tamper", "key"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     }
 }
 
@@ -479,6 +480,7 @@ fn check11_below_tier_policy_quarantine_at_trusted_min_tier() {
         logical_key: theme_key("tamper", "key"),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let err = run_recall(&f, &query).unwrap_err();
     assert_eq!(
@@ -520,6 +522,7 @@ fn semantic_recall_object_swapped_object_tampered() {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
         embedding: Some(sample_query_embedding()),
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,
@@ -544,6 +547,7 @@ fn semantic_recall_missing_query_embedding_fails_closed() {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,
@@ -569,6 +573,7 @@ fn semantic_recall_query_commit_mismatch_fails_closed() {
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
         embedding: Some(sample_query_embedding()),
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,
@@ -600,6 +605,7 @@ fn semantic_recall_zero_dim_query_embedding_fails_closed_even_when_query_commit_
         logical_key: theme_key("semantic", "query"),
         min_tier: TrustTier::Working,
         embedding: Some(malformed),
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,

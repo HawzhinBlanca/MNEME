@@ -25,6 +25,7 @@ fn tamper_suite_generative_byte_mutations() {
             logical_key: theme_key("tamper", "payload"),
             min_tier: TrustTier::Working,
             embedding: None,
+            drand_signature: None,
         };
         store.tamper_object_bytes(id.as_bytes()).unwrap();
         assert_eq!(
@@ -40,6 +41,7 @@ fn tamper_suite_generative_byte_mutations() {
         logical_key: theme_key("tamper", "payload"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     store
         .remember(

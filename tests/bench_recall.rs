@@ -38,6 +38,7 @@ fn bench_verify_recall_10k_entries() {
         },
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
 
     // Warmup (not measured): primes the OS/object caches; the SMT node cache is
@@ -106,6 +107,7 @@ fn bench_verify_semantic_recall_latency() {
         },
         min_tier: TrustTier::Working,
         embedding: Some(bench_embedding(idx % scale, SEMANTIC_BENCH_DIM).expect("query embedding")),
+        drand_signature: None,
     };
 
     // Warmup (not measured): prime OS/object caches and the semantic backend.
@@ -250,6 +252,7 @@ fn bench_query(scale: usize, idx: usize) -> Query {
         },
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     }
 }
 
@@ -372,6 +375,7 @@ fn bench_scale_ops() {
             trust_tier: None,
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         };
         let t = Instant::now();
         store.remember(draft, &cap).expect("remember");
@@ -414,6 +418,7 @@ fn bench_scale_ops() {
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 };
                 peer.remember(draft, &cap).expect("peer remember");
             }
@@ -493,6 +498,7 @@ fn bench_concurrent_merge_contention() {
                             trust_tier: None,
                             embedding: None,
                             valid_time_ms: None,
+                            embargo_round: None,
                         };
                         peer.remember(draft, &cap).expect("peer remember");
                     }

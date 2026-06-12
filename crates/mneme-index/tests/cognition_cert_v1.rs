@@ -45,6 +45,8 @@ fn fixture_root(semantic_commit: [u8; 32]) -> StoredRoot {
         preimage_hash: [0xcc; 32],
         signature: vec![0u8; 64],
         sequence: 1,
+        vdf_proof: None,
+        vdf_difficulty: None,
     }
 }
 

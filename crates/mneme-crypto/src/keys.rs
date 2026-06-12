@@ -76,6 +76,7 @@ pub struct TrustConfig {
     pub authorized_writers: Vec<PublicKeyBytes>,
     pub last_seen_hlc: Option<[u8; 14]>,
     pub last_root_hash: Option<[u8; 32]>,
+    pub min_vdf_difficulty: Option<u64>,
 }
 
 impl TrustConfig {
@@ -85,6 +86,7 @@ impl TrustConfig {
             authorized_writers: vec![operator],
             last_seen_hlc: None,
             last_root_hash: None,
+            min_vdf_difficulty: None,
         }
     }
 

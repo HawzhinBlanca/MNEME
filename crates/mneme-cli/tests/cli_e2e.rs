@@ -132,6 +132,7 @@ fn certify_and_verify_cert_succeeds() {
             trust_tier: Some(TrustTier::Trusted),
             embedding: Some(FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap()),
             valid_time_ms: None,
+            embargo_round: None,
         };
         s.remember(draft, &cap).unwrap();
     }
@@ -505,6 +506,7 @@ fn head_only_verify_misses_object_tamper_full_verify_and_cli_reject() {
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     let (id, _) = store.remember(draft, &cap).unwrap();
     let (root, _) = store.head().unwrap();
@@ -812,4 +814,213 @@ fn pace_calibrate_run_verify_journey() {
         .success()
         .stdout(predicate::str::contains("pace verify ok"))
         .stderr(predicate::str::contains("post-quantum"));
+}
+
+#[test]
+fn e2e_h2_time_lock_embargo_verified_recall() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+
+    // 1. Initialize store
+    mneme()
+        .args(["init", store.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // 2. Remember an entry under embargo round 1
+    mneme()
+        .args([
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "test",
+            "--name",
+            "embargoed_key",
+            "--body",
+            "secret_embargo_content",
+            "--embargo-round",
+            "1",
+        ])
+        .assert()
+        .success();
+
+    // 3. Recall without signature: must fail closed (exit with non-zero code)
+    mneme()
+        .args([
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "embargoed_key",
+            "--namespace",
+            "test",
+        ])
+        .assert()
+        .failure();
+
+    // 4. Recall with a bogus/incorrect signature: must fail closed
+    mneme()
+        .args([
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "embargoed_key",
+            "--namespace",
+            "test",
+            "--drand-sig",
+            "deadbeef",
+        ])
+        .assert()
+        .failure();
+
+    // 5. Recall with the correct signature for round 1 (precomputed quicknet beacon signature)
+    let valid_sig = "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b";
+    mneme()
+        .args([
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "embargoed_key",
+            "--namespace",
+            "test",
+            "--drand-sig",
+            valid_sig,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("secret_embargo_content"));
+}
+
+#[test]
+fn e2e_h3_vdf_anchoring_verification() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+
+    // 1. Initialize store
+    mneme()
+        .args(["init", store.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // 2. Remember first entry with VDF difficulty 100
+    mneme()
+        .args([
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "test",
+            "--name",
+            "k1",
+            "--body",
+            "val1",
+            "--vdf-difficulty",
+            "100",
+        ])
+        .assert()
+        .success();
+
+    // 3. Remember second entry with VDF difficulty 100
+    mneme()
+        .args([
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "test",
+            "--name",
+            "k2",
+            "--body",
+            "val2",
+            "--vdf-difficulty",
+            "100",
+        ])
+        .assert()
+        .success();
+
+    // 4. Verify store succeeds
+    mneme()
+        .args(["verify", store.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify ok"));
+
+    // 4a. Verify with min-vdf-difficulty 50 succeeds
+    mneme()
+        .args([
+            "verify",
+            store.to_str().unwrap(),
+            "--min-vdf-difficulty",
+            "50",
+        ])
+        .assert()
+        .success();
+
+    // 4b. Verify with min-vdf-difficulty 200 fails
+    mneme()
+        .args([
+            "verify",
+            store.to_str().unwrap(),
+            "--min-vdf-difficulty",
+            "200",
+        ])
+        .assert()
+        .failure();
+
+    // 4c. Recall with min-vdf-difficulty 50 succeeds
+    mneme()
+        .args([
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "k2",
+            "--namespace",
+            "test",
+            "--min-vdf-difficulty",
+            "50",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("val2"));
+
+    // 4d. Recall with min-vdf-difficulty 200 fails
+    mneme()
+        .args([
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "k2",
+            "--namespace",
+            "test",
+            "--min-vdf-difficulty",
+            "200",
+        ])
+        .assert()
+        .failure();
+
+    // 5. Corrupt the VDF proof bytes in the checkpoint CBOR files
+    let roots_dir = store.join("roots");
+    let mut modified = false;
+    if let Ok(entries) = fs::read_dir(roots_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.to_str().unwrap().contains(".root.cbor") {
+                let mut data = fs::read(&path).unwrap();
+                if data.len() > 100 {
+                    for i in 80..data.len() {
+                        data[i] = data[i].wrapping_add(1);
+                    }
+                    fs::write(&path, data).unwrap();
+                    modified = true;
+                }
+            }
+        }
+    }
+    assert!(
+        modified,
+        "Should have corrupted at least one root checkpoint"
+    );
+
+    // 6. Verify store must now fail closed
+    mneme()
+        .args(["verify", store.to_str().unwrap()])
+        .assert()
+        .failure();
 }

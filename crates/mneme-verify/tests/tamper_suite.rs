@@ -34,6 +34,7 @@ fn run_verify(f: &helpers::RecallFixture) -> Result<(), MnemeError> {
         logical_key: theme_key("tamper", "key"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &f.key_index,
@@ -378,6 +379,7 @@ fn tamper_below_tier_policy() {
         logical_key: theme_key("tamper", "key"),
         min_tier: TrustTier::Trusted,
         embedding: None,
+        drand_signature: None,
     };
     let ctx = RecallContext {
         key_index: &fixture.key_index,
@@ -1292,6 +1294,7 @@ fn persisted_store_with_entry() -> (tempfile::TempDir, mneme_crypto::TrustConfig
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )
@@ -1326,6 +1329,7 @@ fn persisted_store_with_semantic_entry() -> (tempfile::TempDir, mneme_crypto::Tr
                         .expect("semantic embedding"),
                 ),
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )
@@ -1362,6 +1366,7 @@ fn persisted_store_after_shred_forget() -> (tempfile::TempDir, mneme_crypto::Tru
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )
@@ -1405,6 +1410,7 @@ fn persisted_store_with_two_entries() -> (tempfile::TempDir, mneme_crypto::Trust
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 },
                 &cap,
             )
@@ -1465,6 +1471,7 @@ fn persisted_store_with_live_and_tombstoned_entry() -> (tempfile::TempDir, mneme
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 },
                 &cap,
             )
@@ -1512,6 +1519,7 @@ fn persisted_store_after_logical_key_overwrite() -> (tempfile::TempDir, mneme_cr
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 },
                 &cap,
             )
@@ -1884,6 +1892,7 @@ fn tamper_verify_store_intermediate_checkpoint_fails_closed() {
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 },
                 &cap,
             )
@@ -1946,6 +1955,7 @@ fn tamper_verify_store_missing_head_checkpoint_fails_closed() {
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )

@@ -43,6 +43,7 @@ fn episodic_draft(logical_name: &str, body: &[u8]) -> Draft {
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     }
 }
 

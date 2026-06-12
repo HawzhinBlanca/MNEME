@@ -249,6 +249,7 @@ fn remember_and_tamper_unix_object(
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             cap,
         )

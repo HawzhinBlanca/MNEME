@@ -1,0 +1,16 @@
+[package]
+name = "mneme-vdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mneme-core = { workspace = true }
+blake3 = { workspace = true }
+num-bigint = { workspace = true }
+num-integer = { workspace = true }
+num-traits = { workspace = true }
+rand = { workspace = true }

@@ -145,6 +145,7 @@ fn remember(state: &AppState, ns: &str, name: &str, body: &[u8], cap: &Capabilit
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             cap,
         ),
@@ -366,6 +367,7 @@ async fn plaintext_recall_after_websocket_sync() {
         },
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let plaintext = {
         let sb = expect_store_lock(

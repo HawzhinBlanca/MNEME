@@ -142,27 +142,34 @@ impl StoredRoot {
     }
 }
 
-/// Wesolowski VDF verification stub.
+/// Wesolowski VDF verification.
 ///
 /// Honesty Label (H3-VDF):
 /// "VDF time anchoring proves that a minimum amount of sequential CPU/ASIC work has elapsed
 /// between epoch checkpoints, but does NOT prove absolute wall-clock time unless bound to a
 /// verified external trust anchor."
-pub fn verify_vdf_wesolowski(proof: &[u8], difficulty: u64) -> Result<(), MnemeError> {
+pub fn verify_vdf_wesolowski(
+    x_hash: &[u8; 32],
+    vdf_proof_bytes: &[u8],
+    difficulty: u64,
+) -> Result<(), MnemeError> {
     if difficulty == 0 {
         return Err(MnemeError::RootInconsistent);
     }
-    if proof.is_empty() {
+    if vdf_proof_bytes.len() != 512 {
         return Err(MnemeError::RootInconsistent);
     }
-    if proof == b"invalid-proof" {
-        return Err(MnemeError::RootInconsistent);
+    let (y, proof) = vdf_proof_bytes.split_at(256);
+    if mneme_vdf::VdfVerifier::verify(x_hash, y, proof, difficulty) {
+        Ok(())
+    } else {
+        Err(MnemeError::RootInconsistent)
     }
-    Ok(())
 }
 
 /// Verify hash-chain link and monotonic sequence (INV-4 succession).
 pub fn verify_root_chain(current: &Root, previous: Option<&Root>) -> Result<(), MnemeError> {
+    let mut prev_hash = [0u8; 32];
     if let Some(prev) = previous {
         if current.prev_root != prev.preimage_hash {
             return Err(MnemeError::RootInconsistent);
@@ -170,10 +177,11 @@ pub fn verify_root_chain(current: &Root, previous: Option<&Root>) -> Result<(), 
         if current.sequence <= prev.sequence {
             return Err(MnemeError::RootInconsistent);
         }
+        prev_hash = prev.preimage_hash;
     }
     if let Some(proof) = &current.vdf_proof {
         let difficulty = current.vdf_difficulty.unwrap_or(0);
-        verify_vdf_wesolowski(proof, difficulty)?;
+        verify_vdf_wesolowski(&prev_hash, proof, difficulty)?;
     }
     Ok(())
 }

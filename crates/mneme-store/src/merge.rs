@@ -489,6 +489,7 @@ mod d2_object_set_convergence_tests {
             trust_tier: None,
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         }
     }
     fn object_id_set(s: &Store) -> HashSet<[u8; 32]> {

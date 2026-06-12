@@ -138,6 +138,7 @@ mod tests {
             trust_tier: None,
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         };
         store.remember(draft, &cap).expect("remember");
         drop(store);

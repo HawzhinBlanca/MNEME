@@ -19,6 +19,7 @@ fn e2e_recall_verified_at_matches_current_root() {
         logical_key: theme_key("phase", "bitemporal"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     let proc = default_key_procedure();
     let entries = store
@@ -38,6 +39,7 @@ fn e2e_provenance_scoped_recall_honors_filter() {
         logical_key: theme_key("phase", "provenance"),
         min_tier: TrustTier::Working,
         embedding: Some(embedding),
+        drand_signature: None,
     };
     let proc = default_semantic_procedure();
     let filter = ProvenanceFilter {
@@ -70,12 +72,14 @@ fn e2e_recall_verified_at_valid_time_semantic_excludes_and_is_functional() {
         trust_tier: None,
         embedding: Some(emb.clone()),
         valid_time_ms: Some(200),
+        embargo_round: None,
     };
     store.remember(draft, &cap).unwrap();
     let query = Query {
         logical_key: theme_key("phase", "vt"),
         min_tier: TrustTier::Working,
         embedding: Some(emb),
+        drand_signature: None,
     };
     let proc = default_semantic_procedure();
     let target = b"valid-time-body".to_vec();
@@ -139,6 +143,7 @@ fn e2e_provenance_scoped_recall_excludes_foreign_writer_poison() {
         logical_key: theme_key("p", "good"),
         min_tier: TrustTier::Working,
         embedding: Some(q_emb),
+        drand_signature: None,
     };
     let filter = ProvenanceFilter {
         written_by: Some(cap_good.writer_hash()),
@@ -199,6 +204,7 @@ fn e2e_provenance_scoped_returns_trusted_when_poison_outranks() {
         logical_key: theme_key("p", "good"),
         min_tier: TrustTier::Working,
         embedding: Some(q_emb),
+        drand_signature: None,
     };
     let filter = ProvenanceFilter {
         written_by: Some(cap_good.writer_hash()),

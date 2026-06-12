@@ -58,6 +58,8 @@ const RECALL_CACHE_CAP: usize = 256;
 enum StoreLocalSchemaFailure {
     MissingObjectKey,
     BenchEmbeddingZeroDimension,
+    MissingEmbargoMetadata,
+    MissingEmbargoNonce,
 }
 
 /// §22 session verified-recall cache (K3 "cache last verified root + receipt for
@@ -125,6 +127,7 @@ pub struct Store {
     recall_cache: RefCell<RecallSessionCache>,
     /// Held for the store lifetime; released on drop (single-writer invariant).
     _store_lock: File,
+    pub vdf_difficulty: Option<u64>,
 }
 
 pub struct Recall {
@@ -170,6 +173,7 @@ impl Store {
             sequence: 0,
             recall_cache: RefCell::new(RecallSessionCache::default()),
             _store_lock,
+            vdf_difficulty: None,
         };
         store.commit_root()?;
         Ok(store)
@@ -261,6 +265,7 @@ impl Store {
             sequence: stored.sequence,
             recall_cache: RefCell::new(RecallSessionCache::default()),
             _store_lock,
+            vdf_difficulty: None,
         };
         store.rebuild_semantic_index()?;
         if store.semantic.semantic_commit() != root.semantic_commit {
@@ -283,6 +288,10 @@ impl Store {
 
     pub fn current_hlc(&self) -> &mneme_core::Hlc {
         &self.hlc
+    }
+
+    pub fn set_vdf_difficulty(&mut self, difficulty: Option<u64>) {
+        self.vdf_difficulty = difficulty;
     }
 
     pub fn remember(
@@ -390,6 +399,7 @@ impl Store {
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 };
                 let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
                 ids.push(id);
@@ -503,6 +513,7 @@ impl Store {
                     trust_tier: None,
                     embedding: Some(bench_embedding(i, dim)?),
                     valid_time_ms: None,
+                    embargo_round: None,
                 };
                 let (id, _) = self.apply_remember_draft(&draft, cap, tier, false, false)?;
                 ids.push(id);
@@ -543,7 +554,36 @@ impl Store {
             namespace: draft.namespace.clone(),
             name: draft.logical_name.clone(),
         };
-        let payload_enc = seal_payload(&mut *self.vault, &draft.body, &payload_aad(&key))?;
+
+        let (payload_enc, ext) = if let Some(round) = draft.embargo_round {
+            use rand::RngCore as _;
+            let mut key_seed = [0u8; 16];
+            rand::thread_rng().fill_bytes(&mut key_seed);
+            let mut hasher = blake3::Hasher::new_derive_key("MNEME Time-Lock Embargo key");
+            hasher.update(&key_seed);
+            let key_bytes = *hasher.finalize().as_bytes();
+            let nonce = mneme_crypto::random_nonce();
+            let body = mneme_crypto::seal(&key_bytes, &nonce, &draft.body, &payload_aad(&key))?;
+            let drand_pubkey = hex::decode(mneme_embargo::DRAND_QUICKNET_PUBLIC_KEY).unwrap();
+            let tlock_key_ciphertext =
+                mneme_embargo::encrypt_embargo(&key_seed, round, &drand_pubkey)?;
+            let payload_enc = PayloadEnc {
+                alg: mneme_crypto::PAYLOAD_ALG_EMBARGO,
+                key_id: None,
+                nonce: Some(nonce),
+                body,
+            };
+            let ext = mneme_core::ext_map_with_embargo(
+                draft.valid_time_ms,
+                Some(round),
+                Some(&tlock_key_ciphertext),
+            );
+            (payload_enc, Some(ext))
+        } else {
+            let payload_enc = seal_payload(&mut *self.vault, &draft.body, &payload_aad(&key))?;
+            let ext = draft.valid_time_ms.map(mneme_core::ext_map_with_valid_time);
+            (payload_enc, ext)
+        };
 
         let record = ObjectRecord {
             version: mneme_core::object::OBJECT_VERSION,
@@ -556,7 +596,7 @@ impl Store {
             payload_enc,
             embedding_commit: draft.embedding.as_ref().map(FixedPointEmbedding::commit),
             redaction_slot: None,
-            ext: draft.valid_time_ms.map(mneme_core::ext_map_with_valid_time),
+            ext,
         };
 
         let canonical = to_bytes_canonical(&record)?;
@@ -609,7 +649,7 @@ impl Store {
         };
 
         let recall = self.recall(query, proc, cap)?;
-        let previous_root = self.roots.get(self.roots.len().wrapping_sub(2));
+        let previous_root = self.load_previous_root(recall.root.sequence)?;
         if let Some(receipt) = recall.receipt {
             let object_bytes = self
                 .objects
@@ -621,7 +661,7 @@ impl Store {
                 key_index: self.key_index.tree(),
                 dag: &self.dag,
                 objects: &objects,
-                previous_root,
+                previous_root: previous_root.as_ref(),
             };
             let input = RecallInput {
                 receipt,
@@ -631,7 +671,7 @@ impl Store {
             let mut entries = verify_recall(&input, query, &self.trust, &ctx).inspect_err(|e| {
                 audit::emit_verify_recall_rejection(e, "key_index");
             })?;
-            self.decrypt_entries(&mut entries)?;
+            self.decrypt_entries(query, &mut entries)?;
             if let Some((root_hash, key)) = cache_key {
                 self.recall_cache
                     .borrow_mut()
@@ -653,7 +693,7 @@ impl Store {
                 key_index: self.key_index.tree(),
                 dag: &self.dag,
                 objects: &objects,
-                previous_root,
+                previous_root: previous_root.as_ref(),
             };
             let input = SemanticRecallInput {
                 receipt: semantic_receipt,
@@ -663,7 +703,7 @@ impl Store {
                 .inspect_err(|e| {
                     audit::emit_verify_recall_rejection(e, "semantic");
                 })?;
-            self.decrypt_entries(&mut entries)?;
+            self.decrypt_entries(query, &mut entries)?;
             return Ok(entries);
         }
         Err(MnemeError::ReceiptRootMismatch)
@@ -832,11 +872,7 @@ impl Store {
 
     pub fn head(&self) -> Result<(Root, Option<Root>), MnemeError> {
         let current = self.current_root()?;
-        let previous = if self.roots.len() > 1 {
-            Some(self.roots[self.roots.len() - 2].clone())
-        } else {
-            None
-        };
+        let previous = self.load_previous_root(current.sequence)?;
         Ok((current, previous))
     }
 
@@ -845,6 +881,24 @@ impl Store {
             .last()
             .cloned()
             .ok_or(MnemeError::RootInconsistent)
+    }
+
+    pub fn load_previous_root(&self, sequence: u64) -> Result<Option<Root>, MnemeError> {
+        if sequence <= 1 {
+            return Ok(None);
+        }
+        let prev_path = self.path.join(format!("roots/{}.root.cbor", sequence - 1));
+        match std::fs::read(&prev_path) {
+            Ok(bytes) => {
+                let stored = StoredRoot::from_bytes(&bytes)?;
+                Ok(Some(stored.to_root()))
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(MnemeError::IoFailed {
+                path: prev_path.display().to_string(),
+                kind: err.kind().to_string(),
+            }),
+        }
     }
 
     pub fn tamper_object_bytes(&mut self, id: &[u8; 32]) -> Result<(), MnemeError> {
@@ -909,17 +963,44 @@ impl Store {
         &self.object_keys
     }
 
-    fn decrypt_entries(&self, entries: &mut [Entry]) -> Result<(), MnemeError> {
+    fn decrypt_entries(&self, query: &Query, entries: &mut [Entry]) -> Result<(), MnemeError> {
         for entry in entries {
             let logical_key = self
                 .object_keys
                 .get(entry.id.as_bytes())
                 .ok_or_else(missing_object_key_error)?;
-            entry.plaintext = open_payload(
-                &*self.vault,
-                &entry.record.payload_enc,
-                &payload_aad(logical_key),
-            )?;
+            if entry.record.payload_enc.alg == mneme_crypto::PAYLOAD_ALG_EMBARGO {
+                let (_round, ciphertext) = mneme_core::embargo_from_ext(&entry.record.ext)
+                    .ok_or_else(missing_embargo_metadata_error)?;
+                let sig = query
+                    .drand_signature
+                    .as_ref()
+                    .ok_or_else(|| MnemeError::IoFailed {
+                        path: "tlock_decrypt".to_string(),
+                        kind: "missing drand signature".to_string(),
+                    })?;
+                let key_seed = mneme_embargo::decrypt_embargo(&ciphertext, sig)?;
+                let mut hasher = blake3::Hasher::new_derive_key("MNEME Time-Lock Embargo key");
+                hasher.update(&key_seed);
+                let key_bytes = *hasher.finalize().as_bytes();
+                let nonce = entry
+                    .record
+                    .payload_enc
+                    .nonce
+                    .ok_or_else(missing_embargo_nonce_error)?;
+                entry.plaintext = mneme_crypto::open(
+                    &key_bytes,
+                    &nonce,
+                    &entry.record.payload_enc.body,
+                    &payload_aad(logical_key),
+                )?;
+            } else {
+                entry.plaintext = open_payload(
+                    &*self.vault,
+                    &entry.record.payload_enc,
+                    &payload_aad(logical_key),
+                )?;
+            }
         }
         Ok(())
     }
@@ -966,7 +1047,21 @@ impl Store {
             .map(|r| r.preimage_hash)
             .unwrap_or([0u8; 32]);
         self.sequence += 1;
-        let stored = StoredRoot::assemble(
+
+        let (vdf_proof, difficulty) = if let Some(diff) = self.vdf_difficulty {
+            if prev != [0u8; 32] {
+                let (y, proof) = mneme_vdf::VdfProver::solve(&prev, diff);
+                let mut full_proof = y;
+                full_proof.extend(proof);
+                (Some(full_proof), Some(diff))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        let stored = StoredRoot::assemble_with_vdf(
             self.dag.root(),
             self.key_index.root(),
             self.semantic.semantic_commit(),
@@ -974,6 +1069,8 @@ impl Store {
             prev,
             self.sequence,
             &self.operator,
+            vdf_proof,
+            difficulty,
         )?;
         let root = stored.to_root();
         self.roots.push(root);
@@ -1040,7 +1137,9 @@ fn validate_live_key_index_object_keys(state: &layout::LoadedState) -> Result<()
 fn store_local_schema_failure_to_mneme(failure: StoreLocalSchemaFailure) -> MnemeError {
     match failure {
         StoreLocalSchemaFailure::MissingObjectKey
-        | StoreLocalSchemaFailure::BenchEmbeddingZeroDimension => MnemeError::SchemaDrift,
+        | StoreLocalSchemaFailure::BenchEmbeddingZeroDimension
+        | StoreLocalSchemaFailure::MissingEmbargoMetadata
+        | StoreLocalSchemaFailure::MissingEmbargoNonce => MnemeError::SchemaDrift,
     }
 }
 
@@ -1050,6 +1149,14 @@ fn missing_object_key_error() -> MnemeError {
 
 fn bench_embedding_dimension_error() -> MnemeError {
     store_local_schema_failure_to_mneme(StoreLocalSchemaFailure::BenchEmbeddingZeroDimension)
+}
+
+fn missing_embargo_metadata_error() -> MnemeError {
+    store_local_schema_failure_to_mneme(StoreLocalSchemaFailure::MissingEmbargoMetadata)
+}
+
+fn missing_embargo_nonce_error() -> MnemeError {
+    store_local_schema_failure_to_mneme(StoreLocalSchemaFailure::MissingEmbargoNonce)
 }
 
 fn provenance_objects_for_bytes(

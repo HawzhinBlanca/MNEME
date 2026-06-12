@@ -92,6 +92,7 @@ fn fault_disk_full(iter: u32, seed: u64) {
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             };
             set_readonly_tree(&objects_dir);
             let err = store.remember(draft, &fs.cap).err();
@@ -165,6 +166,7 @@ fn fault_clock_skew_merge(iter: u32, seed: u64) {
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )
@@ -185,6 +187,7 @@ fn fault_clock_skew_merge(iter: u32, seed: u64) {
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )
@@ -325,6 +328,7 @@ fn skew_draft(name: &str, body: &[u8]) -> Draft {
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     }
 }
 
@@ -505,6 +509,7 @@ fn fault_kill_random_boundary(iter: u32, seed: u64) {
                     trust_tier: None,
                     embedding: None,
                     valid_time_ms: None,
+                    embargo_round: None,
                 },
                 &fs.cap,
             )
@@ -543,6 +548,7 @@ fn fault_kill_merge_boundary(iter: u32, _seed: u64) {
                 trust_tier: None,
                 embedding: None,
                 valid_time_ms: None,
+                embargo_round: None,
             },
             &cap,
         )

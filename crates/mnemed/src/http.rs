@@ -192,6 +192,7 @@ async fn remember(
         trust_tier: None,
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     let (id, root) = store.remember(draft, &cap).map_err(ApiError::from_mneme)?;
     Ok(Json(RememberResponse {
@@ -218,6 +219,7 @@ async fn recall(
         logical_key: LogicalKey { namespace, name },
         min_tier,
         embedding: None,
+        drand_signature: None,
     };
     let entries = store
         .recall_verified_default(&query, &cap)

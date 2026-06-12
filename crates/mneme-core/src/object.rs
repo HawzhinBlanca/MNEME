@@ -873,6 +873,44 @@ pub fn valid_time_from_ext(ext: &Option<BTreeMap<u16, Vec<u8>>>) -> Option<u64> 
     Some(u64::from_le_bytes(arr))
 }
 
+/// Extension field: embargo round.
+pub const EXT_EMBARGO_ROUND: u16 = 2;
+
+/// Extension field: tlock key ciphertext.
+pub const EXT_TLOCK_KEY_CIPHERTEXT: u16 = 3;
+
+pub fn ext_map_with_embargo(
+    valid_time_ms: Option<u64>,
+    round: Option<u64>,
+    ciphertext: Option<&[u8]>,
+) -> BTreeMap<u16, Vec<u8>> {
+    let mut m = BTreeMap::new();
+    if let Some(ms) = valid_time_ms {
+        m.insert(EXT_VALID_TIME_MS, ms.to_le_bytes().to_vec());
+    }
+    if let Some(r) = round {
+        m.insert(EXT_EMBARGO_ROUND, r.to_be_bytes().to_vec());
+    }
+    if let Some(ct) = ciphertext {
+        m.insert(EXT_TLOCK_KEY_CIPHERTEXT, ct.to_vec());
+    }
+    m
+}
+
+pub fn embargo_from_ext(ext: &Option<BTreeMap<u16, Vec<u8>>>) -> Option<(u64, Vec<u8>)> {
+    let ext_map = ext.as_ref()?;
+    let round_bytes = ext_map.get(&EXT_EMBARGO_ROUND)?;
+    if round_bytes.len() != 8 {
+        return None;
+    }
+    let mut round_arr = [0u8; 8];
+    round_arr.copy_from_slice(round_bytes);
+    let round = u64::from_be_bytes(round_arr);
+
+    let ciphertext = ext_map.get(&EXT_TLOCK_KEY_CIPHERTEXT)?.clone();
+    Some((round, ciphertext))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

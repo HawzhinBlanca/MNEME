@@ -42,6 +42,7 @@ pub fn run_certify(
         },
         min_tier: TrustTier::Trusted,
         embedding: Some(embedding.clone()),
+        drand_signature: None,
     };
     let bytes = store.issue_cognition_certificate_v1(&query, &proc, cap, level)?;
     fs::write(out, &bytes).map_err(|e| MnemeError::IoFailed {

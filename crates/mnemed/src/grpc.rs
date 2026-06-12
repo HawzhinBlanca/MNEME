@@ -77,6 +77,7 @@ impl MemoryService for GrpcMemoryService {
             trust_tier: None,
             embedding: None,
             valid_time_ms: None,
+            embargo_round: None,
         };
         let (id, root) = store.remember(draft, &cap).map_err(grpc_status_mneme)?;
         Ok(Response::new(RememberResponse {
@@ -103,6 +104,7 @@ impl MemoryService for GrpcMemoryService {
             },
             min_tier,
             embedding: None,
+            drand_signature: None,
         };
         let entries = store
             .recall_verified_default(&query, &cap)

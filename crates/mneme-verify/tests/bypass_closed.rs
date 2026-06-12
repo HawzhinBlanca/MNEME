@@ -33,6 +33,7 @@ fn b1_verify_signed_head_only_signature_only_full_verify_rejects_tamper() {
         trust_tier: Some(TrustTier::Working),
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     let (id, _) = store.remember(draft, &cap).unwrap();
     let (root, _) = store.head().unwrap();
@@ -69,6 +70,7 @@ fn b2_recall_verified_blocks_oob_tamper_direct_recall_unavailable() {
         trust_tier: Some(TrustTier::Working),
         embedding: None,
         valid_time_ms: None,
+        embargo_round: None,
     };
     let (id, _) = store.remember(draft, &cap).unwrap();
     store.tamper_object_bytes(id.as_bytes()).unwrap();
@@ -77,6 +79,7 @@ fn b2_recall_verified_blocks_oob_tamper_direct_recall_unavailable() {
         logical_key: theme_key("audit", "b2"),
         min_tier: TrustTier::Working,
         embedding: None,
+        drand_signature: None,
     };
     assert_eq!(
         store.recall_verified_default(&query, &cap).unwrap_err(),
