@@ -142,6 +142,23 @@ impl SemanticIndex {
         (ids, embeddings)
     }
 
+    /// Prove membership of an object in the balanced semantic Merkle tree.
+    pub fn prove_semantic_membership(
+        &self,
+        object_id: &ObjectId,
+    ) -> Result<(usize, Vec<[u8; 32]>), IndexError> {
+        let entries = self.sorted_entries();
+        let index = entries
+            .iter()
+            .position(|e| &e.object_id == object_id)
+            .ok_or(IndexError::ObjectNotIndexed)?;
+        let path = self
+            .merkle
+            .merkle_path(index)
+            .ok_or(IndexError::ObjectNotIndexed)?;
+        Ok((index, path))
+    }
+
     /// Deterministic semantic search (§9.2, INV-10): integer distances, ObjectId tie-break.
     pub fn search_deterministic(
         &self,

@@ -963,6 +963,87 @@ impl Store {
         &self.object_keys
     }
 
+    pub fn get_embedding(&self, id: &ObjectId) -> Option<FixedPointEmbedding> {
+        self.embeddings.get(id.as_bytes()).cloned()
+    }
+
+    pub fn prove_semantic_membership(
+        &self,
+        id: &ObjectId,
+    ) -> Result<(usize, Vec<[u8; 32]>), MnemeError> {
+        self.semantic
+            .prove_semantic_membership(id)
+            .map_err(index_err)
+    }
+
+    pub fn create_topk_claim(
+        &self,
+        query: FixedPointEmbedding,
+        proc: &Procedure,
+    ) -> Result<mneme_optimistic::TopKClaim, MnemeError> {
+        let (returned_ids, _) = self
+            .semantic
+            .search_deterministic(proc, &query)
+            .map_err(index_err)?;
+        let mut distances = Vec::new();
+        for id in &returned_ids {
+            let emb = self
+                .embeddings
+                .get(id.as_bytes())
+                .ok_or(MnemeError::IndexPathInvalid)?;
+            let dist = query.squared_l2_distance(emb)?;
+            distances.push(dist);
+        }
+        let d_k = if distances.is_empty() {
+            0
+        } else {
+            if returned_ids.len() != proc.k as usize {
+                return Err(MnemeError::IndexPathInvalid);
+            }
+            distances.sort();
+            distances[distances.len() - 1]
+        };
+
+        let root = self.current_root()?;
+        Ok(mneme_optimistic::TopKClaim {
+            query,
+            d_k,
+            returned_ids,
+            semantic_commit: root.semantic_commit,
+        })
+    }
+
+    pub fn audit_topk_claim(
+        &self,
+        claim: &mneme_optimistic::TopKClaim,
+        proc: &Procedure,
+    ) -> Result<Option<mneme_optimistic::WatcherChallenge>, MnemeError> {
+        let (true_ids, _) = self
+            .semantic
+            .search_deterministic(proc, &claim.query)
+            .map_err(index_err)?;
+
+        for true_id in true_ids {
+            if !claim.returned_ids.contains(&true_id) {
+                let emb = self
+                    .embeddings
+                    .get(true_id.as_bytes())
+                    .ok_or(MnemeError::IndexPathInvalid)?;
+                let dist = claim.query.squared_l2_distance(emb)?;
+                if dist < claim.d_k {
+                    let (leaf_index, merkle_path) = self.prove_semantic_membership(&true_id)?;
+                    return Ok(Some(mneme_optimistic::WatcherChallenge {
+                        leaf_index,
+                        counterexample_vector: emb.clone(),
+                        merkle_path,
+                        object_id: true_id,
+                    }));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     fn decrypt_entries(&self, query: &Query, entries: &mut [Entry]) -> Result<(), MnemeError> {
         for entry in entries {
             let logical_key = self

@@ -14,7 +14,8 @@
 //! and minimal proof size on the happy path.
 
 use mneme_core::{FixedPointEmbedding, MnemeError, ObjectId};
-use mneme_smt::{MembershipProof, SparseMerkleTree};
+use mneme_index::{SemanticMerkleTree, hash_sem_leaf};
+use serde::{Deserialize, Serialize};
 
 /// A claim posted by a prover asserting that a set of results is the exact top-k set
 /// under the committed quantized metric.
@@ -26,19 +27,21 @@ pub struct TopKClaim {
     pub d_k: i64,
     /// The ObjectIds returned in the top-k set.
     pub returned_ids: Vec<ObjectId>,
-    /// The signed SMT root committing to all vectors in the dataset.
-    pub smt_root: [u8; 32],
+    /// The signed semantic root committing to all vectors in the dataset.
+    pub semantic_commit: [u8; 32],
 }
 
 /// A fraud proof submitted by a watcher challenging a prover's claim.
 #[derive(Debug, Clone)]
 pub struct WatcherChallenge {
-    /// The key of the counterexample vector in the SMT.
-    pub counterexample_key: [u8; 32],
+    /// The index of the counterexample in the sorted semantic Merkle tree.
+    pub leaf_index: usize,
     /// The counterexample vector.
     pub counterexample_vector: FixedPointEmbedding,
-    /// The SMT membership proof showing the counterexample vector's commit is committed.
-    pub merkle_proof: MembershipProof,
+    /// The Merkle membership proof in the balanced semantic Merkle tree.
+    pub merkle_path: Vec<[u8; 32]>,
+    /// The ObjectId of the counterexample.
+    pub object_id: ObjectId,
 }
 
 impl TopKClaim {
@@ -50,25 +53,22 @@ impl TopKClaim {
     /// - `Err(MnemeError)` if verification encountered a structural/internal error.
     pub fn verify_challenge(&self, challenge: &WatcherChallenge) -> Result<bool, MnemeError> {
         // 1. Verify that the counterexample is NOT already in the claimed top-k set.
-        let counter_id = ObjectId(challenge.counterexample_key);
-        if self.returned_ids.contains(&counter_id) {
+        if self.returned_ids.contains(&challenge.object_id) {
             return Ok(false);
         }
 
-        // 2. Verify that the Merkle proof matches the counterexample vector.
+        // 2. Verify that the Merkle path matches the counterexample vector.
         let expected_commit = challenge.counterexample_vector.commit();
-        if challenge.merkle_proof.value != expected_commit {
-            return Ok(false);
-        }
-        if challenge.merkle_proof.root != self.smt_root {
-            return Ok(false);
-        }
-        if challenge.merkle_proof.key != challenge.counterexample_key {
-            return Ok(false);
-        }
+        let leaf_commit = hash_sem_leaf(challenge.object_id.as_bytes(), &expected_commit);
 
-        // Verify the SMT membership proof.
-        if SparseMerkleTree::verify_membership(&challenge.merkle_proof).is_err() {
+        if SemanticMerkleTree::verify_path_with_index(
+            challenge.leaf_index,
+            &leaf_commit,
+            &challenge.merkle_path,
+            &self.semantic_commit,
+        )
+        .is_err()
+        {
             return Ok(false);
         }
 
@@ -85,5 +85,84 @@ impl TopKClaim {
         } else {
             Ok(false) // False challenge
         }
+    }
+}
+
+// --- Wire Representations for Serde ---
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TopKClaimWire {
+    pub query_dim: u32,
+    pub query_scale: i8,
+    pub query_components: Vec<i16>,
+    pub d_k: i64,
+    pub returned_ids: Vec<[u8; 32]>,
+    pub semantic_commit: [u8; 32],
+}
+
+impl From<TopKClaim> for TopKClaimWire {
+    fn from(claim: TopKClaim) -> Self {
+        Self {
+            query_dim: claim.query.dim,
+            query_scale: claim.query.scale,
+            query_components: claim.query.components,
+            d_k: claim.d_k,
+            returned_ids: claim.returned_ids.iter().map(|id| *id.as_bytes()).collect(),
+            semantic_commit: claim.semantic_commit,
+        }
+    }
+}
+
+impl TryFrom<TopKClaimWire> for TopKClaim {
+    type Error = MnemeError;
+
+    fn try_from(wire: TopKClaimWire) -> Result<Self, Self::Error> {
+        let query =
+            FixedPointEmbedding::new(wire.query_dim, wire.query_scale, wire.query_components)?;
+        let returned_ids = wire.returned_ids.into_iter().map(ObjectId).collect();
+        Ok(Self {
+            query,
+            d_k: wire.d_k,
+            returned_ids,
+            semantic_commit: wire.semantic_commit,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WatcherChallengeWire {
+    pub leaf_index: usize,
+    pub vector_dim: u32,
+    pub vector_scale: i8,
+    pub vector_components: Vec<i16>,
+    pub merkle_path: Vec<[u8; 32]>,
+    pub object_id: [u8; 32],
+}
+
+impl From<WatcherChallenge> for WatcherChallengeWire {
+    fn from(challenge: WatcherChallenge) -> Self {
+        Self {
+            leaf_index: challenge.leaf_index,
+            vector_dim: challenge.counterexample_vector.dim,
+            vector_scale: challenge.counterexample_vector.scale,
+            vector_components: challenge.counterexample_vector.components,
+            merkle_path: challenge.merkle_path,
+            object_id: *challenge.object_id.as_bytes(),
+        }
+    }
+}
+
+impl TryFrom<WatcherChallengeWire> for WatcherChallenge {
+    type Error = MnemeError;
+
+    fn try_from(wire: WatcherChallengeWire) -> Result<Self, Self::Error> {
+        let counterexample_vector =
+            FixedPointEmbedding::new(wire.vector_dim, wire.vector_scale, wire.vector_components)?;
+        Ok(Self {
+            leaf_index: wire.leaf_index,
+            counterexample_vector,
+            merkle_path: wire.merkle_path,
+            object_id: ObjectId(wire.object_id),
+        })
     }
 }

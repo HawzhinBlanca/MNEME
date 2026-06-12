@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 mneme-core.workspace = true
+mneme-index.workspace = true
 mneme-smt.workspace = true
 blake3.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -16,3 +17,4 @@ thiserror.workspace = true
 
 [dev-dependencies]
 rand.workspace = true
+serde_json.workspace = true

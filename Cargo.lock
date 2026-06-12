@@ -1669,6 +1669,7 @@ dependencies = [
  "mneme-core",
  "mneme-crypto",
  "mneme-index",
+ "mneme-optimistic",
  "mneme-pace",
  "mneme-robr",
  "mneme-smt",
@@ -1840,9 +1841,11 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "mneme-core",
+ "mneme-index",
  "mneme-smt",
  "rand 0.8.6",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1907,6 +1910,7 @@ dependencies = [
  "mneme-forget",
  "mneme-gate",
  "mneme-index",
+ "mneme-optimistic",
  "mneme-robr",
  "mneme-root",
  "mneme-smt",

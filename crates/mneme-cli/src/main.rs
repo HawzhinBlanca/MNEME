@@ -10,8 +10,8 @@ mod shapley;
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
 use mneme_core::{
-    DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
-    ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
+    DistanceMetric, Draft, FixedPointEmbedding, ForgetMode, ForgetTarget, LogicalKey, MemoryKind,
+    MnemeError, Procedure, ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
 };
 use mneme_core::{ForgetProof, encode_forget_proof};
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
@@ -232,6 +232,46 @@ enum Commands {
     Pace {
         #[command(subcommand)]
         command: PaceCommands,
+    },
+    /// Queries the semantic index and writes a TopKClaim (as JSON) to a file.
+    QueryTopk {
+        store: PathBuf,
+        /// Query embedding components (e.g. `0.1,0.2`)
+        #[arg(long)]
+        components: String,
+        #[arg(long, default_value_t = 2)]
+        dim: u16,
+        #[arg(long, default_value_t = 0)]
+        scale: i8,
+        #[arg(long = "ef-search", default_value_t = 64)]
+        ef_search: u32,
+        #[arg(long, default_value_t = 1)]
+        k: u32,
+        /// Path to write the generated TopKClaim JSON
+        #[arg(long = "output-claim")]
+        output_claim: PathBuf,
+    },
+    /// Audits a TopKClaim against a local store and outputs a WatcherChallenge if fraud is detected.
+    ChallengeTopk {
+        store: PathBuf,
+        /// Path to the TopKClaim JSON file
+        #[arg(long)]
+        claim: PathBuf,
+        /// EF search parameter for HNSW
+        #[arg(long = "ef-search", default_value_t = 64)]
+        ef_search: u32,
+        /// Path to write the generated WatcherChallenge JSON
+        #[arg(long = "output-challenge")]
+        output_challenge: PathBuf,
+    },
+    /// Verifies a WatcherChallenge against a TopKClaim without requiring store access.
+    VerifyChallenge {
+        /// Path to the TopKClaim JSON file
+        #[arg(long)]
+        claim: PathBuf,
+        /// Path to the WatcherChallenge JSON file
+        #[arg(long)]
+        challenge: PathBuf,
     },
 }
 
@@ -997,6 +1037,129 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 Ok(())
             }
         },
+        Commands::QueryTopk {
+            store,
+            components,
+            dim,
+            scale,
+            ef_search,
+            k,
+            output_claim,
+        } => {
+            require_store_dir(&store)?;
+            let comps = parse_i16_list(&components)?;
+            let query =
+                FixedPointEmbedding::new(dim as u32, scale, comps).map_err(CliErrorKind::Kernel)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let store_instance = open_store(&store, operator, cli.vault)?;
+            let proc = Procedure {
+                algo: ProcedureAlgo::Hnsw,
+                ef_search,
+                k,
+                distance: DistanceMetric::SquaredL2I64,
+                seed: 0,
+            };
+            let claim = store_instance
+                .create_topk_claim(query, &proc)
+                .map_err(CliErrorKind::Kernel)?;
+            let claim_wire = mneme_optimistic::TopKClaimWire::from(claim);
+            let claim_json =
+                serde_json::to_string_pretty(&claim_wire).map_err(|_| CliErrorKind::Usage)?;
+            std::fs::write(&output_claim, claim_json).map_err(|e| {
+                CliErrorKind::Kernel(MnemeError::IoFailed {
+                    path: output_claim.to_string_lossy().into_owned(),
+                    kind: e.kind().to_string(),
+                })
+            })?;
+            println!("wrote claim to {}", output_claim.display());
+            Ok(())
+        }
+        Commands::ChallengeTopk {
+            store,
+            claim,
+            ef_search,
+            output_challenge,
+        } => {
+            require_store_dir(&store)?;
+            require_file_exists(&claim, "claim")?;
+            let claim_json = std::fs::read_to_string(&claim).map_err(|e| {
+                CliErrorKind::Kernel(MnemeError::IoFailed {
+                    path: claim.to_string_lossy().into_owned(),
+                    kind: e.kind().to_string(),
+                })
+            })?;
+            let claim_wire: mneme_optimistic::TopKClaimWire =
+                serde_json::from_str(&claim_json).map_err(|_| CliErrorKind::Usage)?;
+            let claim_struct =
+                mneme_optimistic::TopKClaim::try_from(claim_wire).map_err(CliErrorKind::Kernel)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let store_instance = open_store(&store, operator, cli.vault)?;
+            let proc = Procedure {
+                algo: ProcedureAlgo::Hnsw,
+                ef_search,
+                k: claim_struct.returned_ids.len() as u32,
+                distance: DistanceMetric::SquaredL2I64,
+                seed: 0,
+            };
+            if let Some(challenge_struct) = store_instance
+                .audit_topk_claim(&claim_struct, &proc)
+                .map_err(CliErrorKind::Kernel)?
+            {
+                let challenge_wire = mneme_optimistic::WatcherChallengeWire::from(challenge_struct);
+                let challenge_json = serde_json::to_string_pretty(&challenge_wire)
+                    .map_err(|_| CliErrorKind::Usage)?;
+                std::fs::write(&output_challenge, challenge_json).map_err(|e| {
+                    CliErrorKind::Kernel(MnemeError::IoFailed {
+                        path: output_challenge.to_string_lossy().into_owned(),
+                        kind: e.kind().to_string(),
+                    })
+                })?;
+                println!(
+                    "fraud detected! wrote challenge to {}",
+                    output_challenge.display()
+                );
+                Ok(())
+            } else {
+                println!("no fraud detected.");
+                Err(CliErrorKind::VerifyFailed(MnemeError::IndexPathInvalid))
+            }
+        }
+        Commands::VerifyChallenge { claim, challenge } => {
+            require_file_exists(&claim, "claim")?;
+            require_file_exists(&challenge, "challenge")?;
+            let claim_json = std::fs::read_to_string(&claim).map_err(|e| {
+                CliErrorKind::Kernel(MnemeError::IoFailed {
+                    path: claim.to_string_lossy().into_owned(),
+                    kind: e.kind().to_string(),
+                })
+            })?;
+            let claim_wire: mneme_optimistic::TopKClaimWire =
+                serde_json::from_str(&claim_json).map_err(|_| CliErrorKind::Usage)?;
+            let claim_struct =
+                mneme_optimistic::TopKClaim::try_from(claim_wire).map_err(CliErrorKind::Kernel)?;
+
+            let challenge_json = std::fs::read_to_string(&challenge).map_err(|e| {
+                CliErrorKind::Kernel(MnemeError::IoFailed {
+                    path: challenge.to_string_lossy().into_owned(),
+                    kind: e.kind().to_string(),
+                })
+            })?;
+            let challenge_wire: mneme_optimistic::WatcherChallengeWire =
+                serde_json::from_str(&challenge_json).map_err(|_| CliErrorKind::Usage)?;
+            let challenge_struct = mneme_optimistic::WatcherChallenge::try_from(challenge_wire)
+                .map_err(CliErrorKind::Kernel)?;
+
+            let is_valid = claim_struct
+                .verify_challenge(&challenge_struct)
+                .map_err(CliErrorKind::Kernel)?;
+            if is_valid {
+                println!("challenge is VALID! cheat detected.");
+                Ok(())
+            } else {
+                println!("challenge is INVALID.");
+                Err(CliErrorKind::VerifyFailed(MnemeError::IndexPathInvalid))
+            }
+        }
     }
 }
 
