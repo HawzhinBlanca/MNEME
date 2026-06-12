@@ -16,6 +16,7 @@ fn mcp_remember_binds_action_receipt_when_feature_on() {
             "tools/mcp",
             "note",
             [0x09; 16],
+            None,
         )
         .unwrap();
     assert!(out.root_hash_hex.len() >= 64);

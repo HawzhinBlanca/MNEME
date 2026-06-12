@@ -703,6 +703,20 @@ impl Store {
         self.recall_verified_default(query, cap)
     }
 
+    /// Fail-closed semantic recall with the default semantic procedure (HNSW).
+    ///
+    /// Same TCB gate as `recall_verified`; the query MUST carry an embedding. Per the
+    /// §3 honesty boundary this proves procedure-faithfulness over the committed
+    /// candidate set under the quantized metric — NOT true nearest neighbors.
+    pub fn recall_verified_semantic_default(
+        &self,
+        query: &Query,
+        cap: &Capability,
+    ) -> Result<Vec<Entry>, MnemeError> {
+        let proc = mneme_index::default_semantic_procedure();
+        self.recall_verified(query, &proc, cap)
+    }
+
     pub fn promote(
         &mut self,
         id: &ObjectId,

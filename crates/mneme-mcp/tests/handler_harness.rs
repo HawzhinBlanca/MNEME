@@ -2,7 +2,7 @@
 
 use base64::Engine;
 use mneme_cap::tool_channel_cap;
-use mneme_core::{MemoryKind, MnemeError, TrustTier};
+use mneme_core::{FixedPointEmbedding, MemoryKind, MnemeError, TrustTier};
 use mneme_crypto::KeyPair;
 use mneme_mcp::handlers::MemoryHandlers;
 use mneme_mcp::store_open::test_runtime;
@@ -26,6 +26,7 @@ fn remember_via_tool_channel_is_quarantine_tier() {
             "tools/mcp",
             "web",
             [0x01; 16],
+            None,
         )
         .unwrap();
     assert_eq!(out.trust_tier, TrustTier::Quarantine.as_u8());
@@ -46,11 +47,12 @@ fn recall_uses_recall_verified_roundtrip() {
             "tools/mcp",
             "theme",
             [0x02; 16],
+            None,
         )
         .unwrap();
     let entries = rt
         .handlers
-        .recall("tools/mcp", "theme", TrustTier::Quarantine)
+        .recall("tools/mcp", "theme", TrustTier::Quarantine, None)
         .unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].body, "dark mode");
@@ -68,11 +70,12 @@ fn quarantine_blocked_from_trusted_recall_ainj_mitigation() {
             "tools/mcp",
             "injected",
             [0x03; 16],
+            None,
         )
         .unwrap();
     let err = rt
         .handlers
-        .recall("tools/mcp", "injected", TrustTier::Trusted)
+        .recall("tools/mcp", "injected", TrustTier::Trusted, None)
         .unwrap_err();
     assert!(
         matches!(
@@ -99,7 +102,14 @@ fn forget_with_proof_returns_verifiable_cbor_bound_to_signed_root() {
     let dir = tempdir().unwrap();
     let rt = test_runtime(dir.path());
     rt.handlers
-        .remember(b"x", MemoryKind::Semantic, "tools/mcp", "k", [0x05; 16])
+        .remember(
+            b"x",
+            MemoryKind::Semantic,
+            "tools/mcp",
+            "k",
+            [0x05; 16],
+            None,
+        )
         .unwrap();
     let out = rt.handlers.forget_with_proof("tools/mcp", "k").unwrap();
     let proof_bytes = base64::engine::general_purpose::STANDARD
@@ -116,12 +126,19 @@ fn forget_then_recall_fails_closed() {
     let dir = tempdir().unwrap();
     let rt = test_runtime(dir.path());
     rt.handlers
-        .remember(b"x", MemoryKind::Semantic, "tools/mcp", "k", [0x04; 16])
+        .remember(
+            b"x",
+            MemoryKind::Semantic,
+            "tools/mcp",
+            "k",
+            [0x04; 16],
+            None,
+        )
         .unwrap();
     rt.handlers.forget("tools/mcp", "k").unwrap();
     let err = rt
         .handlers
-        .recall("tools/mcp", "k", TrustTier::Quarantine)
+        .recall("tools/mcp", "k", TrustTier::Quarantine, None)
         .unwrap_err();
     assert_eq!(err, MnemeError::Forgotten);
 }
@@ -157,5 +174,55 @@ fn handlers_do_not_expose_raw_recall() {
     let write_cap = tool_channel_cap(&operator, writer.public_key_bytes()).unwrap();
     let read_cap = mneme_cap::agent_cap(&operator, operator.public_key_bytes()).unwrap();
     let h = MemoryHandlers::new(store, write_cap, read_cap);
-    let _ = h.recall("n", "k", TrustTier::Working);
+    let _ = h.recall("n", "k", TrustTier::Working, None);
+}
+
+#[test]
+fn semantic_recall_by_embedding_returns_indexed_entry() {
+    // Proves the semantic (HNSW) path is wired through MCP: recall by embedding with
+    // NO valid logical key must still return the entry — which only the semantic path
+    // can do (exact-key recall of "" would find nothing). Same fixed-point scale at
+    // write and query time, per the §3 quantized-metric boundary.
+    let dir = tempdir().unwrap();
+    let rt = test_runtime(dir.path());
+    let scale = -8;
+    let emb = |v: &[f32]| FixedPointEmbedding::quantize_from_f32(v, scale).unwrap();
+    rt.handlers
+        .remember(
+            b"about cats",
+            MemoryKind::Semantic,
+            "tools/mcp",
+            "cats",
+            [0x21; 16],
+            Some(emb(&[1.0, 0.0])),
+        )
+        .unwrap();
+    rt.handlers
+        .remember(
+            b"about dogs",
+            MemoryKind::Semantic,
+            "tools/mcp",
+            "dogs",
+            [0x22; 16],
+            Some(emb(&[0.0, 1.0])),
+        )
+        .unwrap();
+    // Query close to "cats", with an empty key — only semantic search can satisfy it.
+    let entries = rt
+        .handlers
+        .recall(
+            "tools/mcp",
+            "",
+            TrustTier::Quarantine,
+            Some(emb(&[0.9, 0.1])),
+        )
+        .unwrap();
+    assert!(
+        !entries.is_empty(),
+        "semantic recall must return candidates from the embedding index"
+    );
+    assert!(
+        entries.iter().any(|e| e.body == "about cats"),
+        "the embedding-nearest entry must be in the verified semantic result set"
+    );
 }
