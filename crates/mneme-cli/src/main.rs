@@ -5,6 +5,7 @@ mod cert;
 mod determinism;
 mod pace;
 mod replay;
+mod robr;
 mod shapley;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -200,6 +201,40 @@ enum Commands {
     },
     /// Offline verify a CCR-Shapley certificate (signature + consistency)
     VerifyShapley {
+        cert: PathBuf,
+        /// Optional pinned operator public key (64 hex chars)
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
+    /// ROBR-1: emit a Recall-to-Output Binding Receipt — bind a model output
+    /// commitment to the signed memory root, prompt, weight measurement, sampling
+    /// params, and the verified context assembled from fail-closed recalls.
+    Robr {
+        store: PathBuf,
+        /// Comma-separated logical key names whose verified recalls form the context
+        #[arg(long = "keys")]
+        keys: String,
+        #[arg(long = "namespace", default_value = "user")]
+        namespace: String,
+        #[arg(long = "min-tier", value_enum, default_value_t = TrustTierArg::Quarantine)]
+        min_tier: TrustTierArg,
+        /// Prompt presented to the model (hashed into the envelope)
+        #[arg(long = "prompt")]
+        prompt: String,
+        /// Operator-asserted model weight measurement (64 hex chars)
+        #[arg(long = "weight-measurement")]
+        weight_measurement: String,
+        /// Canonical sampling params, e.g. "model=…;temp=0;top_p=1;seed=42"
+        #[arg(long = "sampling")]
+        sampling: String,
+        /// File holding the produced output tokens (committed to via BLAKE3)
+        #[arg(long = "output-file")]
+        output_file: PathBuf,
+        #[arg(long = "out")]
+        out: PathBuf,
+    },
+    /// Offline verify a ROBR binding receipt (signature + envelope consistency)
+    VerifyRobr {
         cert: PathBuf,
         /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
@@ -581,6 +616,117 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 );
             }
             println!("honesty: {}", shapley::SHAPLEY_HONESTY);
+            Ok(())
+        }
+        Commands::Robr {
+            store,
+            keys,
+            namespace,
+            min_tier,
+            prompt,
+            weight_measurement,
+            sampling,
+            output_file,
+            out,
+        } => {
+            let key_names: Vec<String> = keys
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if key_names.is_empty() {
+                eprintln!("mneme: robr requires --keys with at least one key");
+                return Err(CliErrorKind::Usage);
+            }
+            let weight = parse_seed_hex(&weight_measurement)?;
+            let output = std::fs::read(&output_file).map_err(|_| CliErrorKind::Usage)?;
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            let cap =
+                agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
+            mneme_store
+                .trust_mut()
+                .authorized_writers
+                .push(operator.public_key_bytes());
+            // Context: every entry comes through fail-closed verified recall.
+            let mut context: Vec<([u8; 32], Vec<u8>)> = Vec::new();
+            for name in &key_names {
+                let q = Query {
+                    logical_key: LogicalKey {
+                        namespace: namespace.clone(),
+                        name: name.clone(),
+                    },
+                    min_tier: min_tier.into(),
+                    embedding: None,
+                };
+                let entries = mneme_store
+                    .recall_verified_default(&q, &cap)
+                    .map_err(CliErrorKind::Kernel)?;
+                for e in entries {
+                    context.push((e.id.0, e.plaintext.clone()));
+                }
+            }
+            let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
+            let prompt_hash = *blake3::hash(prompt.as_bytes()).as_bytes();
+            let ctx_hash = robr::context_hash(&context);
+            let env = robr::envelope_hash(
+                &root.preimage_hash,
+                &prompt_hash,
+                &weight,
+                &sampling,
+                &ctx_hash,
+            );
+            let receipt = robr::RobrReceiptV1 {
+                root_seq: root.sequence,
+                root_preimage: root.preimage_hash,
+                prompt_hash,
+                weight_measurement: weight,
+                sampling_params: sampling,
+                context_ids: context.iter().map(|(id, _)| *id).collect(),
+                context_hash: ctx_hash,
+                envelope_hash: env,
+                output_token_commit: *blake3::hash(&output).as_bytes(),
+                operator_pk: operator.public_key_bytes(),
+                sig: [0u8; 64],
+            };
+            let wire = receipt
+                .sign_and_encode(&operator)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "robr receipt written: {} ({} bytes) root_seq={} context_entries={} envelope={}",
+                out.display(),
+                wire.len(),
+                root.sequence,
+                context.len(),
+                hex::encode(env)
+            );
+            println!("honesty: {}", robr::ROBR_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyRobr { cert, operator_pk } => {
+            let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = robr::RobrReceiptV1::verify(&wire, pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            println!(
+                "verify-robr ok: root_seq={} context_entries={} envelope={} output_commit={} operator_pk={}",
+                parsed.root_seq,
+                parsed.context_ids.len(),
+                hex::encode(parsed.envelope_hash),
+                hex::encode(parsed.output_token_commit),
+                hex::encode(parsed.operator_pk)
+            );
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", robr::ROBR_HONESTY);
             Ok(())
         }
         Commands::Init { path } => {

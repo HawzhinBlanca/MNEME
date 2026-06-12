@@ -40,6 +40,15 @@ proven cross-host bit-identical determinism.
   output_token_commit`, Ed25519-signed, strict length-prefixed wire, fail-closed decode, internal
   consistency checks. **Proof:** round-trip test; **every-byte-flip tamper suite (≥256 cases) all
   reject**; signed-but-inconsistent cert rejected; byte-identical re-encode.
+  - **✅ LANDED** as `mneme-cli` module `robr.rs` (`RobrReceiptV1`) + `mneme robr` /
+    `mneme verify-robr` subcommands. Envelope = `H(root ‖ prompt_hash ‖ weight_measurement ‖
+    sampling_params ‖ context_hash) → output_token_commit`, Ed25519-signed, strict
+    length-prefixed wire reusing the CCR fail-closed `Reader`. Verify re-derives the envelope
+    from the bound inputs and rejects any signed-but-inconsistent receipt. **Proof:** `robr.rs`
+    unit tests (round-trip, every-byte-flip, truncation/trailing, wrong-pinned-pk,
+    envelope-mismatch, **200-case generative tamper, 0 forgeries**) + `tests/robr_e2e.rs`
+    (CLI receipt → offline verify → tampered fails closed code 4). Honesty: binding only —
+    not model-output causation (ROBR-2/4), `weight_measurement` operator-asserted until TEE.
 - **ROBR-2 `[CORE]` — Replay verifier (no TEE).** A `mneme robr verify --replay` path that re-runs a
   **deterministic, batch-invariant** reference kernel over the committed (memory_root, prompt,
   sampling) and asserts **bit-identical** output-token equality to the receipt. Use a small
