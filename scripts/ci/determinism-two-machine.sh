@@ -40,7 +40,7 @@ mneme_ci_init "$ROOT" "${MNEME_CI_LANE:-determinism-two-machine}"
 # inside the image, so it does NOT require cargo/foundation-gate on the host. Skip
 # the host-side preflight compile when --docker / MNEME_DOCKER_SIM is requested.
 if [[ "${1:-}" != "--docker" && "${MNEME_DOCKER_SIM:-}" != "1" ]]; then
-  if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+  if ! cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate --help &>/dev/null; then
     echo "determinism-two-machine: mneme-cli foundation-gate not available — failing closed." >&2
     exit 1
   fi
@@ -175,7 +175,7 @@ run_ssh_remote() {
   b4_log "SSH preflight OK"
 
   rm -rf "$local_out"
-  cargo run -p mneme-cli -- determinism foundation-gate \
+  cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
     --out "$local_out" \
     --timestamp "$TS"
 
@@ -185,7 +185,7 @@ set -euo pipefail
 cd "$remote_root"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$remote_root/target}"
 rm -rf "$REMOTE_OUT"
-cargo run -p mneme-cli -- determinism foundation-gate \\
+cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \\
   --out "$REMOTE_OUT" \\
   --timestamp "$TS"
 EOF
@@ -390,7 +390,7 @@ run_dual_workspace() {
       cd "$ws"
       export CARGO_TARGET_DIR="$ws/target"
       mkdir -p "$CARGO_TARGET_DIR"
-      cargo run -p mneme-cli -- determinism foundation-gate \
+      cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
         --out "$out" \
         --timestamp "$TS"
     )

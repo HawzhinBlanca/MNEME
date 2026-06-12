@@ -60,7 +60,7 @@ Source anchors:
 | `crates/mneme-verify` | CORE | Default TCB modules are `proof`, `recall`, `root`, `store` at `crates/mneme-verify/src/lib.rs:4-21`; semantic verifier is re-included only with `experimental_semantic` at `crates/mneme-verify/src/lib.rs:7-17`. | TCB shrank to 481 production lines. |
 | `crates/mneme-store` | CORE default / DEFER features | Store feature gates are at `crates/mneme-store/Cargo.toml:32-57`; test-only public hooks require `internal_test_support` at `crates/mneme-store/Cargo.toml:64-86`; action/bench/merge modules are path-gated at `crates/mneme-store/src/lib.rs:8-29`. | Default store is the kernel; helper surfaces are hidden behind support features. |
 | `crates/mneme-mcp` | CORE | MCP public tool list is exactly four calls at `crates/mneme-mcp/src/protocol.rs:133-183`; erase returns `ForgetProof` + absence proof in `crates/mneme-mcp/src/handlers.rs:120-148`. | Lean public product API. |
-| `crates/mneme-cli` | OPERATOR / CORE-adjacent | Product commands are `verify`, `recall`, `remember`, `forget` at `crates/mneme-cli/src/main.rs:44-95`; `audit`, `init`, `determinism` require `operator_tools` at `crates/mneme-cli/src/main.rs:54-56` and `crates/mneme-cli/src/main.rs:132-140`; roadmap commands are cfg-gated at `crates/mneme-cli/src/main.rs:96-131`. | Decision made: CLI audit/init/determinism are operator-only, not public product API. |
+| `crates/mneme-cli` | OPERATOR / CORE-adjacent | Product commands are built by default; `audit`, `init`, and `determinism` require the default-off `operator_tools` feature declared in `crates/mneme-cli/Cargo.toml` and enforced with `cfg(feature = "operator_tools")` in `crates/mneme-cli/src/main.rs`. | Decision made: CLI audit/init/determinism are operator-only, not public product API. |
 | `crates/mneme-crossref` | DEFER | Independent reference implementation declared at `crates/mneme-crossref/src/lib.rs:1-4`. | Assurance/standardization, not runtime TCB. |
 | `experimental/context-gate/mneme-context` | DEFER | Context assembly crate declares Phase II purpose at `experimental/context-gate/mneme-context/src/lib.rs:1-8`. | Deferred Context Gate. |
 | `experimental/context-gate/mneme-gate` | DEFER | Gate status/scaffolding is declared at `experimental/context-gate/mneme-gate/src/lib.rs:1-19`. | Deferred until real TEE/attestation ops. |
@@ -183,7 +183,7 @@ Source anchors:
 | `mneme-mcp/src/honesty.rs` | CORE | Public honesty text exported from `crates/mneme-mcp/src/lib.rs:17-21`. |
 | `mneme-mcp/src/server.rs` | CORE | MCP transport exported at `crates/mneme-mcp/src/lib.rs:9-13`. |
 | `mneme-mcp/src/store_open.rs` | CORE | Runtime store open exported at `crates/mneme-mcp/src/lib.rs:21`. |
-| `mneme-cli/src/main.rs` | OPERATOR / CORE-adjacent | Product calls at `crates/mneme-cli/src/main.rs:44-95`; operator-only audit/init/determinism at `crates/mneme-cli/src/main.rs:54-56` and `crates/mneme-cli/src/main.rs:132-140`. |
+| `mneme-cli/src/main.rs` | OPERATOR / CORE-adjacent | Product calls build by default; operator-only audit/init/determinism are behind `cfg(feature = "operator_tools")`. |
 | `mneme-cli/src/determinism.rs` | OPERATOR | Included only by `operator_tools` at `crates/mneme-cli/src/main.rs:7-8`. |
 | `mneme-cli/src/attest.rs` | DEFER | Included only by `experimental_attest` at `crates/mneme-cli/src/main.rs:3-4`. |
 | `mneme-cli/src/cert.rs` | DEFER | Included only by `experimental_cognition_cert` at `crates/mneme-cli/src/main.rs:5-6`. |

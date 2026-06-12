@@ -9,6 +9,15 @@ description = "MNEME fail-closed memory gate (CLI adoption layer)"
 name = "mneme"
 path = "src/main.rs"
 
+[features]
+default = []
+operator_tools = []
+
+[[test]]
+name = "cli_e2e"
+path = "tests/cli_e2e.rs"
+required-features = ["operator_tools"]
+
 [dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }
 mneme-core.workspace = true

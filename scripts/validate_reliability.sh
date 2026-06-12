@@ -37,7 +37,7 @@ case "$LANE" in
     ;;
 
   determinism)
-    if ! cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null; then
+    if ! cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate --help &>/dev/null; then
       fail_closed "mneme-cli determinism foundation-gate not available"
     fi
     out="$ROOT/out/ci-foundation-gate"
@@ -46,10 +46,10 @@ case "$LANE" in
       echo "==> determinism foundation-gate run ${run}/2"
       dest="$out"
       [[ "$run" -eq 2 ]] && dest="${out}-2"
-      cargo run -p mneme-cli -- determinism foundation-gate \
+      cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
         --out "$dest" \
         --timestamp "1970-01-01T00:00:00Z"
-      cargo run -p mneme-cli -- determinism foundation-verify \
+      cargo run -p mneme-cli --features operator_tools -- determinism foundation-verify \
         "$dest/foundation.report.json" \
         --output "$dest/foundation.verify.json"
     done

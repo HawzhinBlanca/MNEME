@@ -2,6 +2,7 @@
 
 mod attest;
 mod cert;
+#[cfg(feature = "operator_tools")]
 mod determinism;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -12,6 +13,7 @@ use mneme_core::{
 };
 use mneme_core::{ForgetProof, encode_forget_proof};
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
+#[cfg(feature = "operator_tools")]
 use mneme_root::{
     CheckpointLog, RootHistoryPeak, RootHistoryPeakConsistencyProof, RootHistoryPeakDigest,
     RootHistoryPeakFrontierProof, RootHistoryPeakInclusionProof, RootHistoryPeakState,
@@ -19,7 +21,9 @@ use mneme_root::{
 };
 use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
+#[cfg(feature = "operator_tools")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "operator_tools")]
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -56,6 +60,7 @@ enum Commands {
         pin_root: Option<String>,
     },
     /// Operator audit: emit root-history/peak digest JSON for a store
+    #[cfg(feature = "operator_tools")]
     Audit {
         store: Option<PathBuf>,
         /// Write the current compact peak state to PATH for later append-only verification.
@@ -165,8 +170,10 @@ enum Commands {
         k: u32,
     },
     /// Initialize a new store at PATH
+    #[cfg(feature = "operator_tools")]
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
+    #[cfg(feature = "operator_tools")]
     Determinism {
         #[command(subcommand)]
         command: DeterminismCommands,
@@ -184,6 +191,7 @@ enum SyncCommands {
     },
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Subcommand)]
 enum DeterminismCommands {
     /// Build fixture store twice; assert byte-identical roots/receipts
@@ -255,6 +263,7 @@ enum CliErrorKind {
     Kernel(MnemeError),
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakStateJson {
@@ -266,6 +275,7 @@ struct PeakStateJson {
     peaks: Vec<PeakJson>,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakJson {
@@ -273,6 +283,7 @@ struct PeakJson {
     hash: String,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakDigestJson {
@@ -283,6 +294,7 @@ struct PeakDigestJson {
     peak_bag_root: String,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakConsistencyProofJson {
@@ -293,6 +305,7 @@ struct PeakConsistencyProofJson {
     appended_checkpoints_cbor: Vec<String>,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakFrontierProofJson {
@@ -303,6 +316,7 @@ struct PeakFrontierProofJson {
     appended_subtrees: Vec<PeakJson>,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakProofStepJson {
@@ -310,6 +324,7 @@ struct PeakProofStepJson {
     sibling_hash: String,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakInclusionProofJson {
@@ -323,6 +338,7 @@ struct PeakInclusionProofJson {
     path: Vec<PeakProofStepJson>,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakProofBundleJson {
@@ -333,6 +349,7 @@ struct PeakProofBundleJson {
     proof: PeakConsistencyProofJson,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakFrontierProofBundleJson {
@@ -347,6 +364,7 @@ struct PeakFrontierProofBundleJson {
     proof: PeakFrontierProofJson,
 }
 
+#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakInclusionProofBundleJson {
@@ -357,6 +375,7 @@ struct PeakInclusionProofBundleJson {
     proof: PeakInclusionProofJson,
 }
 
+#[cfg(feature = "operator_tools")]
 struct AuditRequest<'a> {
     store: Option<&'a Path>,
     emit_peak_state: Option<&'a Path>,
@@ -391,6 +410,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<(), CliErrorKind> {
     match cli.command {
+        #[cfg(feature = "operator_tools")]
         Commands::Init { path } => {
             if path.exists() {
                 eprintln!("mneme: init path already exists: {}", path.display());
@@ -599,6 +619,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
+        #[cfg(feature = "operator_tools")]
         Commands::Audit {
             store,
             emit_peak_state,
@@ -685,6 +706,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
+        #[cfg(feature = "operator_tools")]
         Commands::Determinism { command } => match command {
             DeterminismCommands::FoundationGate { out, timestamp } => {
                 let operator_seed = cli
@@ -720,6 +742,7 @@ fn parse_logical_key(key: &str) -> LogicalKey {
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     if let Some(proof_path) = request.verify_peak_proof {
         if request.store.is_some()
@@ -953,6 +976,7 @@ fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     Ok(())
 }
 
+#[cfg(feature = "operator_tools")]
 fn run_verify_peak_proof(
     proof_path: &Path,
     operator_pubkey: Option<&str>,
@@ -980,6 +1004,7 @@ fn run_verify_peak_proof(
     Ok(())
 }
 
+#[cfg(feature = "operator_tools")]
 fn run_verify_peak_frontier_proof(
     proof_path: &Path,
     operator_pubkey: Option<&str>,
@@ -1016,6 +1041,7 @@ fn run_verify_peak_frontier_proof(
     Ok(())
 }
 
+#[cfg(feature = "operator_tools")]
 fn run_verify_peak_inclusion_proof(
     proof_path: &Path,
     operator_pubkey: Option<&str>,
@@ -1045,12 +1071,14 @@ fn run_verify_peak_inclusion_proof(
     Ok(())
 }
 
+#[cfg(feature = "operator_tools")]
 fn write_peak_state_json(path: &Path, state: &RootHistoryPeakState) -> Result<(), CliErrorKind> {
     let data =
         serde_json::to_vec_pretty(&peak_state_to_json(state)).map_err(|_| CliErrorKind::Usage)?;
     std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
 }
 
+#[cfg(feature = "operator_tools")]
 fn read_peak_state_json(path: &Path) -> Result<RootHistoryPeakState, CliErrorKind> {
     require_file_exists(path, "peak state")?;
     let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
@@ -1058,10 +1086,12 @@ fn read_peak_state_json(path: &Path) -> Result<RootHistoryPeakState, CliErrorKin
     peak_state_from_json(parsed)
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_state_json_value(state: &RootHistoryPeakState) -> Value {
     serde_json::to_value(peak_state_to_json(state)).unwrap_or(Value::Null)
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_state_to_json(state: &RootHistoryPeakState) -> PeakStateJson {
     PeakStateJson {
         schema: "mneme.audit.peak_state.v1".into(),
@@ -1080,6 +1110,7 @@ fn peak_state_to_json(state: &RootHistoryPeakState) -> PeakStateJson {
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_state_from_json(parsed: PeakStateJson) -> Result<RootHistoryPeakState, CliErrorKind> {
     if parsed.schema != "mneme.audit.peak_state.v1" {
         return Err(CliErrorKind::Usage);
@@ -1102,6 +1133,7 @@ fn peak_state_from_json(parsed: PeakStateJson) -> Result<RootHistoryPeakState, C
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_digest_to_json(digest: &RootHistoryPeakDigest) -> PeakDigestJson {
     PeakDigestJson {
         sequence: digest.sequence,
@@ -1112,6 +1144,7 @@ fn peak_digest_to_json(digest: &RootHistoryPeakDigest) -> PeakDigestJson {
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_digest_from_json(parsed: PeakDigestJson) -> Result<RootHistoryPeakDigest, CliErrorKind> {
     Ok(RootHistoryPeakDigest {
         sequence: parsed.sequence,
@@ -1122,6 +1155,7 @@ fn peak_digest_from_json(parsed: PeakDigestJson) -> Result<RootHistoryPeakDigest
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_consistency_proof_to_json(
     proof: &RootHistoryPeakConsistencyProof,
 ) -> Result<PeakConsistencyProofJson, CliErrorKind> {
@@ -1143,6 +1177,7 @@ fn peak_consistency_proof_to_json(
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_consistency_proof_from_json(
     parsed: PeakConsistencyProofJson,
 ) -> Result<RootHistoryPeakConsistencyProof, CliErrorKind> {
@@ -1162,6 +1197,7 @@ fn peak_consistency_proof_from_json(
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_frontier_proof_to_json(proof: &RootHistoryPeakFrontierProof) -> PeakFrontierProofJson {
     PeakFrontierProofJson {
         from_sequence: proof.from_sequence,
@@ -1179,6 +1215,7 @@ fn peak_frontier_proof_to_json(proof: &RootHistoryPeakFrontierProof) -> PeakFron
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_frontier_proof_from_json(
     parsed: PeakFrontierProofJson,
 ) -> Result<RootHistoryPeakFrontierProof, CliErrorKind> {
@@ -1200,6 +1237,7 @@ fn peak_frontier_proof_from_json(
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_inclusion_proof_to_json(proof: &RootHistoryPeakInclusionProof) -> PeakInclusionProofJson {
     PeakInclusionProofJson {
         sequence: proof.sequence,
@@ -1220,6 +1258,7 @@ fn peak_inclusion_proof_to_json(proof: &RootHistoryPeakInclusionProof) -> PeakIn
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn peak_inclusion_proof_from_json(
     parsed: PeakInclusionProofJson,
 ) -> Result<RootHistoryPeakInclusionProof, CliErrorKind> {
@@ -1248,6 +1287,7 @@ fn peak_inclusion_proof_from_json(
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn proof_step_to_json(step: &RootHistoryProofStep) -> PeakProofStepJson {
     let direction = match step.direction {
         RootHistoryProofDirection::Left => "left",
@@ -1259,6 +1299,7 @@ fn proof_step_to_json(step: &RootHistoryProofStep) -> PeakProofStepJson {
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn proof_step_from_json(parsed: PeakProofStepJson) -> Result<RootHistoryProofStep, CliErrorKind> {
     let direction = match parsed.direction.as_str() {
         "left" => RootHistoryProofDirection::Left,
@@ -1271,6 +1312,7 @@ fn proof_step_from_json(parsed: PeakProofStepJson) -> Result<RootHistoryProofSte
     })
 }
 
+#[cfg(feature = "operator_tools")]
 fn write_peak_proof_bundle(
     path: &Path,
     operator_keys: &[[u8; 32]],
@@ -1289,6 +1331,7 @@ fn write_peak_proof_bundle(
     std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
 }
 
+#[cfg(feature = "operator_tools")]
 fn write_peak_inclusion_proof_bundle(
     path: &Path,
     operator_keys: &[[u8; 32]],
@@ -1310,6 +1353,7 @@ fn write_peak_inclusion_proof_bundle(
     std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
 }
 
+#[cfg(feature = "operator_tools")]
 fn write_peak_frontier_proof_bundle(
     path: &Path,
     older: &RootHistoryPeakState,
@@ -1331,6 +1375,7 @@ fn write_peak_frontier_proof_bundle(
     std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
 }
 
+#[cfg(feature = "operator_tools")]
 fn read_peak_proof_bundle(path: &Path) -> Result<PeakProofBundleJson, CliErrorKind> {
     require_file_exists(path, "peak proof")?;
     let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
@@ -1342,6 +1387,7 @@ fn read_peak_proof_bundle(path: &Path) -> Result<PeakProofBundleJson, CliErrorKi
     Ok(bundle)
 }
 
+#[cfg(feature = "operator_tools")]
 fn read_peak_frontier_proof_bundle(
     path: &Path,
 ) -> Result<PeakFrontierProofBundleJson, CliErrorKind> {
@@ -1361,6 +1407,7 @@ fn read_peak_frontier_proof_bundle(
     Ok(bundle)
 }
 
+#[cfg(feature = "operator_tools")]
 fn read_peak_inclusion_proof_bundle(
     path: &Path,
 ) -> Result<PeakInclusionProofBundleJson, CliErrorKind> {
@@ -1374,6 +1421,7 @@ fn read_peak_inclusion_proof_bundle(
     Ok(bundle)
 }
 
+#[cfg(feature = "operator_tools")]
 fn trusted_operator_keys(
     operator_pubkey: Option<&str>,
     seed_hex: Option<&str>,
@@ -1396,6 +1444,7 @@ fn trusted_operator_keys(
     }
 }
 
+#[cfg(feature = "operator_tools")]
 fn create_store(path: &Path, operator: KeyPair, vault: VaultArg) -> Result<Store, CliErrorKind> {
     match vault {
         VaultArg::File => Store::create(path, operator).map_err(CliErrorKind::Kernel),

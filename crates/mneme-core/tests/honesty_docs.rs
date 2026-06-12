@@ -717,10 +717,10 @@ fn validation_lane_determinism_delegates_to_reliability_wrapper() {
     );
 
     for phrase in [
-        "cargo run -p mneme-cli -- determinism foundation-gate --help &>/dev/null",
-        "cargo run -p mneme-cli -- determinism foundation-gate",
+        "cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate --help &>/dev/null",
+        "cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate",
         "--timestamp \"1970-01-01T00:00:00Z\"",
-        "cargo run -p mneme-cli -- determinism foundation-verify",
+        "cargo run -p mneme-cli --features operator_tools -- determinism foundation-verify",
         "fail_closed \"mneme-cli determinism foundation-gate not available\"",
         "==> determinism foundation-gate run ${run}/2",
     ] {

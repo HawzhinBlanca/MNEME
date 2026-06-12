@@ -29,9 +29,9 @@ run_cli_e2e() {
   mneme_ci_init "$ROOT" e2e-cli
   local bin="$CARGO_TARGET_DIR/$PROFILE/mneme"
   echo "==> build mneme-cli ($PROFILE) [target=${CARGO_TARGET_DIR}]"
-  cargo build -p mneme-cli --"$PROFILE"
+  cargo build -p mneme-cli --features operator_tools --"$PROFILE"
   echo "==> Rust CLI e2e (cli_e2e.rs)"
-  cargo test -p mneme-cli --test cli_e2e -- --nocapture
+  cargo test -p mneme-cli --features operator_tools --test cli_e2e -- --nocapture
   echo "==> Node CLI smoke (e2e/cli/*.test.mjs)"
   export MNEME_BIN="$bin"
   if [[ -f package-lock.json ]]; then

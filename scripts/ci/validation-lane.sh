@@ -73,10 +73,14 @@ case "$LANE" in
     cargo clippy -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store \
       --lib --tests -- -D warnings
+    cargo clippy -p mneme-cli --no-default-features --bins --tests -- -D warnings
+    cargo clippy -p mneme-cli --features operator_tools --bins --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
     cargo test -p mneme-verify --test tcb_budget -- --nocapture
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
+    cargo test -p mneme-cli --no-default-features --test cli_product -- --nocapture
+    cargo test -p mneme-cli --features operator_tools --test cli_e2e -- --nocapture
     bash scripts/ci/kill-resume-smoke.sh
     bash scripts/ci/mcp-smoke.sh
     bash scripts/ci/validation-contract-smoke.sh
@@ -148,7 +152,7 @@ case "$LANE" in
     bash scripts/ci/fuzz-meaningful.sh
     bash scripts/ci/check-test-vectors.sh
     # Re-materialize report after workspace/fuzz (prior ci-foundation-gate tree may be gone).
-    cargo run -p mneme-cli -- determinism foundation-gate \
+    cargo run -p mneme-cli --features operator_tools -- determinism foundation-gate \
       --out "$ROOT/out/ci-foundation-gate" \
       --timestamp "1970-01-01T00:00:00Z"
     bash scripts/ci/check-foundation-digests.sh

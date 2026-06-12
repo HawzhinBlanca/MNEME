@@ -28,7 +28,7 @@ and run the gate locally MUST produce identical digests — and a hand-compared 
 Both ran:
 
 ```
-cargo run -q -p mneme-cli -- determinism foundation-gate \
+cargo run -q -p mneme-cli --features operator_tools -- determinism foundation-gate \
   --out <out> --timestamp '1970-01-01T00:00:00Z'
 ```
 

@@ -53,7 +53,7 @@ stage 04-determinism-x5 bash -c '
   prev=""
   for i in 1 2 3 4 5; do
     d="/tmp/ovn-det-$i"; rm -rf "$d"
-    cargo run --release -q -p mneme-cli -- determinism foundation-gate --out "$d" --timestamp "1970-01-01T00:00:00Z" || exit 2
+    cargo run --release -q -p mneme-cli --features operator_tools -- determinism foundation-gate --out "$d" --timestamp "1970-01-01T00:00:00Z" || exit 2
     h=$(shasum -a256 "$d/run-a/roots/HEAD" | cut -d" " -f1)
     echo "run $i HEAD=$h"
     if [ -n "$prev" ] && [ "$h" != "$prev" ]; then echo "DETERMINISM DRIFT at run $i: $h != $prev"; exit 3; fi
