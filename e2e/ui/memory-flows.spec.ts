@@ -10,7 +10,10 @@ test.describe("MNEME memory UI", () => {
   );
 
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
+    // The console's recall/open flows are simulated and gated behind ?demo=1
+    // (the in-product DEMO banner makes this explicit). These tests validate the
+    // demo console behaviour, so navigate with demo mode on.
+    await page.goto("/?demo=1");
     await page.waitForLoadState("networkidle");
   });
 
@@ -39,6 +42,10 @@ test.describe("MNEME memory UI", () => {
   test("settings expose trust tier policy", async ({ page }) => {
     await page.getByRole("link", { name: /settings/i }).click();
     await expect(page.getByLabel(/default min tier/i)).toBeVisible();
-    await expect(page.getByText(/quarantine/i)).toBeVisible();
+    // Scope to the settings view and take the first match: "quarantine" is also the
+    // default min-tier value elsewhere, so an unscoped regex collides in strict mode.
+    await expect(
+      page.locator("#view-settings").getByText(/quarantine/i).first(),
+    ).toBeVisible();
   });
 });

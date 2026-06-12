@@ -176,9 +176,30 @@ body {
   display: inline-block;
 }
 
+.status-dot {
+  /* Neutral default until a real health probe resolves. */
+  background-color: var(--text-muted, hsl(220, 10%, 45%));
+}
+
 .status-dot.online {
   background-color: var(--accent-green);
   box-shadow: 0 0 8px var(--accent-green);
+}
+
+.status-dot.offline {
+  background-color: var(--accent-orange);
+  box-shadow: 0 0 8px var(--accent-orange);
+}
+
+#demo-banner {
+  background-color: var(--accent-orange-glow);
+  color: var(--accent-orange);
+  border-bottom: 1px solid var(--accent-orange);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 6px 12px;
+  letter-spacing: 0.02em;
 }
 
 /* Main Content Workspace */

@@ -13,6 +13,12 @@
   <link rel="stylesheet" href="/index.css">
 </head>
 <body>
+  <!-- Honesty banner: this console ships with no daemon wiring. Recall/forget/open
+       flows are simulated against in-memory sample data and are shown ONLY in demo
+       mode (?demo=1). Hidden by default; revealed by index.js when demo is active. -->
+  <div id="demo-banner" hidden>
+    DEMO CONSOLE — sample data, simulated flows. Not connected to a live mnemed.
+  </div>
   <div class="app-container">
     <!-- Navigation Sidebar -->
     <aside class="sidebar" role="complementary">
@@ -45,8 +51,8 @@
       <div class="sidebar-footer">
         <div class="version">Version 2.0.0-Beta</div>
         <div class="system-status">
-          <span class="status-dot online"></span>
-          Daemon Connected
+          <span class="status-dot" id="daemon-status-dot"></span>
+          <span id="daemon-status-text">Connecting…</span>
         </div>
       </div>
     </aside>
