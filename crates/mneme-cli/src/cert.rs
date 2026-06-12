@@ -64,13 +64,49 @@ pub fn run_verify_cert(
     path: &Path,
     trust: &TrustConfig,
     proc: &Procedure,
-) -> Result<(), MnemeError> {
+    store_path: Option<&Path>,
+) -> Result<String, MnemeError> {
     let bytes = fs::read(path).map_err(|e| MnemeError::IoFailed {
         path: path.display().to_string(),
         kind: e.to_string(),
     })?;
     verify_cognition_certificate_v1(&bytes, trust, proc)?;
-    Ok(())
+    let parsed = parse_cognition_certificate(&bytes)?;
+
+    let mut message = "verify-cert ok: cognition certificate v1 valid offline".to_string();
+
+    if let Some(expected_digest) = parsed.receipt.run_digest {
+        let mut entries = Vec::new();
+        if let Some(store) = store_path {
+            let state = mneme_store::layout::load_state(store)?;
+            for id in &parsed.receipt.verification_object.result_ids {
+                let bytes = state
+                    .objects
+                    .get(id.as_bytes())
+                    .ok_or(MnemeError::ObjectTampered)?;
+                let record = mneme_core::from_bytes_strict(bytes)?;
+                entries.push(mneme_core::Entry {
+                    id: *id,
+                    record,
+                    plaintext: vec![],
+                });
+            }
+        } else {
+            for id in &parsed.receipt.verification_object.result_ids {
+                entries.push(mneme_core::Entry {
+                    id: *id,
+                    record: mneme_core::ObjectRecord::fixture(mneme_core::MemoryKind::Semantic),
+                    plaintext: vec![],
+                });
+            }
+        }
+
+        mneme_robr::verify_replay_binding(&expected_digest, &entries)?;
+        message =
+            "verify-cert ok: cognition certificate v1 valid offline (ROBR-1 verified)".to_string();
+    }
+
+    Ok(message)
 }
 
 pub struct VerifyCertAuditOptions<'a> {

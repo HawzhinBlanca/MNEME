@@ -16,6 +16,7 @@ mneme-root.workspace = true
 mneme-cap.workspace = true
 mneme-verify.workspace = true
 mneme-index.workspace = true
+mneme-robr = { workspace = true }
 mneme-forget.workspace = true
 mneme-crdt.workspace = true
 mneme-account.workspace = true

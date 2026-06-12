@@ -34,10 +34,13 @@ impl Store {
             .embedding
             .as_ref()
             .ok_or(MnemeError::ProcedureMismatch)?;
-        let receipt = self
+        let mut receipt = self
             .semantic
             .recall_receipt_zkann(proc, embedding, root.preimage_hash, level)
             .map_err(crate::index_err)?;
+        let run_digest =
+            mneme_robr::compute_run_digest_from_ids(&receipt.verification_object.result_ids);
+        receipt.run_digest = Some(run_digest);
         assemble_cognition_certificate_v1(&stored, &receipt, Some(AsOf::RootSeq(root.sequence)))
     }
 

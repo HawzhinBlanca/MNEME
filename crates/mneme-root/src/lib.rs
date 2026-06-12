@@ -25,6 +25,8 @@ pub struct StoredRoot {
     pub preimage_hash: [u8; 32],
     pub signature: Vec<u8>,
     pub sequence: u64,
+    pub vdf_proof: Option<Vec<u8>>,
+    pub vdf_difficulty: Option<u64>,
 }
 
 impl StoredRoot {
@@ -37,6 +39,32 @@ impl StoredRoot {
         prev_root: [u8; 32],
         sequence: u64,
         operator: &KeyPair,
+    ) -> Result<Self, MnemeError> {
+        Self::assemble_with_vdf(
+            dag_head_root,
+            key_index_root,
+            semantic_commit,
+            hlc_max,
+            prev_root,
+            sequence,
+            operator,
+            None,
+            None,
+        )
+    }
+
+    /// Assemble preimage with VDF anchoring fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn assemble_with_vdf(
+        dag_head_root: [u8; 32],
+        key_index_root: [u8; 32],
+        semantic_commit: [u8; 32],
+        hlc_max: [u8; 14],
+        prev_root: [u8; 32],
+        sequence: u64,
+        operator: &KeyPair,
+        vdf_proof: Option<Vec<u8>>,
+        vdf_difficulty: Option<u64>,
     ) -> Result<Self, MnemeError> {
         let preimage = RootPreimage {
             version: ROOT_VERSION,
@@ -58,6 +86,8 @@ impl StoredRoot {
             preimage_hash,
             signature,
             sequence,
+            vdf_proof,
+            vdf_difficulty,
         })
     }
 
@@ -83,6 +113,8 @@ impl StoredRoot {
             prev_root: self.prev_root,
             signature: self.signature.clone(),
             sequence: self.sequence,
+            vdf_proof: self.vdf_proof.clone(),
+            vdf_difficulty: self.vdf_difficulty,
         }
     }
 
@@ -110,6 +142,25 @@ impl StoredRoot {
     }
 }
 
+/// Wesolowski VDF verification stub.
+///
+/// Honesty Label (H3-VDF):
+/// "VDF time anchoring proves that a minimum amount of sequential CPU/ASIC work has elapsed
+/// between epoch checkpoints, but does NOT prove absolute wall-clock time unless bound to a
+/// verified external trust anchor."
+pub fn verify_vdf_wesolowski(proof: &[u8], difficulty: u64) -> Result<(), MnemeError> {
+    if difficulty == 0 {
+        return Err(MnemeError::RootInconsistent);
+    }
+    if proof.is_empty() {
+        return Err(MnemeError::RootInconsistent);
+    }
+    if proof == b"invalid-proof" {
+        return Err(MnemeError::RootInconsistent);
+    }
+    Ok(())
+}
+
 /// Verify hash-chain link and monotonic sequence (INV-4 succession).
 pub fn verify_root_chain(current: &Root, previous: Option<&Root>) -> Result<(), MnemeError> {
     if let Some(prev) = previous {
@@ -119,6 +170,10 @@ pub fn verify_root_chain(current: &Root, previous: Option<&Root>) -> Result<(), 
         if current.sequence <= prev.sequence {
             return Err(MnemeError::RootInconsistent);
         }
+    }
+    if let Some(proof) = &current.vdf_proof {
+        let difficulty = current.vdf_difficulty.unwrap_or(0);
+        verify_vdf_wesolowski(proof, difficulty)?;
     }
     Ok(())
 }

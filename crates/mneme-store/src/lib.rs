@@ -16,7 +16,7 @@ mod certify;
 #[cfg(feature = "context_gate")]
 mod context_gate;
 mod forget;
-mod layout;
+pub mod layout;
 mod merge;
 mod pause;
 mod recall;

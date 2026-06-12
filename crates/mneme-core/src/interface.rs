@@ -221,6 +221,8 @@ pub struct Root {
     pub prev_root: [u8; 32],
     pub signature: Vec<u8>,
     pub sequence: u64,
+    pub vdf_proof: Option<Vec<u8>>,
+    pub vdf_difficulty: Option<u64>,
 }
 
 /// Root preimage before hashing and signing (§5.7).
@@ -294,6 +296,7 @@ pub enum Caveat {
 // ---------------------------------------------------------------------------
 
 /// Anti-entropy sync message enum (1-byte type tag + MNEME-dCBOR payload).
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SyncMessage {
     Hello {

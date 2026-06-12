@@ -947,6 +947,8 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
         "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$duplicate_runtime_lane_list\"",
         "expect_failure \"invalid sublane choices\"",
         "validation_lane_sublanes_before \"$label\" \"quick||full-preflight\" \"full-preflight\"",
+        "expect_failure \"underscore sublane choices\"",
+        "validation_lane_sublanes_before \"$label\" \"quick|bad_lane|full-preflight\" \"full-preflight\"",
         "expect_failure \"duplicate sublane choices\"",
         "validation_lane_sublanes_before \"$label\" \"quick|quick|full-preflight\" \"full-preflight\"",
         "expect_failure \"missing full-preflight sentinel\"",

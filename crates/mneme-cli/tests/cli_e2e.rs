@@ -160,7 +160,25 @@ fn certify_and_verify_cert_succeeds() {
             &seed_hex,
         ])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("ROBR-1 verified"));
+
+    mneme()
+        .args([
+            "verify-cert",
+            output.to_str().unwrap(),
+            "--store",
+            store.to_str().unwrap(),
+            "--ef-search",
+            "64",
+            "--k",
+            "1",
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ROBR-1 verified"));
 }
 
 #[test]

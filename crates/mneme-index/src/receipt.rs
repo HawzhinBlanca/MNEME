@@ -53,6 +53,8 @@ pub struct SemanticRecallReceipt {
     pub complete_knn: Option<CompleteKnnAttachment>,
     /// Phase I provenance-filter attestation (optional).
     pub provenance: Option<ProvenanceAttestation>,
+    /// ROBR-1: binding relation digest of returned objects.
+    pub run_digest: Option<[u8; 32]>,
 }
 
 impl SemanticRecallReceipt {
@@ -69,6 +71,7 @@ impl SemanticRecallReceipt {
             zkann: None,
             complete_knn: None,
             provenance: None,
+            run_digest: None,
         }
     }
 

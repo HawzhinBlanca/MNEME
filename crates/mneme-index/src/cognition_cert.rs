@@ -788,17 +788,7 @@ fn verify_root_offline(root: &Root, trust: &TrustConfig) -> Result<(), MnemeErro
 }
 
 fn stored_root_to_root(stored: &StoredRoot) -> Result<Root, MnemeError> {
-    Ok(Root {
-        version: stored.version,
-        preimage_hash: stored.preimage_hash,
-        dag_head_root: stored.dag_head_root,
-        key_index_root: stored.key_index_root,
-        semantic_commit: stored.semantic_commit,
-        hlc_max: stored.hlc_max,
-        prev_root: stored.prev_root,
-        signature: stored.signature.clone(),
-        sequence: stored.sequence,
-    })
+    Ok(stored.to_root())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1103,6 +1093,9 @@ fn encode_semantic_receipt(receipt: &SemanticRecallReceipt) -> Result<Vec<u8>, M
     if receipt.complete_knn.is_some() {
         map_len += 1;
     }
+    if receipt.run_digest.is_some() {
+        map_len += 1;
+    }
     enc.begin_map(map_len)?;
     enc.encode_unsigned(1)?;
     enc.encode_bytes(&receipt.root_bound)?;
@@ -1135,6 +1128,10 @@ fn encode_semantic_receipt(receipt: &SemanticRecallReceipt) -> Result<Vec<u8>, M
         enc.encode_unsigned(u64::from(ck.k))?;
         enc.encode_unsigned(4)?;
         enc.encode_bytes(&ck.proof_bytes)?;
+    }
+    if let Some(rd) = &receipt.run_digest {
+        enc.encode_unsigned(9)?;
+        enc.encode_bytes(rd)?;
     }
     Ok(enc.finish())
 }
@@ -1219,6 +1216,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
     let mut vo_body = None;
     let mut zkann = None;
     let mut complete_knn = None;
+    let mut run_digest = None;
     for (key, value) in map {
         let field = parse_u64_field_key(&key)?;
         match field {
@@ -1230,6 +1228,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
             6 => vo_body = Some(decode_vo_body(&value)?),
             7 => zkann = Some(decode_zkann(&value)?),
             8 => complete_knn = Some(decode_complete_knn_receipt(&value)?),
+            9 => run_digest = Some(parse_fixed32(&value)?),
             _ => {
                 let field_id = u16::try_from(field).unwrap_or(u16::MAX);
                 return Err(cognition_receipt_unknown_field_error(field_id));
@@ -1263,6 +1262,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
         zkann,
         complete_knn,
         provenance: None,
+        run_digest,
     })
 }
 

@@ -394,7 +394,14 @@ fn decode_have_objects(payload: &[u8]) -> Result<SyncMessage, MnemeError> {
 }
 
 fn encode_root(enc: &mut Encoder, root: &Root) -> Result<(), MnemeError> {
-    enc.begin_map(9)?;
+    let mut len = 9;
+    if root.vdf_proof.is_some() {
+        len += 1;
+    }
+    if root.vdf_difficulty.is_some() {
+        len += 1;
+    }
+    enc.begin_map(len)?;
     enc.encode_text("dag_head_root")?;
     enc.encode_bytes(&root.dag_head_root)?;
     enc.encode_text("hlc_max")?;
@@ -413,6 +420,14 @@ fn encode_root(enc: &mut Encoder, root: &Root) -> Result<(), MnemeError> {
     enc.encode_bytes(&root.signature)?;
     enc.encode_text("version")?;
     enc.encode_unsigned(u64::from(root.version))?;
+    if let Some(proof) = &root.vdf_proof {
+        enc.encode_text("vdf_proof")?;
+        enc.encode_bytes(proof)?;
+    }
+    if let Some(diff) = root.vdf_difficulty {
+        enc.encode_text("vdf_difficulty")?;
+        enc.encode_unsigned(diff)?;
+    }
     Ok(())
 }
 
@@ -441,6 +456,8 @@ fn decode_root_value(value: &CborValue) -> Result<Root, MnemeError> {
     let mut hlc_max = [0u8; 14];
     let mut preimage_hash = [0u8; 32];
     let mut signature = Vec::new();
+    let mut vdf_proof = None;
+    let mut vdf_difficulty = None;
     for (k, v) in map {
         match k.as_text().ok_or_else(sync_map_key_text_error)? {
             "version" => version = parse_u16(v)?,
@@ -458,6 +475,8 @@ fn decode_root_value(value: &CborValue) -> Result<Root, MnemeError> {
             }
             "preimage_hash" => preimage_hash = parse_fixed32(v)?,
             "signature" => signature = parse_bytes(v)?,
+            "vdf_proof" => vdf_proof = Some(parse_bytes(v)?),
+            "vdf_difficulty" => vdf_difficulty = Some(parse_u64(v)?),
             _ => return Err(sync_unknown_field_error()),
         }
     }
@@ -471,6 +490,8 @@ fn decode_root_value(value: &CborValue) -> Result<Root, MnemeError> {
         hlc_max,
         preimage_hash,
         signature,
+        vdf_proof,
+        vdf_difficulty,
     })
 }
 

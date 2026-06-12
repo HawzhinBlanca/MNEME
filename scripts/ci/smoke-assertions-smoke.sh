@@ -126,6 +126,10 @@ expect_failure "invalid sublane choices" \
   "$label: invalid validation lane choices: quick||full-preflight" \
   validation_lane_sublanes_before "$label" "quick||full-preflight" "full-preflight"
 
+expect_failure "underscore sublane choices" \
+  "$label: invalid validation lane choices: quick|bad_lane|full-preflight" \
+  validation_lane_sublanes_before "$label" "quick|bad_lane|full-preflight" "full-preflight"
+
 expect_failure "duplicate sublane choices" \
   "$label: duplicate validation lane choice: quick" \
   validation_lane_sublanes_before "$label" "quick|quick|full-preflight" "full-preflight"

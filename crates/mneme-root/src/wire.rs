@@ -14,6 +14,8 @@ const F_PREV_ROOT: u64 = 6;
 const F_PREIMAGE_HASH: u64 = 7;
 const F_SIGNATURE: u64 = 8;
 const F_SEQUENCE: u64 = 9;
+const F_VDF_PROOF: u64 = 10;
+const F_VDF_DIFFICULTY: u64 = 11;
 
 const HLC_MAX_LEN: usize = 14;
 
@@ -155,7 +157,14 @@ fn root_signature_length_error() -> MnemeError {
 impl DcborEncode for StoredRoot {
     fn dcbor_encode(&self, enc: &mut Encoder) -> Result<(), MnemeError> {
         self.validate_invariants()?;
-        enc.begin_map(9)?;
+        let mut map_len = 9u64;
+        if self.vdf_proof.is_some() {
+            map_len += 1;
+        }
+        if self.vdf_difficulty.is_some() {
+            map_len += 1;
+        }
+        enc.begin_map(map_len)?;
         enc.encode_unsigned(F_VERSION)?;
         enc.encode_unsigned(u64::from(self.version))?;
         enc.encode_unsigned(F_DAG_HEAD_ROOT)?;
@@ -174,6 +183,14 @@ impl DcborEncode for StoredRoot {
         enc.encode_bytes(&self.signature)?;
         enc.encode_unsigned(F_SEQUENCE)?;
         enc.encode_unsigned(self.sequence)?;
+        if let Some(proof) = &self.vdf_proof {
+            enc.encode_unsigned(F_VDF_PROOF)?;
+            enc.encode_bytes(proof)?;
+        }
+        if let Some(diff) = self.vdf_difficulty {
+            enc.encode_unsigned(F_VDF_DIFFICULTY)?;
+            enc.encode_unsigned(diff)?;
+        }
         Ok(())
     }
 }
@@ -190,6 +207,8 @@ impl DcborDecode for StoredRoot {
         let mut preimage_hash = None;
         let mut signature = None;
         let mut sequence = None;
+        let mut vdf_proof = None;
+        let mut vdf_difficulty = None;
 
         for (key, value) in map {
             let field = parse_u64_field_key(&key)?;
@@ -203,6 +222,8 @@ impl DcborDecode for StoredRoot {
                 F_PREIMAGE_HASH => preimage_hash = Some(parse_fixed32(&value)?),
                 F_SIGNATURE => signature = Some(parse_signature(&value)?),
                 F_SEQUENCE => sequence = Some(parse_u64(&value)?),
+                F_VDF_PROOF => vdf_proof = Some(parse_bytes(&value)?),
+                F_VDF_DIFFICULTY => vdf_difficulty = Some(parse_u64(&value)?),
                 _ => return Err(root_unknown_field_error(field)),
             }
         }
@@ -217,6 +238,8 @@ impl DcborDecode for StoredRoot {
             preimage_hash: preimage_hash.ok_or_else(missing_root_preimage_hash_error)?,
             signature: signature.ok_or_else(missing_root_signature_error)?,
             sequence: sequence.ok_or_else(missing_root_sequence_error)?,
+            vdf_proof,
+            vdf_difficulty,
         };
         stored.validate_invariants()?;
         Ok(stored)
@@ -276,6 +299,11 @@ fn parse_signature(value: &CborValue) -> Result<Vec<u8>, MnemeError> {
     if bytes.len() != ED25519_SIG_LEN {
         return Err(root_signature_length_error());
     }
+    Ok(bytes.to_vec())
+}
+
+fn parse_bytes(value: &CborValue) -> Result<Vec<u8>, MnemeError> {
+    let bytes = value.as_bytes().ok_or_else(root_fixed_slice_bytes_error)?;
     Ok(bytes.to_vec())
 }
 

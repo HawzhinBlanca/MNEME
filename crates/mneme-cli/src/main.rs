@@ -888,8 +888,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 })?;
                 println!("{msg}");
             } else {
-                cert::run_verify_cert(&cert, &trust, &proc).map_err(CliErrorKind::VerifyFailed)?;
-                println!("verify-cert ok: cognition certificate v1 valid offline");
+                let msg = cert::run_verify_cert(&cert, &trust, &proc, store.as_deref())
+                    .map_err(CliErrorKind::VerifyFailed)?;
+                println!("{msg}");
             }
             Ok(())
         }
