@@ -70,3 +70,35 @@ procedure-faithfulness, not exact nearest neighbors. Phase I `ExactDominance`
 proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven
 and it is not top-k by true query-to-embedding distance
 until verifiers recompute candidate distances.
+
+---
+
+## Re-proof on v0.7.0 (2026-06-12) — live two-physical-host, transport-free
+
+Re-run on the released tag **`v0.7.0`** (commit `3fedc80f`), Rust **1.86.0**, across two
+independent physical machines with no shared filesystem and no SSH (transport-free: the
+foundation-gate `RunDigest` is five cryptographic digests over fixed inputs carrying no
+host/path/OS/clock data, so each host runs the one-liner and the outputs are diffed).
+
+| | Host A | Host B |
+|---|---|---|
+| Platform | macOS / arm64 (Apple Silicon) | Windows / x86_64 (WSL2 Ubuntu) |
+| Toolchain | rustc 1.86.0 | rustc 1.86.0 |
+| Commit | `3fedc80f` | `3fedc80f` |
+
+Result: **all five digests byte-identical**; `foundation-verify` → `verified: true`,
+`mismatches: []` on both; the gate's own `byte_identical: true` (run_a == run_b) on both.
+SHA-256 of the sorted five-field digest set is identical on both hosts: `ba35755cfe87f452…`.
+
+```
+absent_proof_digest_hex = b479944e1b1c76a1628c4d8a6f3544fb690882124aeee3cf2ca2db91f5db1d88
+head_bytes_hex          = a90101025820e974b1934370338f4d561b55ab342a53df861354b4f48cb41da1689b6730d54f0...41ec1070905
+receipt_digest_hex      = aebbb7c86000ce2977f0832b4a4bcfcfea92279fb21324fe9a71b5a9fa743355
+root_preimage_hex       = c2b9dbfda40b466168599a18393b4b8e441b5deced15b1424f0ef303bef9837f
+semantic_digest_hex     = cb84a95c083ee6df82d254c80049162e89988f0ef8ff84581b04a17af6159099
+```
+
+This satisfies the README LEAN acceptance checklist condition (3) — golden determinism digests
+match on two physical hosts — live on the released code. **Still open (not claimed here):**
+cross-host CRDT **convergence** (anti-entropy two-peer exchange, D1/D2) requires a network path
+between the hosts; see `scripts/ci/convergence-two-host.sh` (its `MNEME_SECOND_HOST` SSH mode).
