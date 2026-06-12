@@ -1,6 +1,6 @@
 use mneme_core::{FixedPointEmbedding, ObjectId};
-use mneme_smt::SparseMerkleTree;
 use mneme_optimistic::{TopKClaim, WatcherChallenge};
+use mneme_smt::SparseMerkleTree;
 use std::time::Instant;
 
 #[test]
@@ -15,18 +15,18 @@ fn test_optimistic_verifier_and_watcher_challenges() {
     let mut tree = SparseMerkleTree::new();
     let mut vectors = Vec::with_capacity(n);
     let mut key_ids = Vec::with_capacity(n);
-    
+
     // Generate vectors with increasing distances
     for i in 0..n {
         let components = vec![i as i16; 16];
         let vec_i = FixedPointEmbedding::new(16, 0, components).unwrap();
         let mut key = [0u8; 32];
         key[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-        
+
         // Value in SMT is the commit of the vector
         let value = vec_i.commit();
         tree.upsert(key, value);
-        
+
         vectors.push(vec_i);
         key_ids.push(key);
     }
@@ -39,7 +39,7 @@ fn test_optimistic_verifier_and_watcher_challenges() {
         .enumerate()
         .map(|(i, v)| (i, q.squared_l2_distance(v).unwrap()))
         .collect();
-    
+
     // Sort by distance (ascending)
     distances.sort_by_key(|&(_, d)| d);
 
@@ -49,7 +49,7 @@ fn test_optimistic_verifier_and_watcher_challenges() {
         let idx = distances[i].0;
         returned_ids.push(ObjectId(key_ids[idx]));
     }
-    
+
     let honest_d_k = distances[k - 1].1;
 
     // Build the honest claim
@@ -68,8 +68,13 @@ fn test_optimistic_verifier_and_watcher_challenges() {
         counterexample_vector: vectors[sample_idx].clone(),
         merkle_proof: sample_proof.clone(),
     };
-    let outcome = honest_claim.verify_challenge(&false_challenge_already_in).unwrap();
-    assert!(!outcome, "False challenge containing already returned element must be rejected");
+    let outcome = honest_claim
+        .verify_challenge(&false_challenge_already_in)
+        .unwrap();
+    assert!(
+        !outcome,
+        "False challenge containing already returned element must be rejected"
+    );
 
     // --- TEST 2: Watcher challenge with a vector outside top-k but not closer is rejected ---
     let far_idx = distances[k + 5].0;
@@ -79,8 +84,13 @@ fn test_optimistic_verifier_and_watcher_challenges() {
         counterexample_vector: vectors[far_idx].clone(),
         merkle_proof: far_proof,
     };
-    let outcome = honest_claim.verify_challenge(&false_challenge_too_far).unwrap();
-    assert!(!outcome, "False challenge with vector not closer than d_k must be rejected");
+    let outcome = honest_claim
+        .verify_challenge(&false_challenge_too_far)
+        .unwrap();
+    assert!(
+        !outcome,
+        "False challenge with vector not closer than d_k must be rejected"
+    );
 
     // --- TEST 3: Forgery by Omission (Prover cheats) ---
     // Prover omits the closest vector (index 0) from the returned set and returns index k instead.
@@ -89,7 +99,7 @@ fn test_optimistic_verifier_and_watcher_challenges() {
     let omitted_idx = distances[0].0;
     let swapped_in_idx = distances[k].0;
     cheated_returned_ids[0] = ObjectId(key_ids[swapped_in_idx]);
-    
+
     let cheated_d_k = distances[k].1; // New boundary distance
 
     let cheated_claim = TopKClaim {
@@ -108,7 +118,10 @@ fn test_optimistic_verifier_and_watcher_challenges() {
     };
 
     let outcome = cheated_claim.verify_challenge(&watcher_challenge).unwrap();
-    assert!(outcome, "Cheat detected! Watcher challenge MUST succeed and slash the prover.");
+    assert!(
+        outcome,
+        "Cheat detected! Watcher challenge MUST succeed and slash the prover."
+    );
     println!("Forgery/omission successfully caught and slashed!");
 
     // --- BENCHMARK AND MEASUREMENTS ---
@@ -144,20 +157,33 @@ fn test_optimistic_verifier_and_watcher_challenges() {
         challenge_bytes.extend_from_slice(p);
     }
     challenge_bytes.extend_from_slice(&watcher_challenge.merkle_proof.root);
-    challenge_bytes.extend_from_slice(&(watcher_challenge.merkle_proof.leaf_index as u64).to_le_bytes());
+    challenge_bytes
+        .extend_from_slice(&(watcher_challenge.merkle_proof.leaf_index as u64).to_le_bytes());
 
     let size_bytes = challenge_bytes.len();
     let size_kb = size_bytes as f64 / 1024.0;
 
     let time_ratio = verifier_duration.as_nanos() as f64 / merkle_duration.as_nanos() as f64;
 
-    println!("Watcher challenge size: {:.2} KB ({} bytes)", size_kb, size_bytes);
+    println!(
+        "Watcher challenge size: {:.2} KB ({} bytes)",
+        size_kb, size_bytes
+    );
     println!("Challenge verification time: {:?}", verifier_duration);
     println!("Single SMT verify time: {:?}", merkle_duration);
-    println!("Verification time ratio (challenge / SMT): {:.2}x", time_ratio);
+    println!(
+        "Verification time ratio (challenge / SMT): {:.2}x",
+        time_ratio
+    );
 
     // Assert targets
-    assert!(size_kb <= 10.0, "Challenge object size target MISSED (>10 KB)");
-    assert!(time_ratio <= 10.0, "Challenge verification latency target MISSED (>10x SMT verify)");
+    assert!(
+        size_kb <= 10.0,
+        "Challenge object size target MISSED (>10 KB)"
+    );
+    assert!(
+        time_ratio <= 10.0,
+        "Challenge verification latency target MISSED (>10x SMT verify)"
+    );
     println!("All Task A targets MET successfully!");
 }

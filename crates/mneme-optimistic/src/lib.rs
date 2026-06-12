@@ -73,7 +73,9 @@ impl TopKClaim {
         }
 
         // 3. Recompute the quantized distance between the query and the counterexample vector.
-        let dist = self.query.squared_l2_distance(&challenge.counterexample_vector)?;
+        let dist = self
+            .query
+            .squared_l2_distance(&challenge.counterexample_vector)?;
 
         // 4. Compare with the claimed boundary distance d_k.
         // If dist < d_k, the counterexample is strictly closer than the k-th returned item,

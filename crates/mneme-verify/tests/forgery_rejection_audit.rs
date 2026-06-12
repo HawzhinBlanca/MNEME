@@ -300,7 +300,10 @@ fn check05_procedure_replay_result_swapped_procedure_mismatch() {
         .push(ObjectId([0xee; 32]));
     let err = run_semantic_receipt(&f).unwrap_err();
     assert_eq!(err, MnemeError::ProcedureMismatch);
-    assert!(err.to_string().contains("not true nearest neighbors"));
+    assert!(
+        err.to_string()
+            .contains("not exact top-k under the committed quantized metric")
+    );
 }
 
 #[test]

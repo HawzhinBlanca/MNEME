@@ -250,7 +250,10 @@ fn sem_honesty_on_procedure_mismatch() {
     f.receipt.verification_object.procedure_id[0] ^= 0x01;
     let err = run_semantic(&f).unwrap_err();
     assert_eq!(err, MnemeError::ProcedureMismatch);
-    assert!(err.to_string().contains("not true nearest neighbors"));
+    assert!(
+        err.to_string()
+            .contains("not exact top-k under the committed quantized metric")
+    );
 }
 
 #[test]

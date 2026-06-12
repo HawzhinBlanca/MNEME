@@ -94,7 +94,7 @@ Two limits are first-class and must appear in the README, the API docs, and the 
 
 1. **Authenticated ≠ true.** A correctly-signed entry from an authorized writer verifies even if its *content* is false. MNEME proves integrity, provenance, and authorization. It does not adjudicate truth.
 
-2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt proves the declared (approximate) retrieval procedure ran faithfully over un-tampered, committed data. It does **not** prove the returned items are the true nearest neighbors. This is consistent with the state of the art: V3DB (arXiv:2603.03065) and ANNProof (FGCS Vol. 156, 2024) both prove faithful execution of a committed procedure, not exact-NN optimality.
+2. **Verifiable retrieval proves procedure-faithfulness under the committed quantized metric, not optimality.** A recall receipt proves the declared retrieval procedure ran faithfully over un-tampered, committed data. It proves exact top-k under the committed quantized metric (but quantized top-k may differ from real-valued top-k due to quantization precision). This is consistent with the state of the art: V3DB (arXiv:2603.03065) and ANNProof (FGCS Vol. 156, 2024) both prove faithful execution of a committed procedure, not exact-NN optimality.
 
 Designing honestly around these two limits is what separates MNEME from snake oil. Every claim the system makes is bounded by them.
 
@@ -454,7 +454,7 @@ fn recall(query, P, cap):
     return Recall{ entries: results.map(ObjectRef), receipt, root: head }
 ```
 
-The receipt proves, when verified (§10), that: (a) every visited index node's Merkle path resolves to `semantic_commit` inside the signed root; (b) re-executing the deterministic procedure `P` over exactly those nodes reproduces `result_ids`; (c) each returned object's stored `embedding_commit` matches the one used. **It does not prove these are the true nearest neighbors** (§3). ANNProof (FGCS 2024) reports VO-generation/verification/size improvements of ~160×/120×/28× over prior authenticated-ANN work at millisecond scale; use that design as the v0 reference.
+The receipt proves, when verified (§10), that: (a) every visited index node's Merkle path resolves to `semantic_commit` inside the signed root; (b) re-executing the deterministic procedure `P` over exactly those nodes reproduces `result_ids`; (c) each returned object's stored `embedding_commit` matches the one used. **It proves exact top-k under the committed quantized metric (quantized top-k may differ from real-valued top-k)** (§3). ANNProof (FGCS 2024) reports VO-generation/verification/size improvements of ~160×/120×/28× over prior authenticated-ANN work at millisecond scale; use that design as the v0 reference.
 
 The opt-in `commitment_binding` feature (alias `zk`) is the **v0/90-day** privacy path for §9.2. It ships a tagged BLAKE3 commitment-binding envelope: binds `(object_id, embedding_commit)` to `public_commit`, rejects forgeries via `ZkProofInvalid`, and is **not** zero-knowledge (does not hide query or index data). Corpus: `proof/vectors/receipts/zk/`.
 

@@ -150,6 +150,7 @@ fi
 
 case "$LANE" in
   quick)
+    python3 scripts/ci/claims_lint.py
     cargo fmt --all -- --check
     # Wave 0/1 + store kernel on quick lane (§18, §19 v0).
     cargo clippy -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \

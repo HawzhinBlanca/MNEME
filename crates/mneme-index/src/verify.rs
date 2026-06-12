@@ -220,7 +220,7 @@ pub fn verify_semantic_receipt_full(
 /// Honesty guard: VO proves procedure-faithfulness, not exact-NN optimality (§3).
 pub const HONESTY_NOT_EXACT_NN: &str = concat!(
     "MNEME semantic receipts prove procedure-faithfulness over authenticated data, ",
-    "not semantic truth, not exact nearest-neighbor optimality, and not true nearest neighbors. ",
+    "not semantic truth, not exact nearest-neighbor optimality, and not exact top-k under the committed quantized metric (quantized top-k may differ from real-valued top-k). ",
     "ExactDominance v1 proves membership/completeness plus top-k over prover-asserted distances; ",
     "true top-k ranking is not proven and it is not top-k by true query-to-embedding distance ",
     "until verifiers recompute candidate distances."
@@ -468,7 +468,8 @@ mod tests {
 
     #[test]
     fn honesty_message_preserves_distance_caveat() {
-        assert!(HONESTY_NOT_EXACT_NN.contains("not true nearest"));
+        assert!(HONESTY_NOT_EXACT_NN.contains("exact top-k under the committed quantized"));
+        assert!(HONESTY_NOT_EXACT_NN.contains("quantized top-k may differ from real-valued"));
         assert!(
             HONESTY_NOT_EXACT_NN.contains("procedure-faithfulness"),
             "exported semantic honesty string must preserve the §3 procedure-faithfulness boundary"

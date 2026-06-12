@@ -38,7 +38,7 @@ Implementation details may evolve only inside non-contract modules (`dcbor`,
 | INV-7 | Strict parse; `UnknownField`; float/indefinite rejection |
 | INV-9 | Closed `MnemeError` enum (no `Other(String)`) |
 | INV-10 | `FixedPointEmbedding` integer distance + commit |
-| §3 | `ProcedureMismatch` / `RetrievalDominanceFailed` / `BelowTierPolicy` / `ZkProofInvalid` error text: authenticated `≠` true; procedure-faithfulness `≠` exact-NN / not exact nearest-neighbor / not true nearest neighbors; Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding distance (or quantized top-k may differ from true real-valued top-k under the committed quantized metric); binding `≠` SNARK |
+| §3 | `ProcedureMismatch` / `RetrievalDominanceFailed` / `BelowTierPolicy` / `ZkProofInvalid` error text: authenticated `≠` true; procedure-faithfulness `≠` exact-NN / not exact nearest-neighbor / not exact top-k under the committed quantized metric (quantized top-k may differ from real-valued top-k); Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding distance (or quantized top-k may differ from true real-valued top-k under the committed quantized metric); binding `≠` SNARK |
 
 ## Test vectors (Appendix B items 1–2)
 

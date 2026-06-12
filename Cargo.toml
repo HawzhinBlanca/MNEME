@@ -25,6 +25,7 @@ members = [
     "crates/mneme-robr",
     "crates/mneme-vdf",
     "crates/mneme-embargo",
+    "crates/mneme-optimistic",
 ]
 default-members = ["crates/mneme-store"]
 exclude = ["fuzz", "scripts/piop-flat-prototype"]
@@ -59,6 +60,7 @@ mneme-accum = { path = "crates/mneme-accum" }
 mneme-robr = { path = "crates/mneme-robr" }
 mneme-vdf = { path = "crates/mneme-vdf" }
 mneme-embargo = { path = "crates/mneme-embargo" }
+mneme-optimistic = { path = "crates/mneme-optimistic" }
 tlock = "0.0.8"
 darling = "=0.20.6"
 serde_with = "=3.9.0"
