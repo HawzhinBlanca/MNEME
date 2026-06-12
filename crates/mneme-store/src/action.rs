@@ -82,6 +82,13 @@ pub fn enforce_external_action(
 }
 
 impl Store {
+    /// Mint an `ActionReceipt` for an external action commit (P3-1).
+    ///
+    /// Fail-closed unless the store's own **`phase_iii_bind`** feature is enabled.
+    /// Workspace feature unification can make `mneme-account/phase_iii_bind_action`
+    /// available transitively (e.g. via `phase_iii_prove_forget`); keying the gate
+    /// to the store's own feature ensures the bind path does not silently open in a
+    /// build that never asked for it.
     pub fn bind_external_action(
         &self,
         action_commit: [u8; 32],
@@ -91,12 +98,28 @@ impl Store {
     ) -> Result<ActionReceipt, MnemeError> {
         self.verify_cap(cap)?;
         let root = self.current_root()?;
-        mneme_account::bind_action(
-            action_commit,
-            cap.inner(),
-            sanctioner_signer,
-            &root,
-            cognition_cert_commit,
-        )
+        #[cfg(feature = "phase_iii_bind")]
+        {
+            mneme_account::bind_action(
+                action_commit,
+                cap.inner(),
+                sanctioner_signer,
+                &root,
+                cognition_cert_commit,
+            )
+        }
+        #[cfg(not(feature = "phase_iii_bind"))]
+        {
+            let _ = (
+                action_commit,
+                cap,
+                sanctioner_signer,
+                cognition_cert_commit,
+                root,
+            );
+            // Fail closed: the action-provenance binding cannot be established when
+            // the store was not built with phase_iii_bind.
+            Err(MnemeError::ProvenanceBroken)
+        }
     }
 }
