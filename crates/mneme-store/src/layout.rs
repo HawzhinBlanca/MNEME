@@ -106,7 +106,10 @@ enum LayoutCanonicalFailure {
     InitialKeyIndexSidecar,
     RedactionRecord,
     KeyIndexSidecar,
+    // Constructed only by the per-commit snapshot path (bi-temporal recall).
+    #[cfg_attr(not(feature = "bitemporal_recall"), allow(dead_code))]
     KeyIndexSnapshot,
+    #[cfg_attr(not(feature = "bitemporal_recall"), allow(dead_code))]
     HistoricalKeyIndexSnapshot,
     ObjectKeysSidecar,
     ObjectKeysJournal,
@@ -259,6 +262,7 @@ pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
 }
 
 /// Per-checkpoint key-index snapshot for bi-temporal `recall_verified_at` (Phase I P1-2).
+#[cfg(feature = "bitemporal_recall")]
 pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result<(), MnemeError> {
     let dir = path.join("meta/snapshots").join(seq.to_string());
     fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
@@ -276,6 +280,7 @@ pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result
 }
 
 /// Load a historical key index snapshot written at commit `seq`.
+#[cfg(feature = "bitemporal_recall")]
 pub fn load_key_index_at_seq(path: &Path, seq: u64) -> Result<KeyIndex, MnemeError> {
     let snap = path
         .join("meta/snapshots")
@@ -795,10 +800,12 @@ fn layout_key_index_sidecar_json_error() -> MnemeError {
     layout_canonical_failure_to_mneme(LayoutCanonicalFailure::KeyIndexSidecar)
 }
 
+#[cfg(feature = "bitemporal_recall")]
 fn layout_key_index_snapshot_json_error() -> MnemeError {
     layout_canonical_failure_to_mneme(LayoutCanonicalFailure::KeyIndexSnapshot)
 }
 
+#[cfg(feature = "bitemporal_recall")]
 fn layout_historical_key_index_snapshot_json_error() -> MnemeError {
     layout_canonical_failure_to_mneme(LayoutCanonicalFailure::HistoricalKeyIndexSnapshot)
 }
@@ -1030,14 +1037,20 @@ mod tests {
             layout_initial_key_index_sidecar_json_error(),
             layout_redaction_record_json_error(),
             layout_key_index_sidecar_json_error(),
-            layout_key_index_snapshot_json_error(),
-            layout_historical_key_index_snapshot_json_error(),
             layout_object_keys_sidecar_json_error(),
             layout_object_keys_journal_json_error(),
             layout_embedding_sidecar_json_error(),
             layout_embedding_journal_upsert_json_error(),
             layout_embedding_journal_remove_json_error(),
             layout_key_index_journal_json_error(),
+        ] {
+            assert_eq!(error, MnemeError::SerializationNonCanonical);
+        }
+        // Snapshot classifiers exist only when bi-temporal recall is compiled in.
+        #[cfg(feature = "bitemporal_recall")]
+        for error in [
+            layout_key_index_snapshot_json_error(),
+            layout_historical_key_index_snapshot_json_error(),
         ] {
             assert_eq!(error, MnemeError::SerializationNonCanonical);
         }

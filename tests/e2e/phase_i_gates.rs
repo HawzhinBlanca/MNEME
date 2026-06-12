@@ -1,12 +1,15 @@
 use super::helpers::{agent_store, semantic_draft_with_embedding, theme_key};
 use mneme_cap::agent_cap;
-use mneme_core::{
-    AsOf, Draft, FixedPointEmbedding, MemoryKind, ProvenanceFilter, Query, TrustTier,
-};
+#[cfg(feature = "bitemporal_recall")]
+use mneme_core::{AsOf, Draft, MemoryKind};
+use mneme_core::{FixedPointEmbedding, ProvenanceFilter, Query, TrustTier};
 use mneme_crypto::KeyPair;
-use mneme_index::{default_key_procedure, default_semantic_procedure};
+#[cfg(feature = "bitemporal_recall")]
+use mneme_index::default_key_procedure;
+use mneme_index::default_semantic_procedure;
 use mneme_store::Store;
 
+#[cfg(feature = "bitemporal_recall")]
 #[test]
 fn e2e_recall_verified_at_matches_current_root() {
     let (mut store, cap, _dir) = agent_store();
@@ -56,6 +59,7 @@ fn e2e_provenance_scoped_recall_honors_filter() {
 /// valid-time-filtered sub-index whose commit never matched the signed root, so it always
 /// failed closed (`.unwrap()` would panic) — non-functional. Guards both functionality and
 /// the post-filter.
+#[cfg(feature = "bitemporal_recall")]
 #[test]
 fn e2e_recall_verified_at_valid_time_semantic_excludes_and_is_functional() {
     let (mut store, cap, _dir) = agent_store();
