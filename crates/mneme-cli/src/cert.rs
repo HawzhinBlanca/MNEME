@@ -123,7 +123,6 @@ pub fn run_verify_cert_audit(
             root.sequence
         ));
     }
-
     let root = verify_cognition_certificate_v1_with_spot_check(&bytes, trust, proc, None)?;
     Ok(format!(
         "verify-cert ok: cognition certificate v1 valid offline (audit: not selected; seq {})",

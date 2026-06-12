@@ -13,9 +13,15 @@ trap 'rm -rf "$scratch"' EXIT
 
 sentinel_target="$scratch/cargo-target"
 
+source_lane_choices="$(validation_lane_choices_from_source "$label")"
+lane_choices="$(validation_lane_choices_for_target "$label" "$sentinel_target")"
+require_exact_output "$label" "$lane_choices" "$source_lane_choices"
+expected_sublanes="$(validation_lane_sublanes_before "$label" "$lane_choices" "full-preflight")"
+expected_plan="validation-lane (full-preflight): planned sublanes: $expected_sublanes"
+
 output="$(CARGO_TARGET_DIR="$sentinel_target" bash scripts/ci/validation-lane.sh full-preflight)"
 
-require_exact_line "$label" "$output" "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism"
+require_exact_line "$label" "$output" "$expected_plan"
 require_exact_line "$label" "$output" "validation-lane (full-preflight): heavy checks are NOT executed by this lane."
 require_exact_line "$label" "$output" "validation-lane (full-preflight): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."
 require_exact_line "$label" "$output" "validation-lane (full-preflight): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host."

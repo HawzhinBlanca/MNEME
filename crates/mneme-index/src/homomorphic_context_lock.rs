@@ -47,7 +47,7 @@ enum ContextSetLockFailure {
     SidecarProofLengthInvalid,
     SidecarCommitLengthInvalid,
 }
-fn context_set_lock_error(f: ContextSetLockFailure) -> MnemeError {
+fn context_set_lock_failure_to_mneme(f: ContextSetLockFailure) -> MnemeError {
     match f {
         ContextSetLockFailure::EmptyEntrySet
         | ContextSetLockFailure::SetCommitMismatch
@@ -114,7 +114,9 @@ fn fiat_shamir_challenge(
 }
 pub fn sum_set_commit(entries: &[ObjectId]) -> Result<[u8; PUBLIC_COMMIT_LEN], MnemeError> {
     if entries.is_empty() {
-        return Err(context_set_lock_error(ContextSetLockFailure::EmptyEntrySet));
+        return Err(context_set_lock_failure_to_mneme(
+            ContextSetLockFailure::EmptyEntrySet,
+        ));
     }
     let mut acc = RistrettoPoint::default();
     for entry in entries {
@@ -125,10 +127,11 @@ pub fn sum_set_commit(entries: &[ObjectId]) -> Result<[u8; PUBLIC_COMMIT_LEN], M
 pub fn prove_context_set_lock(entries: &[ObjectId]) -> Result<ContextSetLockProof, MnemeError> {
     let set_commit = sum_set_commit(entries)?;
     let context_commit = set_commit;
-    let c_set = CompressedRistretto::from_slice(&set_commit)
-        .map_err(|_| context_set_lock_error(ContextSetLockFailure::SetCommitEncodingRejected))?;
+    let c_set = CompressedRistretto::from_slice(&set_commit).map_err(|_| {
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::SetCommitEncodingRejected)
+    })?;
     let c_ctx = CompressedRistretto::from_slice(&context_commit).map_err(|_| {
-        context_set_lock_error(ContextSetLockFailure::ContextCommitEncodingRejected)
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::ContextCommitEncodingRejected)
     })?;
     let mut rng = OsRng;
     let k = Scalar::random(&mut rng);
@@ -150,46 +153,50 @@ pub fn verify_context_set_lock(
 ) -> Result<(), MnemeError> {
     let expected_set = sum_set_commit(entries)?;
     if expected_set != proof.set_commit {
-        return Err(context_set_lock_error(
+        return Err(context_set_lock_failure_to_mneme(
             ContextSetLockFailure::SetCommitMismatch,
         ));
     }
     if proof.proof_bytes.len() != CONTEXT_SET_LOCK_PROOF_LEN {
-        return Err(context_set_lock_error(
+        return Err(context_set_lock_failure_to_mneme(
             ContextSetLockFailure::ProofByteLengthInvalid,
         ));
     }
     if proof.proof_bytes[0..PUBLIC_COMMIT_LEN] != proof.context_commit {
-        return Err(context_set_lock_error(
+        return Err(context_set_lock_failure_to_mneme(
             ContextSetLockFailure::ContextCommitMismatch,
         ));
     }
-    let c_set = CompressedRistretto::from_slice(&proof.set_commit)
-        .map_err(|_| context_set_lock_error(ContextSetLockFailure::SetCommitEncodingRejected))?;
-    let c_ctx = CompressedRistretto::from_slice(&proof.context_commit).map_err(|_| {
-        context_set_lock_error(ContextSetLockFailure::ContextCommitEncodingRejected)
+    let c_set = CompressedRistretto::from_slice(&proof.set_commit).map_err(|_| {
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::SetCommitEncodingRejected)
     })?;
-    let nonce_point = CompressedRistretto::from_slice(&proof.proof_bytes[32..64])
-        .map_err(|_| context_set_lock_error(ContextSetLockFailure::NonceEncodingRejected))?;
+    let c_ctx = CompressedRistretto::from_slice(&proof.context_commit).map_err(|_| {
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::ContextCommitEncodingRejected)
+    })?;
+    let nonce_point =
+        CompressedRistretto::from_slice(&proof.proof_bytes[32..64]).map_err(|_| {
+            context_set_lock_failure_to_mneme(ContextSetLockFailure::NonceEncodingRejected)
+        })?;
     let mut z_bytes = [0u8; 32];
     z_bytes.copy_from_slice(&proof.proof_bytes[64..96]);
-    let z = Option::<Scalar>::from(Scalar::from_canonical_bytes(z_bytes))
-        .ok_or_else(|| context_set_lock_error(ContextSetLockFailure::ResponseScalarNonCanonical))?;
+    let z = Option::<Scalar>::from(Scalar::from_canonical_bytes(z_bytes)).ok_or_else(|| {
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::ResponseScalarNonCanonical)
+    })?;
     let c_set_point = c_set.decompress().ok_or_else(|| {
-        context_set_lock_error(ContextSetLockFailure::SetCommitDecompressionRejected)
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::SetCommitDecompressionRejected)
     })?;
     let c_ctx_point = c_ctx.decompress().ok_or_else(|| {
-        context_set_lock_error(ContextSetLockFailure::ContextCommitDecompressionRejected)
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::ContextCommitDecompressionRejected)
     })?;
-    let nonce = nonce_point
-        .decompress()
-        .ok_or_else(|| context_set_lock_error(ContextSetLockFailure::NonceDecompressionRejected))?;
+    let nonce = nonce_point.decompress().ok_or_else(|| {
+        context_set_lock_failure_to_mneme(ContextSetLockFailure::NonceDecompressionRejected)
+    })?;
     let d = c_set_point - c_ctx_point;
     let challenge = fiat_shamir_challenge(&c_set, &c_ctx, &nonce_point);
     if z * (*generator_h()) == nonce + challenge * d {
         Ok(())
     } else {
-        Err(context_set_lock_error(
+        Err(context_set_lock_failure_to_mneme(
             ContextSetLockFailure::SchnorrEquationFailed,
         ))
     }
@@ -214,7 +221,7 @@ impl DcborDecode for ContextSetLockProof {
         let mut context_commit = None;
         let mut proof_bytes = None;
         for (key, value) in map {
-            let field = key.as_u64().ok_or(context_set_lock_error(
+            let field = key.as_u64().ok_or(context_set_lock_failure_to_mneme(
                 ContextSetLockFailure::SidecarFieldMissing,
             ))?;
             match field {
@@ -224,43 +231,44 @@ impl DcborDecode for ContextSetLockProof {
                     proof_bytes = Some(
                         value
                             .as_bytes()
-                            .ok_or(context_set_lock_error(
+                            .ok_or(context_set_lock_failure_to_mneme(
                                 ContextSetLockFailure::SidecarFieldMissing,
                             ))?
                             .to_vec(),
                     )
                 }
                 _ => {
-                    return Err(context_set_lock_error(
+                    return Err(context_set_lock_failure_to_mneme(
                         ContextSetLockFailure::SidecarFieldMissing,
                     ));
                 }
             }
         }
-        let proof_bytes = proof_bytes
-            .ok_or_else(|| context_set_lock_error(ContextSetLockFailure::SidecarFieldMissing))?;
+        let proof_bytes = proof_bytes.ok_or_else(|| {
+            context_set_lock_failure_to_mneme(ContextSetLockFailure::SidecarFieldMissing)
+        })?;
         if proof_bytes.len() != CONTEXT_SET_LOCK_PROOF_LEN {
-            return Err(context_set_lock_error(
+            return Err(context_set_lock_failure_to_mneme(
                 ContextSetLockFailure::SidecarProofLengthInvalid,
             ));
         }
         Ok(Self {
             set_commit: set_commit.ok_or_else(|| {
-                context_set_lock_error(ContextSetLockFailure::SidecarFieldMissing)
+                context_set_lock_failure_to_mneme(ContextSetLockFailure::SidecarFieldMissing)
             })?,
             context_commit: context_commit.ok_or_else(|| {
-                context_set_lock_error(ContextSetLockFailure::SidecarFieldMissing)
+                context_set_lock_failure_to_mneme(ContextSetLockFailure::SidecarFieldMissing)
             })?,
             proof_bytes,
         })
     }
 }
 fn parse_fixed32(value: &mneme_core::CborValue) -> Result<[u8; PUBLIC_COMMIT_LEN], MnemeError> {
-    let bytes = value.as_bytes().ok_or(context_set_lock_error(
+    let bytes = value.as_bytes().ok_or(context_set_lock_failure_to_mneme(
         ContextSetLockFailure::SidecarFieldMissing,
     ))?;
     if bytes.len() != PUBLIC_COMMIT_LEN {
-        return Err(context_set_lock_error(
+        return Err(context_set_lock_failure_to_mneme(
             ContextSetLockFailure::SidecarCommitLengthInvalid,
         ));
     }

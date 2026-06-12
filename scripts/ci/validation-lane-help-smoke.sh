@@ -14,11 +14,12 @@ trap 'rm -rf "$scratch"' EXIT
 sentinel_target="$scratch/cargo-target"
 short_sentinel_target="$scratch/short-cargo-target"
 
+lane_choices="$(validation_lane_choices_for_target "$label" "$sentinel_target")"
 output="$(CARGO_TARGET_DIR="$sentinel_target" bash scripts/ci/validation-lane.sh --help)"
 short_output="$(CARGO_TARGET_DIR="$short_sentinel_target" bash scripts/ci/validation-lane.sh -h)"
 
-expected_output="$(cat <<'EOF'
-Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full>
+expected_output="$(cat <<EOF
+Usage: scripts/ci/validation-lane.sh <$lane_choices>
        scripts/ci/validation-lane.sh --list
        scripts/ci/validation-lane.sh --help
 EOF

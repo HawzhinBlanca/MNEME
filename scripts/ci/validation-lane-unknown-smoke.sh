@@ -13,12 +13,14 @@ trap 'rm -rf "$scratch"' EXIT
 
 sentinel_target="$scratch/cargo-target"
 
+lane_choices="$(validation_lane_choices_for_target "$label" "$sentinel_target")"
+
 set +e
 output="$(CARGO_TARGET_DIR="$sentinel_target" bash scripts/ci/validation-lane.sh __mneme_unknown_lane__ 2>&1)"
 status=$?
 set -e
 
-expected="Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full)"
+expected="Unknown lane: __mneme_unknown_lane__ (expected $lane_choices)"
 
 require_exit_status "$label" "$status" "2" "$output"
 require_exact_line "$label" "$output" "$expected"

@@ -75,7 +75,6 @@ fn build_complete_topk_cert() -> (Vec<u8>, TrustConfig) {
         [0x01; 32], [0x02; 32], [0xcd; 32], [0x03; 14], [0x00; 32], 1, &operator,
     )
     .expect("stored root");
-    let mut receipt = receipt;
     receipt.root_bound = stored.preimage_hash;
     let bytes = assemble_cognition_certificate_v1(&stored, &receipt, Some(AsOf::RootSeq(1)))
         .expect("assemble");

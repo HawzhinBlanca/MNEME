@@ -44,7 +44,7 @@ fn bind_external_action_fail_closed_by_default() {
 #[cfg(feature = "phase_iii_bind")]
 #[test]
 fn bind_external_action_mints_under_current_root() {
-    assert!(PHASE_III_BIND_ACTION_OPEN);
+    assert!(std::hint::black_box(PHASE_III_BIND_ACTION_OPEN));
     let (_dir, store, operator, cap) = setup();
     let root = store.current_root().unwrap();
     let receipt = store

@@ -13,5 +13,8 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.52.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1"
   }
 }

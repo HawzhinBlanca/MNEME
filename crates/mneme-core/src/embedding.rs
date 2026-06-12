@@ -83,6 +83,43 @@ impl FixedPointEmbedding {
         })
     }
 
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, MnemeError> {
+        if bytes.len() < 5 {
+            return Err(embedding_declared_dimension_error());
+        }
+        let dim = u32::from_le_bytes(
+            bytes[0..4]
+                .try_into()
+                .map_err(|_| embedding_declared_dimension_error())?,
+        );
+        let scale = bytes[4] as i8;
+        let expected_len = 5 + (dim as usize) * 2;
+        if bytes.len() != expected_len {
+            return Err(embedding_declared_dimension_error());
+        }
+        let mut components = Vec::with_capacity(dim as usize);
+        for i in 0..(dim as usize) {
+            let offset = 5 + i * 2;
+            let val = i16::from_le_bytes(
+                bytes[offset..offset + 2]
+                    .try_into()
+                    .map_err(|_| embedding_declared_dimension_error())?,
+            );
+            components.push(val);
+        }
+        Self::new(dim, scale, components)
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(5 + self.components.len() * 2);
+        out.extend_from_slice(&self.dim.to_le_bytes());
+        out.push(self.scale as u8);
+        for c in &self.components {
+            out.extend_from_slice(&c.to_le_bytes());
+        }
+        out
+    }
+
     /// `embedding_commit = BLAKE3(SEM ‖ dim_le ‖ scale ‖ concat(components_le_i16))`.
     pub fn commit(&self) -> [u8; 32] {
         hash_sem_preimage(self.dim.to_le_bytes(), self.scale, &self.components)
@@ -322,6 +359,18 @@ mod tests {
         let a = FixedPointEmbedding::new(2, 0, vec![3, 4]).unwrap();
         let b = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
         assert_eq!(a.squared_l2_distance(&b).unwrap(), 25);
+    }
+
+    #[test]
+    fn embedding_from_bytes_to_bytes_roundtrip() {
+        let original = FixedPointEmbedding::new(3, -2, vec![123, -456, 789]).unwrap();
+        let bytes = original.to_bytes();
+        let decoded = FixedPointEmbedding::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, original);
+
+        assert!(FixedPointEmbedding::from_bytes(&[]).is_err());
+        assert!(FixedPointEmbedding::from_bytes(&[1]).is_err());
+        assert!(FixedPointEmbedding::from_bytes(&[3, 0, 0, 0, 2, 1, 0]).is_err()); // short bytes
     }
 
     fn hex(bytes: &[u8; 32]) -> String {

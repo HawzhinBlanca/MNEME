@@ -15,9 +15,57 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 VALIDATION_LANES=(quick crypto tamper merge determinism bounds p3-local full-preflight full)
 
+validation_lane_metadata_fail_closed() {
+  local message="$1"
+  echo "MNEME validation-lane metadata invalid: $message" >&2
+  exit 1
+}
+
 validation_lane_choices() {
   local IFS='|'
   echo "${VALIDATION_LANES[*]}"
+}
+
+validate_validation_lanes() {
+  local lane
+  local seen_lane
+  local validation_lane_token_pattern
+  local seen_validation_lanes=()
+  local saw_full_preflight=0
+  local full_sublane_count=0
+
+  if [[ "${#VALIDATION_LANES[@]}" -eq 0 ]]; then
+    validation_lane_metadata_fail_closed "VALIDATION_LANES is empty"
+  fi
+
+  validation_lane_token_pattern='^[a-z0-9][a-z0-9-]*$'
+  for lane in "${VALIDATION_LANES[@]}"; do
+    if [[ ! "$lane" =~ $validation_lane_token_pattern ]]; then
+      validation_lane_metadata_fail_closed "invalid VALIDATION_LANES token: $lane"
+    fi
+
+    if [[ "${#seen_validation_lanes[@]}" -gt 0 ]]; then
+      for seen_lane in "${seen_validation_lanes[@]}"; do
+        if [[ "$lane" == "$seen_lane" ]]; then
+          validation_lane_metadata_fail_closed "duplicate VALIDATION_LANES token: $lane"
+        fi
+      done
+    fi
+    seen_validation_lanes+=("$lane")
+
+    if [[ "$lane" == "full-preflight" ]]; then
+      saw_full_preflight=1
+    elif [[ "$saw_full_preflight" == "0" ]]; then
+      full_sublane_count=$((full_sublane_count + 1))
+    fi
+  done
+
+  if [[ "$saw_full_preflight" != "1" ]]; then
+    validation_lane_metadata_fail_closed "VALIDATION_LANES missing full-preflight sentinel"
+  fi
+  if [[ "$full_sublane_count" -eq 0 ]]; then
+    validation_lane_metadata_fail_closed "VALIDATION_LANES produced no full sublanes"
+  fi
 }
 
 validation_lane_usage() {
@@ -36,6 +84,8 @@ validation_lane_is_known() {
   done
   return 1
 }
+
+validate_validation_lanes
 
 if [[ "${1:-}" == "--list" ]]; then
   validation_lane_choices
@@ -61,7 +111,19 @@ fail_closed() {
   exit 1
 }
 
-FULL_SUBLANES=(quick crypto tamper merge determinism)
+FULL_SUBLANES=()
+for lane in "${VALIDATION_LANES[@]}"; do
+  if [[ "$lane" == "full-preflight" ]]; then
+    break
+  fi
+  FULL_SUBLANES+=("$lane")
+done
+if [[ "${#FULL_SUBLANES[@]}" -eq 0 ]]; then
+  fail_closed "full sublane plan" "VALIDATION_LANES produced no full sublanes"
+fi
+if [[ "${#FULL_SUBLANES[@]}" -eq "${#VALIDATION_LANES[@]}" ]]; then
+  fail_closed "full sublane plan" "VALIDATION_LANES missing full-preflight sentinel"
+fi
 
 print_local_cross_host_honesty_boundary() {
   echo "validation-lane ($LANE): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host)."

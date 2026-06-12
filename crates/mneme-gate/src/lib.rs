@@ -277,6 +277,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "phase_ii_gate_open"))]
     fn gate_closed_by_default() {
         assert!(!std::hint::black_box(PHASE_II_GATE_OPEN));
     }

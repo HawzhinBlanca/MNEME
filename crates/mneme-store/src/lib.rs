@@ -290,7 +290,16 @@ impl Store {
         draft: Draft,
         cap: &Capability,
     ) -> Result<(ObjectId, Root), MnemeError> {
-        self.remember_with_action(draft, cap, None)
+        #[cfg(feature = "phase_iii_require_action")]
+        {
+            let commit = action_commit_remember(&draft);
+            let receipt = self.bind_external_action(commit, cap, &self.operator.clone(), None)?;
+            self.remember_with_action(draft, cap, Some(&receipt))
+        }
+        #[cfg(not(feature = "phase_iii_require_action"))]
+        {
+            self.remember_with_action(draft, cap, None)
+        }
     }
 
     /// Remember with optional Phase III `ActionReceipt` (see `phase_iii_require_action`).
@@ -708,7 +717,16 @@ impl Store {
         to: TrustTier,
         cap: &Capability,
     ) -> Result<Root, MnemeError> {
-        self.promote_with_action(id, to, cap, None)
+        #[cfg(feature = "phase_iii_require_action")]
+        {
+            let commit = action_commit_promote(id, to);
+            let receipt = self.bind_external_action(commit, cap, &self.operator.clone(), None)?;
+            self.promote_with_action(id, to, cap, Some(&receipt))
+        }
+        #[cfg(not(feature = "phase_iii_require_action"))]
+        {
+            self.promote_with_action(id, to, cap, None)
+        }
     }
 
     pub fn promote_with_action(

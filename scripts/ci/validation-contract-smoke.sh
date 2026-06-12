@@ -10,6 +10,7 @@ source scripts/ci/smoke-assertions.sh
 label="validation-contract-smoke"
 expected_output="$(cat <<'EOF'
 smoke-assertions-smoke: OK
+validation-lane-metadata-smoke: OK
 validation-lane-list-smoke: OK
 validation-lane-help-smoke: OK
 full-preflight-smoke: OK
@@ -19,6 +20,7 @@ EOF
 
 output="$(
   bash scripts/ci/smoke-assertions-smoke.sh
+  bash scripts/ci/validation-lane-metadata-smoke.sh
   bash scripts/ci/validation-lane-list-smoke.sh
   bash scripts/ci/validation-lane-help-smoke.sh
   bash scripts/ci/full-preflight-smoke.sh

@@ -299,7 +299,11 @@ fn validation_lane_full_runs_required_sublanes_and_preserves_honesty_boundary() 
         "validation-lane full sublane source",
         validation_lane,
         &[
-            "FULL_SUBLANES=(quick crypto tamper merge determinism)",
+            "VALIDATION_LANES=(quick crypto tamper merge determinism bounds p3-local full-preflight full)",
+            "FULL_SUBLANES=()",
+            "for lane in \"${VALIDATION_LANES[@]}\"",
+            "if [[ \"$lane\" == \"full-preflight\" ]]",
+            "FULL_SUBLANES+=(\"$lane\")",
             "run_full_sublanes()",
             "for sublane in \"${FULL_SUBLANES[@]}\"",
             "bash \"$0\" \"$sublane\"",
@@ -362,7 +366,15 @@ fn validation_lane_full_and_preflight_share_one_sublane_source() {
     let validation_lane = include_str!("../../../scripts/ci/validation-lane.sh");
 
     for phrase in [
-        "FULL_SUBLANES=(quick crypto tamper merge determinism)",
+        "validation_lane_metadata_fail_closed()",
+        "validate_validation_lanes",
+        "invalid VALIDATION_LANES token",
+        "duplicate VALIDATION_LANES token",
+        "FULL_SUBLANES=()",
+        "for lane in \"${VALIDATION_LANES[@]}\"",
+        "if [[ \"$lane\" == \"full-preflight\" ]]",
+        "FULL_SUBLANES+=(\"$lane\")",
+        "VALIDATION_LANES missing full-preflight sentinel",
         "${FULL_SUBLANES[*]}",
         "run_full_sublanes()",
         "for sublane in \"${FULL_SUBLANES[@]}\"",
@@ -380,11 +392,59 @@ fn validation_lane_full_and_preflight_share_one_sublane_source() {
         "bash \"$0\" tamper",
         "bash \"$0\" merge",
         "bash \"$0\" determinism",
-        "planned sublanes: quick crypto tamper merge determinism",
+        "bash \"$0\" bounds",
+        "bash \"$0\" p3-local",
+        "planned sublanes: quick crypto tamper merge determinism bounds p3-local",
+        "FULL_SUBLANES=(quick crypto tamper merge determinism bounds p3-local)",
     ] {
         assert!(
             !validation_lane.contains(phrase),
             "validation-lane must not duplicate full-lane plan as `{phrase}`"
+        );
+    }
+}
+
+#[test]
+fn validation_lane_metadata_smoke_preserves_executable_contract() {
+    let validation_contract_smoke =
+        include_str!("../../../scripts/ci/validation-contract-smoke.sh");
+    assert!(
+        validation_contract_smoke.contains("bash scripts/ci/validation-lane-metadata-smoke.sh"),
+        "validation contract smoke must run the validation-lane metadata smoke"
+    );
+
+    let smoke_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../scripts/ci/validation-lane-metadata-smoke.sh"
+    );
+    let smoke =
+        std::fs::read_to_string(smoke_path).expect("validation-lane metadata smoke must exist");
+
+    for phrase in [
+        "source scripts/ci/smoke-assertions.sh",
+        "cp scripts/ci/lib.sh \"$fixture_dir/lib.sh\"",
+        "sed \"s/^VALIDATION_LANES=.*/VALIDATION_LANES=$validation_lanes/\"",
+        "expect_metadata_failure()",
+        "require_exit_status \"$label\" \"$status\" \"1\" \"$output\"",
+        "require_absent_substring \"$label\" \"$output\" \"Usage: scripts/ci/validation-lane.sh\"",
+        "require_absent_substring \"$label\" \"$output\" \"Unknown lane:\"",
+        "make_fixture \"$duplicate_lane_fixture\" \"(quick quick full-preflight full)\"",
+        "make_fixture \"$invalid_lane_fixture\" \"(quick BAD full-preflight full)\"",
+        "make_fixture \"$missing_sentinel_fixture\" \"(quick crypto full)\"",
+        "make_fixture \"$first_sentinel_fixture\" \"(full-preflight full)\"",
+        "expect_metadata_failure \"duplicate --list lane metadata\"",
+        "MNEME validation-lane metadata invalid: duplicate VALIDATION_LANES token: quick",
+        "expect_metadata_failure \"invalid --help lane metadata\"",
+        "MNEME validation-lane metadata invalid: invalid VALIDATION_LANES token: BAD",
+        "expect_metadata_failure \"missing sentinel unknown-lane metadata\"",
+        "MNEME validation-lane metadata invalid: VALIDATION_LANES missing full-preflight sentinel",
+        "expect_metadata_failure \"empty sublane plan metadata\"",
+        "MNEME validation-lane metadata invalid: VALIDATION_LANES produced no full sublanes",
+        "validation-lane-metadata-smoke: OK",
+    ] {
+        assert!(
+            smoke.contains(phrase),
+            "validation-lane metadata smoke must preserve `{phrase}`"
         );
     }
 }
@@ -457,8 +517,13 @@ fn full_preflight_smoke_preserves_executable_contract() {
     for phrase in [
         "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-full-preflight.XXXXXX\")\"",
         "sentinel_target=\"$scratch/cargo-target\"",
+        "source_lane_choices=\"$(validation_lane_choices_from_source \"$label\")\"",
+        "lane_choices=\"$(validation_lane_choices_for_target \"$label\" \"$sentinel_target\")\"",
+        "require_exact_output \"$label\" \"$lane_choices\" \"$source_lane_choices\"",
+        "expected_sublanes=\"$(validation_lane_sublanes_before \"$label\" \"$lane_choices\" \"full-preflight\")\"",
+        "expected_plan=\"validation-lane (full-preflight): planned sublanes: $expected_sublanes\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh full-preflight)\"",
-        "validation-lane (full-preflight): planned sublanes: quick crypto tamper merge determinism",
+        "require_exact_line \"$label\" \"$output\" \"$expected_plan\"",
         "validation-lane (full-preflight): heavy checks are NOT executed by this lane.",
         "validation-lane (full-preflight): Section 17.7 cross-host two-machine determinism is NOT proven by this lane (single host).",
         "validation-lane (full-preflight): to prove it, set MNEME_SECOND_HOST and run scripts/ci/determinism-two-machine.sh on a distinct physical host.",
@@ -470,6 +535,25 @@ fn full_preflight_smoke_preserves_executable_contract() {
         assert!(
             smoke.contains(phrase),
             "full-preflight smoke must preserve `{phrase}`"
+        );
+    }
+
+    assert!(
+        !smoke.contains("planned sublanes: quick crypto tamper merge determinism bounds p3-local"),
+        "full-preflight smoke must derive the expected sublane plan from --list"
+    );
+
+    for local_derivation in [
+        "IFS='|' read -r -a validation_lanes <<< \"$lane_choices\"",
+        "expected_sublanes=()",
+        "for lane in \"${validation_lanes[@]}\"",
+        "expected_sublanes+=(\"$lane\")",
+        "full-preflight-smoke: --list did not produce full-preflight sentinel",
+        "expected_plan=\"validation-lane (full-preflight): planned sublanes: ${expected_sublanes[*]}\"",
+    ] {
+        assert!(
+            !smoke.contains(local_derivation),
+            "full-preflight smoke must use shared lane helpers instead of `{local_derivation}`"
         );
     }
 }
@@ -485,10 +569,12 @@ fn unknown_lane_smoke_preserves_executable_contract() {
     for phrase in [
         "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-unknown.XXXXXX\")\"",
         "sentinel_target=\"$scratch/cargo-target\"",
+        "lane_choices=\"$(validation_lane_choices_for_target \"$label\" \"$sentinel_target\")\"",
         "CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh __mneme_unknown_lane__",
         "status=$?",
+        "expected=\"Unknown lane: __mneme_unknown_lane__ (expected $lane_choices)\"",
         "require_exit_status \"$label\" \"$status\" \"2\" \"$output\"",
-        "Unknown lane: __mneme_unknown_lane__ (expected quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full)",
+        "require_exact_line \"$label\" \"$output\" \"$expected\"",
         "if [[ -e \"$sentinel_target\" ]]",
         "validation-lane-unknown-smoke: unknown lane created target dir",
         "validation-lane-unknown-smoke: OK",
@@ -498,6 +584,19 @@ fn unknown_lane_smoke_preserves_executable_contract() {
             "unknown-lane smoke must preserve `{phrase}`"
         );
     }
+
+    assert!(
+        !smoke.contains(
+            "expected quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full"
+        ),
+        "unknown-lane smoke must derive accepted lanes from --list"
+    );
+    assert!(
+        !smoke.contains(
+            "lane_choices=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\""
+        ),
+        "unknown-lane smoke must use the shared lane-choices helper"
+    );
 }
 
 #[test]
@@ -520,9 +619,10 @@ fn validation_lane_help_smoke_preserves_executable_contract() {
         "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-help.XXXXXX\")\"",
         "sentinel_target=\"$scratch/cargo-target\"",
         "short_sentinel_target=\"$scratch/short-cargo-target\"",
+        "lane_choices=\"$(validation_lane_choices_for_target \"$label\" \"$sentinel_target\")\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --help)\"",
         "short_output=\"$(CARGO_TARGET_DIR=\"$short_sentinel_target\" bash scripts/ci/validation-lane.sh -h)\"",
-        "Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full>",
+        "Usage: scripts/ci/validation-lane.sh <$lane_choices>",
         "       scripts/ci/validation-lane.sh --list",
         "       scripts/ci/validation-lane.sh --help",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
@@ -540,6 +640,17 @@ fn validation_lane_help_smoke_preserves_executable_contract() {
             "validation-lane help smoke must preserve `{phrase}`"
         );
     }
+
+    assert!(
+        !smoke.contains("Usage: scripts/ci/validation-lane.sh <quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full>"),
+        "validation-lane help smoke must derive accepted lanes from --list"
+    );
+    assert!(
+        !smoke.contains(
+            "lane_choices=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\""
+        ),
+        "validation-lane help smoke must use the shared lane-choices helper"
+    );
 }
 
 #[test]
@@ -562,7 +673,7 @@ fn validation_lane_list_smoke_preserves_executable_contract() {
         "scratch=\"$(mktemp -d \"${TMPDIR:-/tmp}/mneme-validation-lane-list.XXXXXX\")\"",
         "sentinel_target=\"$scratch/cargo-target\"",
         "output=\"$(CARGO_TARGET_DIR=\"$sentinel_target\" bash scripts/ci/validation-lane.sh --list)\"",
-        "expected_output=\"quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full\"",
+        "expected_output=\"$(validation_lane_choices_from_source \"$label\")\"",
         "require_exact_output \"$label\" \"$output\" \"$expected_output\"",
         "require_line_count \"$label\" \"$output\" \"1\"",
         "if [[ -e \"$sentinel_target\" ]]",
@@ -572,6 +683,23 @@ fn validation_lane_list_smoke_preserves_executable_contract() {
         assert!(
             smoke.contains(phrase),
             "validation-lane list smoke must preserve `{phrase}`"
+        );
+    }
+
+    assert!(
+        !smoke.contains("expected_output=\"quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full\""),
+        "validation-lane list smoke must derive expected lanes from VALIDATION_LANES"
+    );
+
+    for local_derivation in [
+        "validation_lanes_line=\"$(grep -E '^VALIDATION_LANES=\\(' scripts/ci/validation-lane.sh)\"",
+        "validation_lanes_pattern='^VALIDATION_LANES=\\(([^)]*)\\)$'",
+        "if [[ ! \"$validation_lanes_line\" =~ $validation_lanes_pattern ]]",
+        "expected_output=\"${BASH_REMATCH[1]// /|}\"",
+    ] {
+        assert!(
+            !smoke.contains(local_derivation),
+            "validation-lane list smoke must use shared lane helpers instead of `{local_derivation}`"
         );
     }
 }
@@ -612,6 +740,56 @@ fn validation_smoke_scripts_share_assertion_helpers() {
         }
     }
 
+    for (name, smoke, required_helpers, forbidden_derivations) in [
+        (
+            "full-preflight-smoke",
+            full_preflight_smoke,
+            &[
+                "validation_lane_choices_from_source \"$label\"",
+                "validation_lane_choices_for_target \"$label\" \"$sentinel_target\"",
+                "require_exact_output \"$label\" \"$lane_choices\" \"$source_lane_choices\"",
+                "validation_lane_sublanes_before \"$label\" \"$lane_choices\" \"full-preflight\"",
+            ][..],
+            &[
+                "IFS='|' read -r -a validation_lanes",
+                "expected_sublanes=()",
+                "expected_sublanes+=(\"$lane\")",
+            ][..],
+        ),
+        (
+            "validation-lane-unknown-smoke",
+            unknown_lane_smoke,
+            &["validation_lane_choices_for_target \"$label\" \"$sentinel_target\""][..],
+            &["bash scripts/ci/validation-lane.sh --list)\""][..],
+        ),
+        (
+            "validation-lane-help-smoke",
+            help_smoke.as_str(),
+            &["validation_lane_choices_for_target \"$label\" \"$sentinel_target\""][..],
+            &["bash scripts/ci/validation-lane.sh --list)\""][..],
+        ),
+        (
+            "validation-lane-list-smoke",
+            list_smoke.as_str(),
+            &["validation_lane_choices_from_source \"$label\""][..],
+            &["grep -E '^VALIDATION_LANES=\\('", "BASH_REMATCH[1]// /|"][..],
+        ),
+    ] {
+        for required_helper in required_helpers {
+            assert!(
+                smoke.contains(required_helper),
+                "{name} must call shared lane helper `{required_helper}`"
+            );
+        }
+
+        for forbidden_derivation in forbidden_derivations {
+            assert!(
+                !smoke.contains(forbidden_derivation),
+                "{name} must not carry local lane derivation `{forbidden_derivation}`"
+            );
+        }
+    }
+
     let helper_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../scripts/ci/smoke-assertions.sh"
@@ -625,10 +803,32 @@ fn validation_smoke_scripts_share_assertion_helpers() {
         "require_absent_substring()",
         "require_line_count()",
         "require_exit_status()",
+        "require_validation_lane_choices()",
+        "validation_lane_choices_from_source()",
+        "validation_lane_choices_for_target()",
+        "validation_lane_sublanes_before()",
     ] {
         assert!(
             helper.contains(function),
             "shared smoke assertion helper must define `{function}`"
+        );
+    }
+
+    for phrase in [
+        "local validation_lane_source=\"${2:-scripts/ci/validation-lane.sh}\"",
+        "grep -E '^VALIDATION_LANES=\\(' \"$validation_lane_source\"",
+        "expected exactly one VALIDATION_LANES declaration",
+        "invalid VALIDATION_LANES tokens",
+        "duplicate VALIDATION_LANES token",
+        "local validation_lane_script=\"${3:-scripts/ci/validation-lane.sh}\"",
+        "bash \"$validation_lane_script\" --list",
+        "require_validation_lane_choices \"$label\" \"$output\"",
+        "invalid validation lane choices",
+        "duplicate validation lane choice",
+    ] {
+        assert!(
+            helper.contains(phrase),
+            "validation lane source helper must preserve `{phrase}`"
         );
     }
 }
@@ -656,6 +856,44 @@ fn smoke_assertion_helper_has_executable_self_smoke() {
         "require_absent_substring \"$label\" \"$sample_output\" \"gamma\"",
         "require_line_count \"$label\" \"$sample_output\" \"2\"",
         "require_exit_status \"$label\" \"2\" \"2\" \"$sample_output\"",
+        "sentinel_target=\"$scratch/cargo-target\"",
+        "lane_choices=\"$(validation_lane_choices_from_source \"$label\")\"",
+        "target_lane_choices=\"$(validation_lane_choices_for_target \"$label\" \"$sentinel_target\")\"",
+        "require_exact_output \"$label\" \"$target_lane_choices\" \"$lane_choices\"",
+        "full_sublanes=\"$(validation_lane_sublanes_before \"$label\" \"$lane_choices\" \"full-preflight\")\"",
+        "require_exact_output \"$label\" \"$full_sublanes\" \"quick crypto tamper merge determinism bounds p3-local\"",
+        "multiline_lane_list=\"$scratch/multiline-lane-list.sh\"",
+        "invalid_token_lane_list=\"$scratch/invalid-token-lane-list.sh\"",
+        "duplicate_runtime_lane_list=\"$scratch/duplicate-runtime-lane-list.sh\"",
+        "malformed_validation_lane=\"$scratch/malformed-validation-lane.sh\"",
+        "printf '%s\\n' 'VALIDATION_LANES=quick crypto' > \"$malformed_validation_lane\"",
+        "duplicate_validation_lane=\"$scratch/duplicate-validation-lane.sh\"",
+        "printf '%s\\n' 'VALIDATION_LANES=(quick full-preflight full)'",
+        "printf '%s\\n' 'VALIDATION_LANES=(quick full)'",
+        "empty_token_validation_lane=\"$scratch/empty-token-validation-lane.sh\"",
+        "printf '%s\\n' 'VALIDATION_LANES=(quick  full-preflight full)' > \"$empty_token_validation_lane\"",
+        "duplicate_token_validation_lane=\"$scratch/duplicate-token-validation-lane.sh\"",
+        "printf '%s\\n' 'VALIDATION_LANES=(quick quick full-preflight full)' > \"$duplicate_token_validation_lane\"",
+        "expect_failure \"malformed validation lane source\"",
+        "validation_lane_choices_from_source \"$label\" \"$malformed_validation_lane\"",
+        "expect_failure \"duplicate validation lane source\"",
+        "validation_lane_choices_from_source \"$label\" \"$duplicate_validation_lane\"",
+        "expect_failure \"empty validation lane token\"",
+        "validation_lane_choices_from_source \"$label\" \"$empty_token_validation_lane\"",
+        "expect_failure \"duplicate validation lane token\"",
+        "validation_lane_choices_from_source \"$label\" \"$duplicate_token_validation_lane\"",
+        "expect_failure \"multi-line target lane choices\"",
+        "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$multiline_lane_list\"",
+        "expect_failure \"invalid target lane choices\"",
+        "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$invalid_token_lane_list\"",
+        "expect_failure \"duplicate target lane choices\"",
+        "validation_lane_choices_for_target \"$label\" \"$sentinel_target\" \"$duplicate_runtime_lane_list\"",
+        "expect_failure \"invalid sublane choices\"",
+        "validation_lane_sublanes_before \"$label\" \"quick||full-preflight\" \"full-preflight\"",
+        "expect_failure \"duplicate sublane choices\"",
+        "validation_lane_sublanes_before \"$label\" \"quick|quick|full-preflight\" \"full-preflight\"",
+        "expect_failure \"missing full-preflight sentinel\"",
+        "validation_lane_sublanes_before \"$label\" \"quick|full\" \"full-preflight\"",
         "expect_failure \"missing exact line\"",
         "expect_failure \"output mismatch\"",
         "expect_failure \"forbidden substring\"",
@@ -678,6 +916,7 @@ fn validation_contract_smoke_enforces_exact_component_output() {
         "source scripts/ci/smoke-assertions.sh",
         "expected_output=\"$(cat <<'EOF'",
         "smoke-assertions-smoke: OK",
+        "validation-lane-metadata-smoke: OK",
         "validation-lane-list-smoke: OK",
         "validation-lane-help-smoke: OK",
         "full-preflight-smoke: OK",
@@ -756,6 +995,7 @@ fn validation_lane_quick_runs_aggregate_validation_contract_smoke() {
     for phrase in [
         "bash scripts/ci/validation-lane-list-smoke.sh",
         "bash scripts/ci/validation-lane-help-smoke.sh",
+        "bash scripts/ci/validation-lane-metadata-smoke.sh",
         "bash scripts/ci/full-preflight-smoke.sh",
         "bash scripts/ci/validation-lane-unknown-smoke.sh",
         "validation-contract-smoke: OK",

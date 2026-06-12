@@ -166,6 +166,24 @@ pub fn apply_peer_snapshot(
         }
     }
 
+    // VCP D2 / survivor-D T5: Ingest any missing alternative/retained objects from peer
+    // that are associated with non-tombstoned keys.
+    for (obj_id, logical_key) in &peer.object_keys {
+        let key_hash = logical_key.hash();
+        if peer.key_index.is_tombstoned(&key_hash) || local_key_index.is_tombstoned(&key_hash) {
+            continue;
+        }
+        if !local_objects.contains_key(obj_id) {
+            if let Some(peer_bytes) = peer.objects.get(obj_id) {
+                verify_object_bytes(obj_id, peer_bytes)?;
+                authorize_writer(peer_bytes, trust)?;
+                ingest_object_bytes(local_objects, local_dag, *obj_id, peer_bytes)?;
+                local_object_keys.insert(*obj_id, logical_key.clone());
+                result.objects_inserted += 1;
+            }
+        }
+    }
+
     Ok(result)
 }
 

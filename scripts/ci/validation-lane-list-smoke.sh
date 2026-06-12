@@ -14,7 +14,7 @@ trap 'rm -rf "$scratch"' EXIT
 sentinel_target="$scratch/cargo-target"
 
 output="$(CARGO_TARGET_DIR="$sentinel_target" bash scripts/ci/validation-lane.sh --list)"
-expected_output="quick|crypto|tamper|merge|determinism|bounds|p3-local|full-preflight|full"
+expected_output="$(validation_lane_choices_from_source "$label")"
 
 require_exact_output "$label" "$output" "$expected_output"
 require_line_count "$label" "$output" "1"

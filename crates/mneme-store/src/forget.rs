@@ -26,7 +26,16 @@ impl Store {
         cap: &Capability,
         mode: ForgetMode,
     ) -> Result<(layout::Tombstone, mneme_core::Root), MnemeError> {
-        self.forget_with_action(target, cap, mode, None)
+        #[cfg(feature = "phase_iii_require_action")]
+        {
+            let commit = action_commit_forget(&target, mode);
+            let receipt = self.bind_external_action(commit, cap, &self.operator.clone(), None)?;
+            self.forget_with_action(target, cap, mode, Some(&receipt))
+        }
+        #[cfg(not(feature = "phase_iii_require_action"))]
+        {
+            self.forget_with_action(target, cap, mode, None)
+        }
     }
 
     pub fn forget_with_action(
@@ -49,6 +58,18 @@ impl Store {
         mode: ForgetMode,
         action_receipt: Option<&ActionReceipt>,
     ) -> Result<ForgetProven, MnemeError> {
+        #[cfg(feature = "phase_iii_require_action")]
+        let owned_receipt;
+        #[cfg(feature = "phase_iii_require_action")]
+        let action_receipt = match action_receipt {
+            Some(r) => Some(r),
+            None => {
+                let commit = action_commit_forget(&target, mode);
+                owned_receipt =
+                    self.bind_external_action(commit, cap, &self.operator.clone(), None)?;
+                Some(&owned_receipt)
+            }
+        };
         let outcome = self.forget_internal(target, cap, mode, action_receipt)?;
         Ok(ForgetProven {
             tombstone: outcome.tombstone,
