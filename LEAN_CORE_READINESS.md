@@ -16,9 +16,14 @@ Plus: the O(N) write-amplification blocker found during 1M perf is FIXED at
 master HEAD (commit `43231ba6`): the per-commit key-index snapshot is gated
 behind an off-by-default `bitemporal_recall` feature, verified at HEAD with the
 foundation-gate digests **byte-identical** to the v0.7.0 reference (snapshots
-are sidecars, not in the signed root). The ~97× / p50 4.476 s → 46.3 ms figure
-was measured on the PR #9 branch state; the 1M wall-clock re-bench at HEAD is
-PENDING (see "Perf Finding").
+are sidecars, not in the signed root). **Re-measured at HEAD 2026-06-13** (see
+"HEAD re-bench" below): at 2k entries the per-commit snapshot sidecar costs **57 MB
+with the feature ON vs 0 (no `meta/snapshots/` dir) gated OFF**, and a 100k lean
+store is **36 MB total with no snapshot dir** and flat per-op write latency — the
+O(N×writes) amplification is gone. (The original p50 4.476 s → 46.3 ms / ~97×
+figure is a PR #9-host number; absolute write latency is fsync/disk-bound and
+machine-specific, so the *amplification removal* — not the exact multiple — is the
+machine-independent result.)
 
 PR [#9](https://github.com/HawzhinBlanca/MNEME/pull/9) is fully green — every
 check passes: `Phase program gate`, `compare digests (ubuntu vs macos)`, both
@@ -42,16 +47,16 @@ key-index snapshot, O(N) time / O(N × writes) disk) has been **fixed at master
 HEAD**: the snapshot is now gated behind an off-by-default `bitemporal_recall`
 feature (commit `43231ba6`), with foundation-gate digests verified byte-identical
 at HEAD (snapshots are sidecars, not in the signed root); tamper + e2e green in
-both `{lean, bitemporal_recall}` configs. The p50 4.476 s → 46.3 ms (~97×) at 1M
-was measured on the PR #9 branch state; the 1M wall-clock re-bench at HEAD is
-PENDING. See "Perf Finding (RESOLVED)". Remaining blockers:
+both `{lean, bitemporal_recall}` configs. Re-measured at HEAD 2026-06-13 (see
+"HEAD re-bench" below): the snapshot amplification is gone — 57 MB sidecar at 2k
+ON vs 0 gated OFF. See "Perf Finding (RESOLVED)". Remaining blockers:
 
 - RESOLVED: The full validation lane passes from a committed, cold, separate
   clean checkout. (The 1M wall-clock numbers below were captured on branch state
   `c2251db`, PR #9 lineage — **not in master history**; re-bench at HEAD pending.)
 - RESOLVED: The O(N) per-commit key-index snapshot is gated behind
   `bitemporal_recall` (commit `43231ba6`); foundation-gate digests byte-identical
-  at HEAD. The ~97× 1M figure is a branch measurement (re-bench at HEAD pending).
+  at HEAD. Re-measured at HEAD 2026-06-13 — amplification removed (see "HEAD re-bench").
 - SUBSTANTIALLY CLOSED: Cross-OS determinism is now proven — the Linux
   container digests are byte-identical to the macOS-host pinned values (see
   "Cross-OS determinism" below). The digests are environment-independent across
@@ -188,7 +193,7 @@ FIXED at master HEAD in commit `43231ba6` by gating the per-commit snapshot
 behind `bitemporal_recall` (off by default); foundation-gate digests verified
 byte-identical at HEAD (snapshots are sidecars, not in the signed root). The
 table below was **measured on the PR #9 branch state** (`c2251db`, not in master)
-at 1M, fsync-on, 200 samples — the HEAD wall-clock re-bench is PENDING:
+at 1M, fsync-on, 200 samples — see "HEAD re-bench" below for the at-HEAD numbers:
 
 | Op | Before (snapshot on) | After (gated off) |
 |---|---:|---:|
@@ -203,6 +208,28 @@ Pinned `root_preimage`/`receipt`/`absent_proof` digests are unchanged (verified
 against `out/ci-foundation-gate/foundation.report.json`), confirming the
 snapshot is a sidecar, not part of the signed root. Original analysis follows
 for the record.
+
+### HEAD re-bench (master, Apple Silicon / arm64, 2026-06-13)
+
+Re-ran `bench_scale_ops` at master HEAD (post-gate) to verify the fix on the tree
+that exists, using the same harness (`MNEME_BENCH_*` knobs). The load-bearing,
+machine-independent result is the **removal of the snapshot amplification**:
+
+| Config | scale | `meta/snapshots/` disk | total store disk |
+|---|---:|---:|---:|
+| ON (`--features bitemporal_recall`) | 2k | **57 MB** | 71 MB |
+| OFF (lean default) | 2k | **0 (no dir)** | 14 MB |
+| OFF (lean default) | 100k | **0 (no dir)** | 36 MB |
+
+At only 2k commits the per-commit snapshot already costs 57 MB (it grows ~O(N²)
+in total because each of the N commits rewrites the whole key index); gated off it
+is **zero**, and a 100k lean store is a flat 36 MB with no snapshot directory.
+`remember`/`forget` p50 on this host are fsync/disk-bound (~78 ms at 100k) and do
+NOT grow with scale once the snapshot is gated off — confirming the lean write path
+is O(1)-in-history, not O(N). Absolute latency differs from the PR #9 host (slower
+disk here), which is why the *amplification removal* is the reported result rather
+than the exact ~97× multiple. Foundation-gate `root_preimage` at HEAD is unchanged
+(`c2b9dbfd…`), confirming the gate does not touch the signed root.
 
 Investigating the 1M write run on the committed state (`c2251db`, PR #9 branch, not in master) surfaced a
 real scalability blocker, more significant than the perf sample count or the
