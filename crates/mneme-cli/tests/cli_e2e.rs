@@ -881,6 +881,164 @@ fn audit_exports_structural_frontier_proof_without_signature_overclaim() {
 }
 
 #[test]
+fn audit_pin_peak_state_creates_advances_and_rejects_rollback() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let rolled_back_store = dir.path().join("rolled-back-store");
+    let pin = dir.path().join("pins").join("root-history-pin.json");
+    let seed = "4b".repeat(32);
+
+    mneme()
+        .args(["--operator-seed", &seed, "init", store.to_str().unwrap()])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "audit",
+            "--name",
+            "base",
+            "--body",
+            "base",
+        ])
+        .assert()
+        .success();
+
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "audit",
+            store.to_str().unwrap(),
+            "--pin-peak-state",
+            store.join("bad-pin.json").to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("must be outside STORE"));
+
+    let output = mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "audit",
+            store.to_str().unwrap(),
+            "--pin-peak-state",
+            pin.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output).expect("audit json");
+    assert_eq!(report["peak_pin"]["verified"], true);
+    assert_eq!(report["peak_pin"]["status"], "created");
+    assert_eq!(
+        report["peak_pin"]["proof_kind"],
+        "initial_peak_state_pin.v1"
+    );
+    assert_eq!(report["peak_pin"]["from_sequence"], Value::Null);
+    assert_eq!(report["peak_pin"]["to_sequence"], 2);
+    assert_eq!(
+        report["peak_pin"]["snapshot_rollback_resistance_requires_pin_outside_store"],
+        true
+    );
+    assert_eq!(
+        report["peak_pin"]["same_host_pin_file_can_be_rolled_back_with_store"],
+        true
+    );
+    assert!(pin.exists());
+
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "audit",
+            "--name",
+            "next",
+            "--body",
+            "next",
+        ])
+        .assert()
+        .success();
+
+    let output = mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "audit",
+            store.to_str().unwrap(),
+            "--pin-peak-state",
+            pin.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: Value = serde_json::from_slice(&output).expect("audit json");
+    assert_eq!(report["peak_pin"]["verified"], true);
+    assert_eq!(report["peak_pin"]["status"], "advanced");
+    assert_eq!(
+        report["peak_pin"]["proof_kind"],
+        "signed_delta_consistency.v1"
+    );
+    assert_eq!(report["peak_pin"]["from_sequence"], 2);
+    assert_eq!(report["peak_pin"]["to_sequence"], 3);
+    assert_eq!(report["peak_pin"]["appended_checkpoint_count"], 1);
+
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "init",
+            rolled_back_store.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "audit",
+            rolled_back_store.to_str().unwrap(),
+            "--pin-peak-state",
+            pin.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicate::str::contains("verify failed"));
+
+    let mut tampered: Value =
+        serde_json::from_slice(&fs::read(&pin).expect("pin json")).expect("pin json");
+    tampered["peak_bag_root"] = Value::String("00".repeat(32));
+    fs::write(&pin, serde_json::to_vec_pretty(&tampered).unwrap()).unwrap();
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed,
+            "audit",
+            store.to_str().unwrap(),
+            "--pin-peak-state",
+            pin.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(4)
+        .stderr(predicate::str::contains("verify failed"));
+}
+
+#[test]
 fn audit_rejects_well_formed_but_false_peak_sidecar() {
     let dir = tempdir().unwrap();
     let store = dir.path().join("store");

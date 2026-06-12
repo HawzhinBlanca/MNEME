@@ -26,6 +26,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "operator_tools")]
 use serde_json::{Value, json};
 use std::fmt::Write as _;
+#[cfg(feature = "operator_tools")]
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -66,6 +68,9 @@ enum Commands {
         /// Write the current compact peak state to PATH for later append-only verification.
         #[arg(long = "emit-peak-state")]
         emit_peak_state: Option<PathBuf>,
+        /// Verify and atomically advance an operator peak-state pin outside STORE.
+        #[arg(long = "pin-peak-state")]
+        pin_peak_state: Option<PathBuf>,
         /// Verify that current HEAD extends a previously emitted peak state JSON.
         #[arg(long = "from-peak-state")]
         from_peak_state: Option<PathBuf>,
@@ -379,6 +384,7 @@ struct PeakInclusionProofBundleJson {
 struct AuditRequest<'a> {
     store: Option<&'a Path>,
     emit_peak_state: Option<&'a Path>,
+    pin_peak_state: Option<&'a Path>,
     from_peak_state: Option<&'a Path>,
     emit_peak_proof: Option<&'a Path>,
     emit_peak_frontier_proof: Option<&'a Path>,
@@ -623,6 +629,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
         Commands::Audit {
             store,
             emit_peak_state,
+            pin_peak_state,
             from_peak_state,
             emit_peak_proof,
             emit_peak_frontier_proof,
@@ -635,6 +642,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
         } => run_audit(AuditRequest {
             store: store.as_deref(),
             emit_peak_state: emit_peak_state.as_deref(),
+            pin_peak_state: pin_peak_state.as_deref(),
             from_peak_state: from_peak_state.as_deref(),
             emit_peak_proof: emit_peak_proof.as_deref(),
             emit_peak_frontier_proof: emit_peak_frontier_proof.as_deref(),
@@ -747,6 +755,7 @@ fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     if let Some(proof_path) = request.verify_peak_proof {
         if request.store.is_some()
             || request.emit_peak_state.is_some()
+            || request.pin_peak_state.is_some()
             || request.from_peak_state.is_some()
             || request.emit_peak_proof.is_some()
             || request.emit_peak_frontier_proof.is_some()
@@ -763,6 +772,7 @@ fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     if let Some(proof_path) = request.verify_peak_frontier_proof {
         if request.store.is_some()
             || request.emit_peak_state.is_some()
+            || request.pin_peak_state.is_some()
             || request.from_peak_state.is_some()
             || request.emit_peak_proof.is_some()
             || request.emit_peak_frontier_proof.is_some()
@@ -784,6 +794,7 @@ fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     if let Some(proof_path) = request.verify_peak_inclusion_proof {
         if request.store.is_some()
             || request.emit_peak_state.is_some()
+            || request.pin_peak_state.is_some()
             || request.from_peak_state.is_some()
             || request.emit_peak_proof.is_some()
             || request.emit_peak_frontier_proof.is_some()
@@ -937,6 +948,18 @@ fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
         None
     };
 
+    let peak_pin = if let Some(path) = request.pin_peak_state {
+        Some(update_peak_state_pin(
+            store,
+            path,
+            &mneme_store,
+            &peak_state,
+            &peak_digest,
+        )?)
+    } else {
+        None
+    };
+
     let mut report = json!({
         "schema": "mneme.audit.root_history.v1",
         "store": store.display().to_string(),
@@ -969,10 +992,90 @@ fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     if let Some(peak_inclusion) = peak_inclusion {
         report["peak_inclusion"] = peak_inclusion;
     }
+    if let Some(peak_pin) = peak_pin {
+        report["peak_pin"] = peak_pin;
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&report).map_err(|_| CliErrorKind::Usage)?
     );
+    Ok(())
+}
+
+#[cfg(feature = "operator_tools")]
+fn update_peak_state_pin(
+    store: &Path,
+    path: &Path,
+    mneme_store: &Store,
+    peak_state: &RootHistoryPeakState,
+    peak_digest: &RootHistoryPeakDigest,
+) -> Result<Value, CliErrorKind> {
+    ensure_peak_pin_outside_store(store, path)?;
+    let existed = path.exists();
+    let report = if existed {
+        let older = read_peak_state_json(path)?;
+        let proof = mneme_store
+            .root_history_peak_consistency_proof(&older)
+            .map_err(CliErrorKind::VerifyFailed)?;
+        mneme_root::verify_root_history_peak_consistency(
+            &mneme_store.trust().operator_keys,
+            &older,
+            peak_digest,
+            &proof,
+        )
+        .map_err(CliErrorKind::VerifyFailed)?;
+        let status = if older.sequence == peak_state.sequence {
+            "unchanged"
+        } else {
+            "advanced"
+        };
+        json!({
+            "verified": true,
+            "status": status,
+            "path": path.display().to_string(),
+            "pin_schema": "mneme.audit.peak_state.v1",
+            "proof_kind": "signed_delta_consistency.v1",
+            "from_sequence": older.sequence,
+            "to_sequence": peak_state.sequence,
+            "from_peak_bag_root": hex::encode(older.peak_bag_root),
+            "to_peak_bag_root": hex::encode(peak_state.peak_bag_root),
+            "appended_checkpoint_count": proof.appended_checkpoints.len(),
+            "snapshot_rollback_resistance_requires_pin_outside_store": true,
+            "same_host_pin_file_can_be_rolled_back_with_store": true,
+        })
+    } else {
+        json!({
+            "verified": true,
+            "status": "created",
+            "path": path.display().to_string(),
+            "pin_schema": "mneme.audit.peak_state.v1",
+            "proof_kind": "initial_peak_state_pin.v1",
+            "from_sequence": Value::Null,
+            "to_sequence": peak_state.sequence,
+            "from_peak_bag_root": Value::Null,
+            "to_peak_bag_root": hex::encode(peak_state.peak_bag_root),
+            "appended_checkpoint_count": Value::Null,
+            "snapshot_rollback_resistance_requires_pin_outside_store": true,
+            "same_host_pin_file_can_be_rolled_back_with_store": true,
+        })
+    };
+    write_peak_state_json_atomic(path, peak_state)?;
+    Ok(report)
+}
+
+#[cfg(feature = "operator_tools")]
+fn ensure_peak_pin_outside_store(store: &Path, path: &Path) -> Result<(), CliErrorKind> {
+    let store = std::fs::canonicalize(store).map_err(|_| CliErrorKind::Usage)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+    let parent = std::fs::canonicalize(parent).map_err(|_| CliErrorKind::Usage)?;
+    if parent.starts_with(&store) {
+        eprintln!("mneme: --pin-peak-state must be outside STORE");
+        return Err(CliErrorKind::Usage);
+    }
     Ok(())
 }
 
@@ -1076,6 +1179,45 @@ fn write_peak_state_json(path: &Path, state: &RootHistoryPeakState) -> Result<()
     let data =
         serde_json::to_vec_pretty(&peak_state_to_json(state)).map_err(|_| CliErrorKind::Usage)?;
     std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+}
+
+#[cfg(feature = "operator_tools")]
+fn write_peak_state_json_atomic(
+    path: &Path,
+    state: &RootHistoryPeakState,
+) -> Result<(), CliErrorKind> {
+    let data =
+        serde_json::to_vec_pretty(&peak_state_to_json(state)).map_err(|_| CliErrorKind::Usage)?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+    let file_name = path.file_name().ok_or(CliErrorKind::Usage)?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(file_name);
+    tmp_name.push(format!(".{}.tmp", std::process::id()));
+    let tmp_path = parent.join(tmp_name);
+    {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&tmp_path)
+            .map_err(|_| CliErrorKind::Usage)?;
+        if file.write_all(&data).is_err() || file.sync_all().is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(CliErrorKind::Usage);
+        }
+    }
+    if std::fs::rename(&tmp_path, path).is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(CliErrorKind::Usage);
+    }
+    if let Ok(dir) = std::fs::File::open(parent) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
 }
 
 #[cfg(feature = "operator_tools")]
