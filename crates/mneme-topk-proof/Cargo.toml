@@ -1,0 +1,16 @@
+[package]
+name = "mneme-topk-proof"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Count-sum-check cryptographic layer top-k proof system for MNEME"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mneme-core = { workspace = true }
+blake3 = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

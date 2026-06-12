@@ -1920,6 +1920,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-topk-proof"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "mneme-core",
+ "rand 0.8.6",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "mneme-vdf"
 version = "0.1.0"
 dependencies = [
