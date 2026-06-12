@@ -4,9 +4,22 @@
 
 mod atomic;
 mod checkpoint;
+mod history;
 mod wire;
 
 pub use checkpoint::{CheckpointLog, max_signed_checkpoint, verify_checkpoint_chain};
+pub use history::{
+    RootHistoryConsistencyProof, RootHistoryDigest, RootHistoryInclusionProof, RootHistoryPeak,
+    RootHistoryPeakConsistencyProof, RootHistoryPeakDigest, RootHistoryPeakFrontierProof,
+    RootHistoryPeakInclusionProof, RootHistoryPeakState, RootHistoryProofDirection,
+    RootHistoryProofStep, read_root_history_peak_state, root_history_consistency_proof,
+    root_history_digest, root_history_inclusion_proof, root_history_peak_consistency_proof,
+    root_history_peak_digest, root_history_peak_frontier_proof, root_history_peak_inclusion_proof,
+    root_history_peak_state_digest, update_root_history_peaks, verify_root_history_consistency,
+    verify_root_history_digest, verify_root_history_inclusion,
+    verify_root_history_peak_consistency, verify_root_history_peak_frontier,
+    verify_root_history_peak_inclusion, verify_root_history_peak_state,
+};
 
 use mneme_core::{MnemeError, Root, RootPreimage, cmp_wire, from_bytes_strict, to_bytes_canonical};
 use mneme_crypto::{KeyPair, verify_signature_bytes};

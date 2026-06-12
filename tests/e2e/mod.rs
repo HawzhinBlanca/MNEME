@@ -13,6 +13,11 @@ use mneme_core::{ForgetMode, ForgetTarget, LogicalKey, MnemeError, Query, TrustT
 use mneme_crypto::KeyPair;
 use mneme_dag::DagIndex;
 use mneme_index::{default_key_procedure, default_semantic_procedure};
+use mneme_root::{
+    CheckpointLog, verify_root_history_consistency, verify_root_history_inclusion,
+    verify_root_history_peak_consistency, verify_root_history_peak_frontier,
+    verify_root_history_peak_inclusion,
+};
 use mneme_smt::SparseMerkleTree;
 use mneme_store::Store;
 use mneme_verify::{RecallContext, RecallInput, verify_recall};
@@ -111,6 +116,211 @@ fn e2e_remember_appends_key_index_journal_without_rewriting_base() {
         .recall_verified(&query, &default_key_procedure(), &cap)
         .unwrap();
     assert_eq!(entries[0].plaintext, b"2");
+}
+
+#[test]
+#[cfg(not(feature = "bitemporal_recall"))]
+fn e2e_lean_default_does_not_write_bitemporal_snapshots() {
+    test_clear_pause();
+    let dir = tempdir().unwrap();
+    let operator = KeyPair::generate();
+    let agent = KeyPair::generate();
+    let cap = agent_cap(&operator, agent.public_key_bytes()).unwrap();
+
+    let mut store = Store::create(dir.path(), operator).unwrap();
+    store.trust_mut().authorized_writers.push(cap.subject);
+    store
+        .remember(semantic_draft("lean", "one", b"1"), &cap)
+        .unwrap();
+    store
+        .remember(semantic_draft("lean", "two", b"2"), &cap)
+        .unwrap();
+
+    assert!(
+        !dir.path().join("meta/snapshots").exists(),
+        "lean default must not pay the O(N) per-commit bitemporal snapshot cost"
+    );
+}
+
+#[test]
+fn e2e_root_history_digest_tracks_checkpoint_appends() {
+    let (mut store, cap, _dir) = agent_store();
+    let initial = store.root_history_digest().unwrap();
+    assert_eq!(initial.sequence, 1);
+    assert_eq!(initial.checkpoint_count, 1);
+
+    store
+        .remember(semantic_draft("history", "one", b"1"), &cap)
+        .unwrap();
+    let after_first = store.root_history_digest().unwrap();
+    assert_eq!(after_first.sequence, 2);
+    assert_eq!(after_first.checkpoint_count, 2);
+    assert_ne!(initial.accumulator_root, after_first.accumulator_root);
+
+    store
+        .remember(semantic_draft("history", "two", b"2"), &cap)
+        .unwrap();
+    let after_second = store.root_history_digest().unwrap();
+    assert_eq!(after_second.sequence, 3);
+    assert_eq!(after_second.checkpoint_count, 3);
+    assert_ne!(after_first.accumulator_root, after_second.accumulator_root);
+}
+
+#[test]
+fn e2e_root_history_inclusion_proof_binds_checkpoint_to_digest() {
+    let (mut store, cap, dir) = agent_store();
+    store
+        .remember(semantic_draft("history-proof", "one", b"1"), &cap)
+        .unwrap();
+    store
+        .remember(semantic_draft("history-proof", "two", b"2"), &cap)
+        .unwrap();
+
+    let digest = store.root_history_digest().unwrap();
+    let proof = store.root_history_inclusion_proof(2).unwrap();
+    let checkpoint = CheckpointLog::read_checkpoint(dir.path(), 2).unwrap();
+    verify_root_history_inclusion(&digest, &checkpoint, &proof).unwrap();
+
+    let wrong_checkpoint = CheckpointLog::read_checkpoint(dir.path(), 3).unwrap();
+    let err = verify_root_history_inclusion(&digest, &wrong_checkpoint, &proof).unwrap_err();
+    assert_eq!(err, MnemeError::RootInconsistent);
+}
+
+#[test]
+fn e2e_root_history_consistency_proves_later_digest_extends_earlier_pin() {
+    let (mut store, cap, _dir) = agent_store();
+    store
+        .remember(semantic_draft("history-consistency", "one", b"1"), &cap)
+        .unwrap();
+    let earlier = store.root_history_digest().unwrap();
+
+    store
+        .remember(semantic_draft("history-consistency", "two", b"2"), &cap)
+        .unwrap();
+    store
+        .remember(semantic_draft("history-consistency", "three", b"3"), &cap)
+        .unwrap();
+    let later = store.root_history_digest().unwrap();
+
+    let proof = store
+        .root_history_consistency_proof(earlier.sequence)
+        .unwrap();
+    verify_root_history_consistency(&earlier, &later, &proof).unwrap();
+
+    let reversed = verify_root_history_consistency(&later, &earlier, &proof).unwrap_err();
+    assert_eq!(reversed, MnemeError::RootInconsistent);
+}
+
+#[test]
+fn e2e_root_history_peak_digest_tracks_store_commits() {
+    let (mut store, cap, dir) = agent_store();
+    for idx in 0..6 {
+        let key = format!("k{idx}");
+        store
+            .remember(semantic_draft("history-peaks", &key, b"x"), &cap)
+            .unwrap();
+    }
+
+    let replayed = store.root_history_digest().unwrap();
+    let peaks = store.root_history_peak_digest().unwrap();
+    assert_eq!(peaks.sequence, replayed.sequence);
+    assert_eq!(peaks.checkpoint_count, replayed.checkpoint_count);
+    assert_eq!(peaks.head_preimage_hash, replayed.head_preimage_hash);
+    assert_eq!(peaks.peak_count, u64::from(replayed.sequence.count_ones()));
+    assert!(
+        dir.path().join("roots/HISTORY_PEAKS.cbor").exists(),
+        "store commits must persist the compact root-history peak sidecar"
+    );
+}
+
+#[test]
+fn e2e_root_history_peak_inclusion_binds_checkpoint_to_compact_digest() {
+    let (mut store, cap, dir) = agent_store();
+    for idx in 0..7 {
+        let key = format!("included-{idx}");
+        store
+            .remember(semantic_draft("history-peak-inclusion", &key, b"x"), &cap)
+            .unwrap();
+    }
+
+    let digest = store.root_history_peak_digest().unwrap();
+    let target_sequence = 5;
+    let checkpoint = CheckpointLog::read_checkpoint(dir.path(), target_sequence).unwrap();
+    let proof = store
+        .root_history_peak_inclusion_proof(target_sequence)
+        .unwrap();
+    verify_root_history_peak_inclusion(&store.trust().operator_keys, &digest, &checkpoint, &proof)
+        .unwrap();
+    assert_eq!(proof.sequence, target_sequence);
+    assert_eq!(proof.peaks.len(), digest.peak_count as usize);
+}
+
+#[test]
+fn e2e_root_history_peak_consistency_verifies_from_saved_compact_state() {
+    let (mut store, cap, _dir) = agent_store();
+    for idx in 0..3 {
+        let key = format!("before-{idx}");
+        store
+            .remember(semantic_draft("history-peak-consistency", &key, b"x"), &cap)
+            .unwrap();
+    }
+    let saved_state = store.root_history_peak_state().unwrap();
+
+    for idx in 0..4 {
+        let key = format!("after-{idx}");
+        store
+            .remember(semantic_draft("history-peak-consistency", &key, b"y"), &cap)
+            .unwrap();
+    }
+    let newer = store.root_history_peak_digest().unwrap();
+    let proof = store
+        .root_history_peak_consistency_proof(&saved_state)
+        .unwrap();
+
+    assert_eq!(proof.from_sequence, saved_state.sequence);
+    assert_eq!(proof.to_sequence, newer.sequence);
+    assert_eq!(
+        proof.appended_checkpoints.len(),
+        usize::try_from(newer.sequence - saved_state.sequence).unwrap()
+    );
+    verify_root_history_peak_consistency(
+        &store.trust().operator_keys,
+        &saved_state,
+        &newer,
+        &proof,
+    )
+    .unwrap();
+}
+
+#[test]
+fn e2e_root_history_peak_frontier_compacts_append_extension() {
+    let (mut store, cap, _dir) = agent_store();
+    for idx in 0..3 {
+        let key = format!("frontier-before-{idx}");
+        store
+            .remember(semantic_draft("history-peak-frontier", &key, b"x"), &cap)
+            .unwrap();
+    }
+    let saved_state = store.root_history_peak_state().unwrap();
+
+    for idx in 0..12 {
+        let key = format!("frontier-after-{idx}");
+        store
+            .remember(semantic_draft("history-peak-frontier", &key, b"y"), &cap)
+            .unwrap();
+    }
+    let newer = store.root_history_peak_digest().unwrap();
+    let signed_delta = store
+        .root_history_peak_consistency_proof(&saved_state)
+        .unwrap();
+    let frontier = store
+        .root_history_peak_frontier_proof(&saved_state)
+        .unwrap();
+    verify_root_history_peak_frontier(&saved_state, &newer, &frontier).unwrap();
+    assert!(
+        frontier.appended_subtrees.len() < signed_delta.appended_checkpoints.len(),
+        "frontier proof should compact append extension into aligned subtrees"
+    );
 }
 
 // --- §22 K3: session recall cache is fail-closed (invalidated by mutation) ---

@@ -20,6 +20,7 @@ mod layout;
 mod merge;
 mod pause;
 mod recall;
+#[cfg(feature = "bitemporal_recall")]
 mod recall_at;
 mod repair;
 mod scoped_recall;
@@ -829,6 +830,135 @@ impl Store {
             .ok_or(MnemeError::RootInconsistent)
     }
 
+    /// Compact audit pin for the contiguous signed checkpoint history through HEAD.
+    pub fn root_history_digest(&self) -> Result<mneme_root::RootHistoryDigest, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_digest(&self.path, &self.trust.operator_keys, &stored)
+    }
+
+    /// Inclusion proof that checkpoint `sequence` belongs to the current root-history digest.
+    pub fn root_history_inclusion_proof(
+        &self,
+        sequence: u64,
+    ) -> Result<mneme_root::RootHistoryInclusionProof, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_inclusion_proof(
+            &self.path,
+            &self.trust.operator_keys,
+            &stored,
+            sequence,
+        )
+    }
+
+    /// Consistency proof that the current root-history digest extends `from_sequence`.
+    pub fn root_history_consistency_proof(
+        &self,
+        from_sequence: u64,
+    ) -> Result<mneme_root::RootHistoryConsistencyProof, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_consistency_proof(
+            &self.path,
+            &self.trust.operator_keys,
+            &stored,
+            from_sequence,
+        )
+    }
+
+    /// Verified compact pin from the persisted root-history peak sidecar.
+    ///
+    /// The sidecar is treated as untrusted disk: live operator APIs compare it
+    /// against the signed contiguous checkpoint log before returning a digest.
+    pub fn root_history_peak_digest(
+        &self,
+    ) -> Result<mneme_root::RootHistoryPeakDigest, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_peak_digest(&self.path, &self.trust.operator_keys, &stored)
+    }
+
+    /// Verified compact root-history peak state, suitable as an operator audit checkpoint.
+    pub fn root_history_peak_state(&self) -> Result<mneme_root::RootHistoryPeakState, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::verify_root_history_peak_state(&self.path, &self.trust.operator_keys, &stored)
+    }
+
+    /// Delta proof that the current peak digest extends a previously pinned peak state.
+    pub fn root_history_peak_consistency_proof(
+        &self,
+        from_state: &mneme_root::RootHistoryPeakState,
+    ) -> Result<mneme_root::RootHistoryPeakConsistencyProof, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_peak_consistency_proof(
+            &self.path,
+            &self.trust.operator_keys,
+            from_state,
+            &stored,
+        )
+    }
+
+    /// Inclusion proof that checkpoint `sequence` belongs to the current compact peak digest.
+    pub fn root_history_peak_inclusion_proof(
+        &self,
+        sequence: u64,
+    ) -> Result<mneme_root::RootHistoryPeakInclusionProof, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_peak_inclusion_proof(
+            &self.path,
+            &self.trust.operator_keys,
+            &stored,
+            sequence,
+        )
+    }
+
+    /// Compact structural proof that current peak frontier extends a prior peak state.
+    ///
+    /// This proof carries appended subtree roots, not every appended checkpoint.
+    /// Use `root_history_peak_consistency_proof` when offline verification must
+    /// re-check each appended checkpoint signature.
+    pub fn root_history_peak_frontier_proof(
+        &self,
+        from_state: &mneme_root::RootHistoryPeakState,
+    ) -> Result<mneme_root::RootHistoryPeakFrontierProof, MnemeError> {
+        let stored = layout::read_head(&self.path)?;
+        let current = self.current_root()?;
+        if stored.preimage_hash != current.preimage_hash {
+            return Err(MnemeError::RootInconsistent);
+        }
+        mneme_root::root_history_peak_frontier_proof(
+            &self.path,
+            &self.trust.operator_keys,
+            from_state,
+            &stored,
+        )
+    }
+
     pub fn tamper_object_bytes(&mut self, id: &[u8; 32]) -> Result<(), MnemeError> {
         let bytes = self.objects.get_mut(id).ok_or(MnemeError::ObjectTampered)?;
         if !bytes.is_empty() {
@@ -959,10 +1089,11 @@ impl Store {
         )?;
         let root = stored.to_root();
         self.roots.push(root);
-        layout::append_checkpoint(&self.path, &stored)?;
+        layout::append_checkpoint(&self.path, &self.trust.operator_keys, &stored)?;
         pause::checkpoint(pause::AFTER_APPEND_CHECKPOINT)?;
         layout::write_head(&self.path, &stored)?;
         pause::checkpoint(pause::AFTER_WRITE_HEAD)?;
+        #[cfg(feature = "bitemporal_recall")]
         layout::snapshot_key_index_at_seq(&self.path, self.sequence, self)?;
         Ok(())
     }

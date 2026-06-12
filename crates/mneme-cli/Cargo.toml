@@ -15,6 +15,7 @@ mneme-core.workspace = true
 mneme-crypto.workspace = true
 mneme-cap.workspace = true
 mneme-store = { workspace = true, features = ["phase_iii_prove_forget"] }
+mneme-root.workspace = true
 mneme-verify.workspace = true
 mneme-index.workspace = true
 mneme-smt.workspace = true

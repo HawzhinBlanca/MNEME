@@ -12,8 +12,15 @@ use mneme_core::{
 };
 use mneme_core::{ForgetProof, encode_forget_proof};
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
+use mneme_root::{
+    CheckpointLog, RootHistoryPeak, RootHistoryPeakConsistencyProof, RootHistoryPeakDigest,
+    RootHistoryPeakFrontierProof, RootHistoryPeakInclusionProof, RootHistoryPeakState,
+    RootHistoryProofDirection, RootHistoryProofStep, StoredRoot,
+};
 use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -48,8 +55,40 @@ enum Commands {
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
     },
-    /// [Not yet implemented] Print provenance, writers, tiers, tombstones for a root checkpoint
-    Audit { root: PathBuf },
+    /// Operator audit: emit root-history/peak digest JSON for a store
+    Audit {
+        store: Option<PathBuf>,
+        /// Write the current compact peak state to PATH for later append-only verification.
+        #[arg(long = "emit-peak-state")]
+        emit_peak_state: Option<PathBuf>,
+        /// Verify that current HEAD extends a previously emitted peak state JSON.
+        #[arg(long = "from-peak-state")]
+        from_peak_state: Option<PathBuf>,
+        /// Write a portable peak-consistency proof bundle; requires --from-peak-state.
+        #[arg(long = "emit-peak-proof")]
+        emit_peak_proof: Option<PathBuf>,
+        /// Write a compact structural frontier proof bundle; requires --from-peak-state.
+        #[arg(long = "emit-peak-frontier-proof")]
+        emit_peak_frontier_proof: Option<PathBuf>,
+        /// Checkpoint sequence for compact peak-inclusion proof export.
+        #[arg(long = "checkpoint-sequence")]
+        checkpoint_sequence: Option<u64>,
+        /// Write a portable peak-inclusion proof bundle; requires --checkpoint-sequence.
+        #[arg(long = "emit-peak-inclusion-proof")]
+        emit_peak_inclusion_proof: Option<PathBuf>,
+        /// Offline-verify a portable peak-consistency proof bundle; omit STORE.
+        #[arg(long = "verify-peak-proof")]
+        verify_peak_proof: Option<PathBuf>,
+        /// Offline-verify a structural frontier proof bundle; omit STORE.
+        #[arg(long = "verify-peak-frontier-proof")]
+        verify_peak_frontier_proof: Option<PathBuf>,
+        /// Offline-verify a portable peak-inclusion proof bundle; omit STORE.
+        #[arg(long = "verify-peak-inclusion-proof")]
+        verify_peak_inclusion_proof: Option<PathBuf>,
+        /// Trusted operator public key hex for offline proof verification.
+        #[arg(long = "operator-pubkey")]
+        operator_pubkey: Option<String>,
+    },
     /// Key recall under min trust tier (verified)
     Recall {
         store: PathBuf,
@@ -212,9 +251,126 @@ enum VaultArg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliErrorKind {
     Usage,
-    StoreUnavailable,
     VerifyFailed(MnemeError),
     Kernel(MnemeError),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakStateJson {
+    schema: String,
+    version: u16,
+    sequence: u64,
+    head_preimage_hash: String,
+    peak_bag_root: String,
+    peaks: Vec<PeakJson>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakJson {
+    height: u32,
+    hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakDigestJson {
+    sequence: u64,
+    checkpoint_count: u64,
+    head_preimage_hash: String,
+    peak_count: u64,
+    peak_bag_root: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakConsistencyProofJson {
+    from_sequence: u64,
+    to_sequence: u64,
+    from_peak_bag_root: String,
+    to_peak_bag_root: String,
+    appended_checkpoints_cbor: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakFrontierProofJson {
+    from_sequence: u64,
+    to_sequence: u64,
+    from_peak_bag_root: String,
+    to_peak_bag_root: String,
+    appended_subtrees: Vec<PeakJson>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakProofStepJson {
+    direction: String,
+    sibling_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakInclusionProofJson {
+    sequence: u64,
+    checkpoint_count: u64,
+    leaf_hash: String,
+    peak_index: u64,
+    peak_height: u32,
+    peak_hash: String,
+    peaks: Vec<PeakJson>,
+    path: Vec<PeakProofStepJson>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakProofBundleJson {
+    schema: String,
+    operator_keys: Vec<String>,
+    older: PeakStateJson,
+    newer: PeakDigestJson,
+    proof: PeakConsistencyProofJson,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakFrontierProofBundleJson {
+    schema: String,
+    proof_kind: String,
+    claim: String,
+    signature_coverage: String,
+    requires_external_pin: bool,
+    signed_checkpoint_delta_required_for_signature_coverage: bool,
+    older: PeakStateJson,
+    newer: PeakDigestJson,
+    proof: PeakFrontierProofJson,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeakInclusionProofBundleJson {
+    schema: String,
+    operator_keys: Vec<String>,
+    digest: PeakDigestJson,
+    checkpoint_cbor: String,
+    proof: PeakInclusionProofJson,
+}
+
+struct AuditRequest<'a> {
+    store: Option<&'a Path>,
+    emit_peak_state: Option<&'a Path>,
+    from_peak_state: Option<&'a Path>,
+    emit_peak_proof: Option<&'a Path>,
+    emit_peak_frontier_proof: Option<&'a Path>,
+    checkpoint_sequence: Option<u64>,
+    emit_peak_inclusion_proof: Option<&'a Path>,
+    verify_peak_proof: Option<&'a Path>,
+    verify_peak_frontier_proof: Option<&'a Path>,
+    verify_peak_inclusion_proof: Option<&'a Path>,
+    operator_pubkey: Option<&'a str>,
+    seed_hex: Option<&'a str>,
+    vault: VaultArg,
 }
 
 fn main() -> ExitCode {
@@ -224,10 +380,6 @@ fn main() -> ExitCode {
         Err(kind) => {
             let (code, msg) = match kind {
                 CliErrorKind::Usage => (2, "invalid usage".to_string()),
-                CliErrorKind::StoreUnavailable => (
-                    3,
-                    "store kernel not available: build mneme-store and re-run".to_string(),
-                ),
                 CliErrorKind::VerifyFailed(e) => (4, format!("verify failed: {e}")),
                 CliErrorKind::Kernel(e) => (5, format!("{e}")),
             };
@@ -447,19 +599,33 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Audit { root } => {
-            // Validate the argument before reporting non-implementation: a missing root path is a
-            // usage error (exit 2), matching `audit_missing_root_is_usage_error`. Only a present,
-            // well-formed argument reaches the not-yet-implemented surface (exit 3).
-            if !root.exists() {
-                eprintln!("mneme: root checkpoint not found: {}", root.display());
-                return Err(CliErrorKind::Usage);
-            }
-            eprintln!(
-                "mneme: audit is not yet implemented (provenance/writer/tier/tombstone dump deferred)"
-            );
-            Err(CliErrorKind::StoreUnavailable)
-        }
+        Commands::Audit {
+            store,
+            emit_peak_state,
+            from_peak_state,
+            emit_peak_proof,
+            emit_peak_frontier_proof,
+            checkpoint_sequence,
+            emit_peak_inclusion_proof,
+            verify_peak_proof,
+            verify_peak_frontier_proof,
+            verify_peak_inclusion_proof,
+            operator_pubkey,
+        } => run_audit(AuditRequest {
+            store: store.as_deref(),
+            emit_peak_state: emit_peak_state.as_deref(),
+            from_peak_state: from_peak_state.as_deref(),
+            emit_peak_proof: emit_peak_proof.as_deref(),
+            emit_peak_frontier_proof: emit_peak_frontier_proof.as_deref(),
+            checkpoint_sequence,
+            emit_peak_inclusion_proof: emit_peak_inclusion_proof.as_deref(),
+            verify_peak_proof: verify_peak_proof.as_deref(),
+            verify_peak_frontier_proof: verify_peak_frontier_proof.as_deref(),
+            verify_peak_inclusion_proof: verify_peak_inclusion_proof.as_deref(),
+            operator_pubkey: operator_pubkey.as_deref(),
+            seed_hex: cli.operator_seed.as_deref(),
+            vault: cli.vault,
+        }),
         Commands::Certify {
             store,
             out,
@@ -550,6 +716,682 @@ fn parse_logical_key(key: &str) -> LogicalKey {
         LogicalKey {
             namespace: "user".into(),
             name: key.into(),
+        }
+    }
+}
+
+fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
+    if let Some(proof_path) = request.verify_peak_proof {
+        if request.store.is_some()
+            || request.emit_peak_state.is_some()
+            || request.from_peak_state.is_some()
+            || request.emit_peak_proof.is_some()
+            || request.emit_peak_frontier_proof.is_some()
+            || request.checkpoint_sequence.is_some()
+            || request.emit_peak_inclusion_proof.is_some()
+            || request.verify_peak_frontier_proof.is_some()
+            || request.verify_peak_inclusion_proof.is_some()
+        {
+            eprintln!("mneme: --verify-peak-proof is offline; omit STORE and live audit flags");
+            return Err(CliErrorKind::Usage);
+        }
+        return run_verify_peak_proof(proof_path, request.operator_pubkey, request.seed_hex);
+    }
+    if let Some(proof_path) = request.verify_peak_frontier_proof {
+        if request.store.is_some()
+            || request.emit_peak_state.is_some()
+            || request.from_peak_state.is_some()
+            || request.emit_peak_proof.is_some()
+            || request.emit_peak_frontier_proof.is_some()
+            || request.checkpoint_sequence.is_some()
+            || request.emit_peak_inclusion_proof.is_some()
+            || request.verify_peak_inclusion_proof.is_some()
+        {
+            eprintln!(
+                "mneme: --verify-peak-frontier-proof is offline; omit STORE and live audit flags"
+            );
+            return Err(CliErrorKind::Usage);
+        }
+        return run_verify_peak_frontier_proof(
+            proof_path,
+            request.operator_pubkey,
+            request.seed_hex,
+        );
+    }
+    if let Some(proof_path) = request.verify_peak_inclusion_proof {
+        if request.store.is_some()
+            || request.emit_peak_state.is_some()
+            || request.from_peak_state.is_some()
+            || request.emit_peak_proof.is_some()
+            || request.emit_peak_frontier_proof.is_some()
+            || request.checkpoint_sequence.is_some()
+            || request.emit_peak_inclusion_proof.is_some()
+        {
+            eprintln!(
+                "mneme: --verify-peak-inclusion-proof is offline; omit STORE and live audit flags"
+            );
+            return Err(CliErrorKind::Usage);
+        }
+        return run_verify_peak_inclusion_proof(
+            proof_path,
+            request.operator_pubkey,
+            request.seed_hex,
+        );
+    }
+    let store = request.store.ok_or_else(|| {
+        eprintln!("mneme: audit requires STORE unless offline proof verification is used");
+        CliErrorKind::Usage
+    })?;
+    if request.emit_peak_proof.is_some() && request.from_peak_state.is_none() {
+        eprintln!("mneme: --emit-peak-proof requires --from-peak-state");
+        return Err(CliErrorKind::Usage);
+    }
+    if request.emit_peak_frontier_proof.is_some() && request.from_peak_state.is_none() {
+        eprintln!("mneme: --emit-peak-frontier-proof requires --from-peak-state");
+        return Err(CliErrorKind::Usage);
+    }
+    if request.emit_peak_inclusion_proof.is_some() && request.checkpoint_sequence.is_none() {
+        eprintln!("mneme: --emit-peak-inclusion-proof requires --checkpoint-sequence");
+        return Err(CliErrorKind::Usage);
+    }
+    require_store_dir(store)?;
+    let operator = load_or_generate_operator(store, request.seed_hex)?;
+    if let Some(operator_pubkey) = request.operator_pubkey {
+        let expected = parse_seed_hex(operator_pubkey)?;
+        if operator.public_key_bytes() != expected {
+            return Err(CliErrorKind::VerifyFailed(MnemeError::RootSigInvalid));
+        }
+    }
+    let trust = TrustConfig::new(operator.public_key_bytes());
+    let verify_report = verify_store(store, &trust).map_err(CliErrorKind::VerifyFailed)?;
+    let mneme_store = open_store(store, operator, request.vault).map_err(|err| match err {
+        CliErrorKind::Kernel(e) => CliErrorKind::VerifyFailed(e),
+        other => other,
+    })?;
+    let root_history = mneme_store
+        .root_history_digest()
+        .map_err(CliErrorKind::VerifyFailed)?;
+    let peak_state = mneme_store
+        .root_history_peak_state()
+        .map_err(CliErrorKind::VerifyFailed)?;
+    let peak_digest = mneme_store
+        .root_history_peak_digest()
+        .map_err(CliErrorKind::VerifyFailed)?;
+
+    if let Some(path) = request.emit_peak_state {
+        write_peak_state_json(path, &peak_state)?;
+    }
+
+    let (peak_consistency, peak_frontier) = if let Some(path) = request.from_peak_state {
+        let older = read_peak_state_json(path)?;
+        let proof = mneme_store
+            .root_history_peak_consistency_proof(&older)
+            .map_err(CliErrorKind::VerifyFailed)?;
+        mneme_root::verify_root_history_peak_consistency(
+            &mneme_store.trust().operator_keys,
+            &older,
+            &peak_digest,
+            &proof,
+        )
+        .map_err(CliErrorKind::VerifyFailed)?;
+        if let Some(path) = request.emit_peak_proof {
+            write_peak_proof_bundle(
+                path,
+                &mneme_store.trust().operator_keys,
+                &older,
+                &peak_digest,
+                &proof,
+            )?;
+        }
+        let frontier = mneme_store
+            .root_history_peak_frontier_proof(&older)
+            .map_err(CliErrorKind::VerifyFailed)?;
+        mneme_root::verify_root_history_peak_frontier(&older, &peak_digest, &frontier)
+            .map_err(CliErrorKind::VerifyFailed)?;
+        if let Some(path) = request.emit_peak_frontier_proof {
+            write_peak_frontier_proof_bundle(path, &older, &peak_digest, &frontier)?;
+        }
+        let consistency_report = json!({
+            "verified": true,
+            "from_sequence": proof.from_sequence,
+            "to_sequence": proof.to_sequence,
+            "from_peak_bag_root": hex::encode(proof.from_peak_bag_root),
+            "to_peak_bag_root": hex::encode(proof.to_peak_bag_root),
+            "appended_checkpoint_count": proof.appended_checkpoints.len(),
+            "proof_emitted": request.emit_peak_proof.map(|path| path.display().to_string()),
+        });
+        let frontier_report = json!({
+            "verified": true,
+            "proof_kind": "structural_frontier.v1",
+            "claim": "structural_frontier_only",
+            "signature_coverage": "none_for_appended_subtrees",
+            "requires_external_pin": true,
+            "signed_checkpoint_delta_required_for_signature_coverage": true,
+            "from_sequence": frontier.from_sequence,
+            "to_sequence": frontier.to_sequence,
+            "from_peak_bag_root": hex::encode(frontier.from_peak_bag_root),
+            "to_peak_bag_root": hex::encode(frontier.to_peak_bag_root),
+            "appended_subtree_count": frontier.appended_subtrees.len(),
+            "proof_emitted": request.emit_peak_frontier_proof.map(|path| path.display().to_string()),
+        });
+        (Some(consistency_report), Some(frontier_report))
+    } else {
+        (None, None)
+    };
+
+    let peak_inclusion = if let Some(sequence) = request.checkpoint_sequence {
+        let proof = mneme_store
+            .root_history_peak_inclusion_proof(sequence)
+            .map_err(CliErrorKind::VerifyFailed)?;
+        let checkpoint =
+            CheckpointLog::read_checkpoint(store, sequence).map_err(CliErrorKind::VerifyFailed)?;
+        mneme_root::verify_root_history_peak_inclusion(
+            &mneme_store.trust().operator_keys,
+            &peak_digest,
+            &checkpoint,
+            &proof,
+        )
+        .map_err(CliErrorKind::VerifyFailed)?;
+        if let Some(path) = request.emit_peak_inclusion_proof {
+            write_peak_inclusion_proof_bundle(
+                path,
+                &mneme_store.trust().operator_keys,
+                &peak_digest,
+                &checkpoint,
+                &proof,
+            )?;
+        }
+        Some(json!({
+            "verified": true,
+            "sequence": proof.sequence,
+            "checkpoint_count": proof.checkpoint_count,
+            "peak_index": proof.peak_index,
+            "peak_height": proof.peak_height,
+            "path_len": proof.path.len(),
+            "proof_emitted": request.emit_peak_inclusion_proof.map(|path| path.display().to_string()),
+        }))
+    } else {
+        None
+    };
+
+    let mut report = json!({
+        "schema": "mneme.audit.root_history.v1",
+        "store": store.display().to_string(),
+        "verify_store": {
+            "verified": true,
+            "root_sequence": verify_report.root.sequence,
+            "object_count": verify_report.object_count,
+        },
+        "root_history": {
+            "sequence": root_history.sequence,
+            "checkpoint_count": root_history.checkpoint_count,
+            "head_preimage_hash": hex::encode(root_history.head_preimage_hash),
+            "accumulator_root": hex::encode(root_history.accumulator_root),
+        },
+        "peak_digest": {
+            "sequence": peak_digest.sequence,
+            "checkpoint_count": peak_digest.checkpoint_count,
+            "head_preimage_hash": hex::encode(peak_digest.head_preimage_hash),
+            "peak_count": peak_digest.peak_count,
+            "peak_bag_root": hex::encode(peak_digest.peak_bag_root),
+        },
+        "peak_state": peak_state_json_value(&peak_state),
+    });
+    if let Some(peak_consistency) = peak_consistency {
+        report["peak_consistency"] = peak_consistency;
+    }
+    if let Some(peak_frontier) = peak_frontier {
+        report["peak_frontier"] = peak_frontier;
+    }
+    if let Some(peak_inclusion) = peak_inclusion {
+        report["peak_inclusion"] = peak_inclusion;
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).map_err(|_| CliErrorKind::Usage)?
+    );
+    Ok(())
+}
+
+fn run_verify_peak_proof(
+    proof_path: &Path,
+    operator_pubkey: Option<&str>,
+    seed_hex: Option<&str>,
+) -> Result<(), CliErrorKind> {
+    let operator_keys = trusted_operator_keys(operator_pubkey, seed_hex)?;
+    let bundle = read_peak_proof_bundle(proof_path)?;
+    let older = peak_state_from_json(bundle.older)?;
+    let newer = peak_digest_from_json(bundle.newer)?;
+    let proof = peak_consistency_proof_from_json(bundle.proof)?;
+    mneme_root::verify_root_history_peak_consistency(&operator_keys, &older, &newer, &proof)
+        .map_err(CliErrorKind::VerifyFailed)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "schema": "mneme.audit.peak_proof_verification.v1",
+            "verified": true,
+            "from_sequence": proof.from_sequence,
+            "to_sequence": proof.to_sequence,
+            "trusted_operator_keys": operator_keys.iter().map(hex::encode).collect::<Vec<_>>(),
+            "appended_checkpoint_count": proof.appended_checkpoints.len(),
+        }))
+        .map_err(|_| CliErrorKind::Usage)?
+    );
+    Ok(())
+}
+
+fn run_verify_peak_frontier_proof(
+    proof_path: &Path,
+    operator_pubkey: Option<&str>,
+    seed_hex: Option<&str>,
+) -> Result<(), CliErrorKind> {
+    if operator_pubkey.is_some() || seed_hex.is_some() {
+        eprintln!(
+            "mneme: --verify-peak-frontier-proof is structural-only; operator keys are not used"
+        );
+        return Err(CliErrorKind::Usage);
+    }
+    let bundle = read_peak_frontier_proof_bundle(proof_path)?;
+    let older = peak_state_from_json(bundle.older)?;
+    let newer = peak_digest_from_json(bundle.newer)?;
+    let proof = peak_frontier_proof_from_json(bundle.proof)?;
+    mneme_root::verify_root_history_peak_frontier(&older, &newer, &proof)
+        .map_err(CliErrorKind::VerifyFailed)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "schema": "mneme.audit.peak_frontier_proof_verification.v1",
+            "verified": true,
+            "proof_kind": "structural_frontier.v1",
+            "claim": "structural_frontier_only",
+            "signature_coverage": "none_for_appended_subtrees",
+            "requires_external_pin": true,
+            "signed_checkpoint_delta_required_for_signature_coverage": true,
+            "from_sequence": proof.from_sequence,
+            "to_sequence": proof.to_sequence,
+            "appended_subtree_count": proof.appended_subtrees.len(),
+        }))
+        .map_err(|_| CliErrorKind::Usage)?
+    );
+    Ok(())
+}
+
+fn run_verify_peak_inclusion_proof(
+    proof_path: &Path,
+    operator_pubkey: Option<&str>,
+    seed_hex: Option<&str>,
+) -> Result<(), CliErrorKind> {
+    let operator_keys = trusted_operator_keys(operator_pubkey, seed_hex)?;
+    let bundle = read_peak_inclusion_proof_bundle(proof_path)?;
+    let digest = peak_digest_from_json(bundle.digest)?;
+    let checkpoint_bytes = hex::decode(bundle.checkpoint_cbor).map_err(|_| CliErrorKind::Usage)?;
+    let checkpoint =
+        StoredRoot::from_bytes(&checkpoint_bytes).map_err(CliErrorKind::VerifyFailed)?;
+    let proof = peak_inclusion_proof_from_json(bundle.proof)?;
+    mneme_root::verify_root_history_peak_inclusion(&operator_keys, &digest, &checkpoint, &proof)
+        .map_err(CliErrorKind::VerifyFailed)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "schema": "mneme.audit.peak_inclusion_proof_verification.v1",
+            "verified": true,
+            "sequence": proof.sequence,
+            "checkpoint_count": proof.checkpoint_count,
+            "trusted_operator_keys": operator_keys.iter().map(hex::encode).collect::<Vec<_>>(),
+            "path_len": proof.path.len(),
+        }))
+        .map_err(|_| CliErrorKind::Usage)?
+    );
+    Ok(())
+}
+
+fn write_peak_state_json(path: &Path, state: &RootHistoryPeakState) -> Result<(), CliErrorKind> {
+    let data =
+        serde_json::to_vec_pretty(&peak_state_to_json(state)).map_err(|_| CliErrorKind::Usage)?;
+    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+}
+
+fn read_peak_state_json(path: &Path) -> Result<RootHistoryPeakState, CliErrorKind> {
+    require_file_exists(path, "peak state")?;
+    let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
+    let parsed: PeakStateJson = serde_json::from_slice(&bytes).map_err(|_| CliErrorKind::Usage)?;
+    peak_state_from_json(parsed)
+}
+
+fn peak_state_json_value(state: &RootHistoryPeakState) -> Value {
+    serde_json::to_value(peak_state_to_json(state)).unwrap_or(Value::Null)
+}
+
+fn peak_state_to_json(state: &RootHistoryPeakState) -> PeakStateJson {
+    PeakStateJson {
+        schema: "mneme.audit.peak_state.v1".into(),
+        version: state.version,
+        sequence: state.sequence,
+        head_preimage_hash: hex::encode(state.head_preimage_hash),
+        peak_bag_root: hex::encode(state.peak_bag_root),
+        peaks: state
+            .peaks
+            .iter()
+            .map(|peak| PeakJson {
+                height: peak.height,
+                hash: hex::encode(peak.hash),
+            })
+            .collect(),
+    }
+}
+
+fn peak_state_from_json(parsed: PeakStateJson) -> Result<RootHistoryPeakState, CliErrorKind> {
+    if parsed.schema != "mneme.audit.peak_state.v1" {
+        return Err(CliErrorKind::Usage);
+    }
+    Ok(RootHistoryPeakState {
+        version: parsed.version,
+        sequence: parsed.sequence,
+        head_preimage_hash: parse_seed_hex(&parsed.head_preimage_hash)?,
+        peak_bag_root: parse_seed_hex(&parsed.peak_bag_root)?,
+        peaks: parsed
+            .peaks
+            .into_iter()
+            .map(|peak| {
+                Ok(RootHistoryPeak {
+                    height: peak.height,
+                    hash: parse_seed_hex(&peak.hash)?,
+                })
+            })
+            .collect::<Result<Vec<_>, CliErrorKind>>()?,
+    })
+}
+
+fn peak_digest_to_json(digest: &RootHistoryPeakDigest) -> PeakDigestJson {
+    PeakDigestJson {
+        sequence: digest.sequence,
+        checkpoint_count: digest.checkpoint_count,
+        head_preimage_hash: hex::encode(digest.head_preimage_hash),
+        peak_count: digest.peak_count,
+        peak_bag_root: hex::encode(digest.peak_bag_root),
+    }
+}
+
+fn peak_digest_from_json(parsed: PeakDigestJson) -> Result<RootHistoryPeakDigest, CliErrorKind> {
+    Ok(RootHistoryPeakDigest {
+        sequence: parsed.sequence,
+        checkpoint_count: parsed.checkpoint_count,
+        head_preimage_hash: parse_seed_hex(&parsed.head_preimage_hash)?,
+        peak_count: parsed.peak_count,
+        peak_bag_root: parse_seed_hex(&parsed.peak_bag_root)?,
+    })
+}
+
+fn peak_consistency_proof_to_json(
+    proof: &RootHistoryPeakConsistencyProof,
+) -> Result<PeakConsistencyProofJson, CliErrorKind> {
+    Ok(PeakConsistencyProofJson {
+        from_sequence: proof.from_sequence,
+        to_sequence: proof.to_sequence,
+        from_peak_bag_root: hex::encode(proof.from_peak_bag_root),
+        to_peak_bag_root: hex::encode(proof.to_peak_bag_root),
+        appended_checkpoints_cbor: proof
+            .appended_checkpoints
+            .iter()
+            .map(|checkpoint| {
+                checkpoint
+                    .to_bytes()
+                    .map(hex::encode)
+                    .map_err(CliErrorKind::Kernel)
+            })
+            .collect::<Result<Vec<_>, CliErrorKind>>()?,
+    })
+}
+
+fn peak_consistency_proof_from_json(
+    parsed: PeakConsistencyProofJson,
+) -> Result<RootHistoryPeakConsistencyProof, CliErrorKind> {
+    Ok(RootHistoryPeakConsistencyProof {
+        from_sequence: parsed.from_sequence,
+        to_sequence: parsed.to_sequence,
+        from_peak_bag_root: parse_seed_hex(&parsed.from_peak_bag_root)?,
+        to_peak_bag_root: parse_seed_hex(&parsed.to_peak_bag_root)?,
+        appended_checkpoints: parsed
+            .appended_checkpoints_cbor
+            .into_iter()
+            .map(|checkpoint_hex| {
+                let bytes = hex::decode(checkpoint_hex).map_err(|_| CliErrorKind::Usage)?;
+                StoredRoot::from_bytes(&bytes).map_err(CliErrorKind::VerifyFailed)
+            })
+            .collect::<Result<Vec<_>, CliErrorKind>>()?,
+    })
+}
+
+fn peak_frontier_proof_to_json(proof: &RootHistoryPeakFrontierProof) -> PeakFrontierProofJson {
+    PeakFrontierProofJson {
+        from_sequence: proof.from_sequence,
+        to_sequence: proof.to_sequence,
+        from_peak_bag_root: hex::encode(proof.from_peak_bag_root),
+        to_peak_bag_root: hex::encode(proof.to_peak_bag_root),
+        appended_subtrees: proof
+            .appended_subtrees
+            .iter()
+            .map(|peak| PeakJson {
+                height: peak.height,
+                hash: hex::encode(peak.hash),
+            })
+            .collect(),
+    }
+}
+
+fn peak_frontier_proof_from_json(
+    parsed: PeakFrontierProofJson,
+) -> Result<RootHistoryPeakFrontierProof, CliErrorKind> {
+    Ok(RootHistoryPeakFrontierProof {
+        from_sequence: parsed.from_sequence,
+        to_sequence: parsed.to_sequence,
+        from_peak_bag_root: parse_seed_hex(&parsed.from_peak_bag_root)?,
+        to_peak_bag_root: parse_seed_hex(&parsed.to_peak_bag_root)?,
+        appended_subtrees: parsed
+            .appended_subtrees
+            .into_iter()
+            .map(|peak| {
+                Ok(RootHistoryPeak {
+                    height: peak.height,
+                    hash: parse_seed_hex(&peak.hash)?,
+                })
+            })
+            .collect::<Result<Vec<_>, CliErrorKind>>()?,
+    })
+}
+
+fn peak_inclusion_proof_to_json(proof: &RootHistoryPeakInclusionProof) -> PeakInclusionProofJson {
+    PeakInclusionProofJson {
+        sequence: proof.sequence,
+        checkpoint_count: proof.checkpoint_count,
+        leaf_hash: hex::encode(proof.leaf_hash),
+        peak_index: proof.peak_index,
+        peak_height: proof.peak_height,
+        peak_hash: hex::encode(proof.peak_hash),
+        peaks: proof
+            .peaks
+            .iter()
+            .map(|peak| PeakJson {
+                height: peak.height,
+                hash: hex::encode(peak.hash),
+            })
+            .collect(),
+        path: proof.path.iter().map(proof_step_to_json).collect(),
+    }
+}
+
+fn peak_inclusion_proof_from_json(
+    parsed: PeakInclusionProofJson,
+) -> Result<RootHistoryPeakInclusionProof, CliErrorKind> {
+    Ok(RootHistoryPeakInclusionProof {
+        sequence: parsed.sequence,
+        checkpoint_count: parsed.checkpoint_count,
+        leaf_hash: parse_seed_hex(&parsed.leaf_hash)?,
+        peak_index: parsed.peak_index,
+        peak_height: parsed.peak_height,
+        peak_hash: parse_seed_hex(&parsed.peak_hash)?,
+        peaks: parsed
+            .peaks
+            .into_iter()
+            .map(|peak| {
+                Ok(RootHistoryPeak {
+                    height: peak.height,
+                    hash: parse_seed_hex(&peak.hash)?,
+                })
+            })
+            .collect::<Result<Vec<_>, CliErrorKind>>()?,
+        path: parsed
+            .path
+            .into_iter()
+            .map(proof_step_from_json)
+            .collect::<Result<Vec<_>, CliErrorKind>>()?,
+    })
+}
+
+fn proof_step_to_json(step: &RootHistoryProofStep) -> PeakProofStepJson {
+    let direction = match step.direction {
+        RootHistoryProofDirection::Left => "left",
+        RootHistoryProofDirection::Right => "right",
+    };
+    PeakProofStepJson {
+        direction: direction.into(),
+        sibling_hash: hex::encode(step.sibling_hash),
+    }
+}
+
+fn proof_step_from_json(parsed: PeakProofStepJson) -> Result<RootHistoryProofStep, CliErrorKind> {
+    let direction = match parsed.direction.as_str() {
+        "left" => RootHistoryProofDirection::Left,
+        "right" => RootHistoryProofDirection::Right,
+        _ => return Err(CliErrorKind::Usage),
+    };
+    Ok(RootHistoryProofStep {
+        direction,
+        sibling_hash: parse_seed_hex(&parsed.sibling_hash)?,
+    })
+}
+
+fn write_peak_proof_bundle(
+    path: &Path,
+    operator_keys: &[[u8; 32]],
+    older: &RootHistoryPeakState,
+    newer: &RootHistoryPeakDigest,
+    proof: &RootHistoryPeakConsistencyProof,
+) -> Result<(), CliErrorKind> {
+    let bundle = PeakProofBundleJson {
+        schema: "mneme.audit.peak_consistency_proof.v1".into(),
+        operator_keys: operator_keys.iter().map(hex::encode).collect(),
+        older: peak_state_to_json(older),
+        newer: peak_digest_to_json(newer),
+        proof: peak_consistency_proof_to_json(proof)?,
+    };
+    let data = serde_json::to_vec_pretty(&bundle).map_err(|_| CliErrorKind::Usage)?;
+    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+}
+
+fn write_peak_inclusion_proof_bundle(
+    path: &Path,
+    operator_keys: &[[u8; 32]],
+    digest: &RootHistoryPeakDigest,
+    checkpoint: &StoredRoot,
+    proof: &RootHistoryPeakInclusionProof,
+) -> Result<(), CliErrorKind> {
+    let bundle = PeakInclusionProofBundleJson {
+        schema: "mneme.audit.peak_inclusion_proof.v1".into(),
+        operator_keys: operator_keys.iter().map(hex::encode).collect(),
+        digest: peak_digest_to_json(digest),
+        checkpoint_cbor: checkpoint
+            .to_bytes()
+            .map(hex::encode)
+            .map_err(CliErrorKind::Kernel)?,
+        proof: peak_inclusion_proof_to_json(proof),
+    };
+    let data = serde_json::to_vec_pretty(&bundle).map_err(|_| CliErrorKind::Usage)?;
+    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+}
+
+fn write_peak_frontier_proof_bundle(
+    path: &Path,
+    older: &RootHistoryPeakState,
+    newer: &RootHistoryPeakDigest,
+    proof: &RootHistoryPeakFrontierProof,
+) -> Result<(), CliErrorKind> {
+    let bundle = PeakFrontierProofBundleJson {
+        schema: "mneme.audit.peak_frontier_proof.v1".into(),
+        proof_kind: "structural_frontier.v1".into(),
+        claim: "structural_frontier_only".into(),
+        signature_coverage: "none_for_appended_subtrees".into(),
+        requires_external_pin: true,
+        signed_checkpoint_delta_required_for_signature_coverage: true,
+        older: peak_state_to_json(older),
+        newer: peak_digest_to_json(newer),
+        proof: peak_frontier_proof_to_json(proof),
+    };
+    let data = serde_json::to_vec_pretty(&bundle).map_err(|_| CliErrorKind::Usage)?;
+    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+}
+
+fn read_peak_proof_bundle(path: &Path) -> Result<PeakProofBundleJson, CliErrorKind> {
+    require_file_exists(path, "peak proof")?;
+    let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
+    let bundle: PeakProofBundleJson =
+        serde_json::from_slice(&bytes).map_err(|_| CliErrorKind::Usage)?;
+    if bundle.schema != "mneme.audit.peak_consistency_proof.v1" {
+        return Err(CliErrorKind::Usage);
+    }
+    Ok(bundle)
+}
+
+fn read_peak_frontier_proof_bundle(
+    path: &Path,
+) -> Result<PeakFrontierProofBundleJson, CliErrorKind> {
+    require_file_exists(path, "peak frontier proof")?;
+    let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
+    let bundle: PeakFrontierProofBundleJson =
+        serde_json::from_slice(&bytes).map_err(|_| CliErrorKind::Usage)?;
+    if bundle.schema != "mneme.audit.peak_frontier_proof.v1"
+        || bundle.proof_kind != "structural_frontier.v1"
+        || bundle.claim != "structural_frontier_only"
+        || bundle.signature_coverage != "none_for_appended_subtrees"
+        || !bundle.requires_external_pin
+        || !bundle.signed_checkpoint_delta_required_for_signature_coverage
+    {
+        return Err(CliErrorKind::Usage);
+    }
+    Ok(bundle)
+}
+
+fn read_peak_inclusion_proof_bundle(
+    path: &Path,
+) -> Result<PeakInclusionProofBundleJson, CliErrorKind> {
+    require_file_exists(path, "peak inclusion proof")?;
+    let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
+    let bundle: PeakInclusionProofBundleJson =
+        serde_json::from_slice(&bytes).map_err(|_| CliErrorKind::Usage)?;
+    if bundle.schema != "mneme.audit.peak_inclusion_proof.v1" {
+        return Err(CliErrorKind::Usage);
+    }
+    Ok(bundle)
+}
+
+fn trusted_operator_keys(
+    operator_pubkey: Option<&str>,
+    seed_hex: Option<&str>,
+) -> Result<Vec<[u8; 32]>, CliErrorKind> {
+    let from_pubkey = operator_pubkey.map(parse_seed_hex).transpose()?;
+    let from_seed = seed_hex
+        .map(|seed| Ok(KeyPair::from_seed(parse_seed_hex(seed)?).public_key_bytes()))
+        .transpose()?;
+    match (from_pubkey, from_seed) {
+        (Some(pubkey), Some(seed_pubkey)) if pubkey != seed_pubkey => {
+            Err(CliErrorKind::VerifyFailed(MnemeError::RootSigInvalid))
+        }
+        (Some(pubkey), _) | (None, Some(pubkey)) => Ok(vec![pubkey]),
+        (None, None) => {
+            eprintln!(
+                "mneme: offline proof verification requires --operator-pubkey or --operator-seed"
+            );
+            Err(CliErrorKind::Usage)
         }
     }
 }

@@ -1368,6 +1368,7 @@ dependencies = [
  "mneme-core",
  "mneme-crypto",
  "mneme-index",
+ "mneme-root",
  "mneme-smt",
  "mneme-store",
  "mneme-verify",

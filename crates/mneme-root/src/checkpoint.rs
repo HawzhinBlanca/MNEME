@@ -174,7 +174,7 @@ pub fn verify_checkpoint_chain(
     Ok(())
 }
 
-fn checkpoint_signature_valid(stored: &StoredRoot, operator_keys: &[[u8; 32]]) -> bool {
+pub(crate) fn checkpoint_signature_valid(stored: &StoredRoot, operator_keys: &[[u8; 32]]) -> bool {
     if stored.preimage().hash() != stored.preimage_hash {
         return false;
     }

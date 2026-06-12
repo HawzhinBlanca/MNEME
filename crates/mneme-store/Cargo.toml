@@ -32,6 +32,9 @@ libc = "0.2"
 
 [features]
 default = []
+# Opt-in historical `recall_verified_at`. It needs per-commit full key-index
+# snapshots, so lean default builds do not pay that O(N) write/disk tax.
+bitemporal_recall = []
 context_gate = ["mneme-index/context_gate", "dep:mneme-context", "dep:mneme-gate"]
 phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
 phase_iii_verify = ["mneme-account/phase_iii_verify"]

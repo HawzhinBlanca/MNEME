@@ -106,7 +106,9 @@ enum LayoutCanonicalFailure {
     InitialKeyIndexSidecar,
     RedactionRecord,
     KeyIndexSidecar,
+    #[cfg(feature = "bitemporal_recall")]
     KeyIndexSnapshot,
+    #[cfg(feature = "bitemporal_recall")]
     HistoricalKeyIndexSnapshot,
     ObjectKeysSidecar,
     ObjectKeysJournal,
@@ -185,8 +187,14 @@ fn head_path(store: &Path) -> std::path::PathBuf {
     store.join("roots/HEAD")
 }
 
-pub fn append_checkpoint(path: &Path, root: &StoredRoot) -> Result<(), MnemeError> {
-    CheckpointLog::append(path, root)
+pub fn append_checkpoint(
+    path: &Path,
+    operator_keys: &[[u8; 32]],
+    root: &StoredRoot,
+) -> Result<(), MnemeError> {
+    CheckpointLog::append(path, root)?;
+    mneme_root::update_root_history_peaks(path, operator_keys, root)?;
+    Ok(())
 }
 
 pub fn write_redaction_record(
@@ -259,6 +267,7 @@ pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
 }
 
 /// Per-checkpoint key-index snapshot for bi-temporal `recall_verified_at` (Phase I P1-2).
+#[cfg(feature = "bitemporal_recall")]
 pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result<(), MnemeError> {
     let dir = path.join("meta/snapshots").join(seq.to_string());
     fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
@@ -276,6 +285,7 @@ pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result
 }
 
 /// Load a historical key index snapshot written at commit `seq`.
+#[cfg(feature = "bitemporal_recall")]
 pub fn load_key_index_at_seq(path: &Path, seq: u64) -> Result<KeyIndex, MnemeError> {
     let snap = path
         .join("meta/snapshots")
@@ -768,14 +778,17 @@ fn layout_canonical_failure_to_mneme(failure: LayoutCanonicalFailure) -> MnemeEr
         | LayoutCanonicalFailure::InitialKeyIndexSidecar
         | LayoutCanonicalFailure::RedactionRecord
         | LayoutCanonicalFailure::KeyIndexSidecar
-        | LayoutCanonicalFailure::KeyIndexSnapshot
-        | LayoutCanonicalFailure::HistoricalKeyIndexSnapshot
         | LayoutCanonicalFailure::ObjectKeysSidecar
         | LayoutCanonicalFailure::ObjectKeysJournal
         | LayoutCanonicalFailure::EmbeddingSidecar
         | LayoutCanonicalFailure::EmbeddingJournalUpsert
         | LayoutCanonicalFailure::EmbeddingJournalRemove
         | LayoutCanonicalFailure::KeyIndexJournal => MnemeError::SerializationNonCanonical,
+        #[cfg(feature = "bitemporal_recall")]
+        LayoutCanonicalFailure::KeyIndexSnapshot
+        | LayoutCanonicalFailure::HistoricalKeyIndexSnapshot => {
+            MnemeError::SerializationNonCanonical
+        }
     }
 }
 
@@ -795,10 +808,12 @@ fn layout_key_index_sidecar_json_error() -> MnemeError {
     layout_canonical_failure_to_mneme(LayoutCanonicalFailure::KeyIndexSidecar)
 }
 
+#[cfg(feature = "bitemporal_recall")]
 fn layout_key_index_snapshot_json_error() -> MnemeError {
     layout_canonical_failure_to_mneme(LayoutCanonicalFailure::KeyIndexSnapshot)
 }
 
+#[cfg(feature = "bitemporal_recall")]
 fn layout_historical_key_index_snapshot_json_error() -> MnemeError {
     layout_canonical_failure_to_mneme(LayoutCanonicalFailure::HistoricalKeyIndexSnapshot)
 }
@@ -1010,7 +1025,9 @@ mod tests {
             LayoutCanonicalFailure::InitialKeyIndexSidecar,
             LayoutCanonicalFailure::RedactionRecord,
             LayoutCanonicalFailure::KeyIndexSidecar,
+            #[cfg(feature = "bitemporal_recall")]
             LayoutCanonicalFailure::KeyIndexSnapshot,
+            #[cfg(feature = "bitemporal_recall")]
             LayoutCanonicalFailure::HistoricalKeyIndexSnapshot,
             LayoutCanonicalFailure::ObjectKeysSidecar,
             LayoutCanonicalFailure::ObjectKeysJournal,
@@ -1030,7 +1047,9 @@ mod tests {
             layout_initial_key_index_sidecar_json_error(),
             layout_redaction_record_json_error(),
             layout_key_index_sidecar_json_error(),
+            #[cfg(feature = "bitemporal_recall")]
             layout_key_index_snapshot_json_error(),
+            #[cfg(feature = "bitemporal_recall")]
             layout_historical_key_index_snapshot_json_error(),
             layout_object_keys_sidecar_json_error(),
             layout_object_keys_journal_json_error(),
