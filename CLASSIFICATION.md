@@ -215,7 +215,7 @@ to be **active** and were **kept** (cutting them would reduce coverage).
 | `experimental/research/mneme-index-piop-research.rs` | DELETED | default-off `piop_research` seam, no prover/recall path; removed the feature, `mod`, `pub use`, and guard-test. No CORE dep. |
 | `scripts/piop-flat-prototype` | DELETED | workspace-`exclude`d prototype; sole caller `phase-iv-cost-report.sh` already `-f`-guards its absence. |
 | `scripts/ci/crypto-fault-injection-smoke.sh` | KEPT | active, passing step of `validation-lane crypto` (2 `fault_injection` tests exist + run) — a real gate, not a scaffold. |
-| `experimental/cognition-cert/cognition_cert_v1.rs` | KEPT | a real `[[test]]` (roundtrip, `required-features=["cognition_cert"]`), not a fixture-only helper. |
+| `experimental/cognition-cert/cognition_cert_v1.rs` | KEPT | a real `[[test]]` (roundtrip, `required-features=["cognition_cert"]`), not a fixture-only helper. (PR #9 branch layout — not in master; in master this test is `crates/mneme-index/tests/cognition_cert_v1.rs`.) |
 
 ## Uncertain Items — operator decisions (2026-06-06)
 

@@ -18,8 +18,9 @@ const MIME_TYPES = {
 };
 
 const server = http.createServer((req, res) => {
-  // Normalize URL path
-  let safeUrl = req.url;
+  // Normalize URL path — strip query string/hash so client routes like
+  // `/?demo=1` and `/settings?demo=1` still resolve to the SPA entrypoint.
+  let safeUrl = req.url.split('?')[0].split('#')[0];
   if (safeUrl === '/' || safeUrl.startsWith('/settings')) {
     safeUrl = '/index.html';
   }

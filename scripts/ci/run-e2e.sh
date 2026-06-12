@@ -40,6 +40,12 @@ run_cli_e2e() {
     npm install
   fi
   node --test e2e/cli/*.test.mjs
+  echo "==> build mneme-mcp ($PROFILE) + MCP e2e (e2e/mcp/*.test.mjs)"
+  cargo build -p mneme-mcp --"$PROFILE"
+  # sdk-client.test.mjs fails closed if MNEME_MCP_BIN is set but missing; point it
+  # at the binary we just built. live-agent.test.mjs skips without ANTHROPIC_API_KEY.
+  export MNEME_MCP_BIN="$CARGO_TARGET_DIR/$PROFILE/mneme-mcp"
+  npm run test:e2e:mcp
   if [[ -n "${MNEME_UI_BASE_URL:-}" ]]; then
     echo "==> Playwright UI (MNEME_UI_BASE_URL set)"
     npx playwright install chromium --with-deps 2>/dev/null || npx playwright install chromium

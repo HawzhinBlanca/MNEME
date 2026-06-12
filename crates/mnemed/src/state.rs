@@ -9,6 +9,21 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+// Single-writer invariant (stated, not accidental): `Store::open`/`create` take an
+// advisory flock for the process lifetime, so exactly one writer process exists per
+// store directory; a second opener gets `LockHeld`. In-process we serialize with a
+// Mutex.
+//
+// Why Mutex and not RwLock (so concurrent reads could proceed): `Store` is `Send`
+// but NOT `Sync`. Its read path (`recall_verified`, `&self`) mutates interior caches
+// through `RefCell` — the §22 K3 recall session cache and the SMT `TreeCache` — and
+// the key vault is a non-`Sync` trait object. `Mutex<T>: Sync` requires only
+// `T: Send`, which holds; `RwLock<T>: Sync` requires `T: Send + Sync`, which does
+// not. An `RwLock<Store>` therefore does not compile, and rightly so: two parallel
+// readers would race on those `RefCell` caches. Unlocking concurrent reads requires
+// first making those caches thread-safe (Mutex/atomic interior mutability in
+// mneme-store/mneme-smt + a `Sync` vault) — a kernel change with recall-hot-path and
+// determinism implications, not a daemon-layer swap. Tracked as future work.
 pub type SharedStore = Arc<Mutex<Store>>;
 pub const MAX_CAPABILITY_B64_LEN: usize = 4 * 1024;
 pub const MAX_RATE_LIMIT_SUBJECT_WINDOWS: usize = 4096;

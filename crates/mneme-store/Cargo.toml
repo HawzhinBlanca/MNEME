@@ -32,6 +32,11 @@ libc = "0.2"
 
 [features]
 default = []
+# Bi-temporal / point-in-time recall (`recall_verified_at`, Phase I P1-2). OFF in
+# lean default: it is the sole consumer of per-commit full key-index snapshots,
+# which impose O(N) write latency and O(N x writes) disk at scale. The lean MCP
+# surface exposes no time/sequence recall, so the lean core does not pay this tax.
+bitemporal_recall = []
 context_gate = ["mneme-index/context_gate", "dep:mneme-context", "dep:mneme-gate"]
 phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
 phase_iii_verify = ["mneme-account/phase_iii_verify"]
