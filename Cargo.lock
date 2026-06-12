@@ -1532,6 +1532,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-optimistic"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "mneme-core",
+ "mneme-smt",
+ "rand 0.8.6",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "mneme-pace"
 version = "0.1.0"
 dependencies = [
