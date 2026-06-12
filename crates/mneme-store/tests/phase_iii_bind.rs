@@ -28,17 +28,21 @@ fn setup() -> (TempDir, Store, KeyPair, Capability) {
 #[cfg(not(feature = "phase_iii_bind"))]
 #[test]
 fn bind_external_action_fail_closed_by_default() {
-    if std::hint::black_box(PHASE_III_BIND_ACTION_OPEN) {
-        return;
-    }
+    // The store gates `bind_external_action` on its OWN `phase_iii_bind` feature, so
+    // it must fail closed whenever that feature is off — even if workspace feature
+    // unification transitively opened `mneme-account`'s bind path
+    // (`PHASE_III_BIND_ACTION_OPEN == true`). The previous test skipped that exact
+    // case, hiding the unification hole; assert it unconditionally now.
+    let transitively_open = std::hint::black_box(PHASE_III_BIND_ACTION_OPEN);
     let (_dir, store, operator, cap) = setup();
     let err = store
         .bind_external_action([0xAB; 32], &cap, &operator, None)
         .unwrap_err();
-    assert!(matches!(
-        err,
-        mneme_core::MnemeError::UnsupportedVersion { .. }
-    ));
+    assert!(
+        matches!(err, mneme_core::MnemeError::ProvenanceBroken),
+        "bind must fail closed when the store's phase_iii_bind is off \
+         (transitively_open={transitively_open}); got {err:?}"
+    );
 }
 
 #[cfg(feature = "phase_iii_bind")]
