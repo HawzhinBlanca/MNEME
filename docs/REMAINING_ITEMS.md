@@ -4,6 +4,11 @@ Last updated: 2026-06-11 (`master` @ `28f3cf47`; doc sync after PR #37 P3 local 
 This tracks items beyond the certified single-host v0 core. Each entry states what is
 in-repo, what is gated, and *why* it cannot be marked done without an external input.
 
+> **NEW work order (2026-06-12):** [`docs/WORK_ORDER_EXTERNALIZED_MIND.md`](WORK_ORDER_EXTERNALIZED_MIND.md)
+> — the 5 capability 10X upgrades (ROBR / FCC / TTRP / MTL / RPT), each gated on a runnable
+> proof + tamper suite, honesty-tier labels mandatory. Build cores first; frontiers are honest
+> scaffolds. Spec: [`docs/research/THE_EXTERNALIZED_MIND.md`](research/THE_EXTERNALIZED_MIND.md).
+>
 > **Work order (2026-06-08):** [`docs/WORK_ORDER_DEEP_INSPECTION_2026-06-08.md`](WORK_ORDER_DEEP_INSPECTION_2026-06-08.md).
 > **P0–P2 software scope: 100% complete** on `master` (merged via PR #8 @ `558af8e`;
 > WO-1..WO-20 delivered; `validation-lane.sh quick` + `tamper` + `determinism` green on master).
