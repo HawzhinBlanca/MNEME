@@ -15,13 +15,13 @@ use mneme_core::{ForgetProof, encode_forget_proof};
 use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
 #[cfg(feature = "operator_tools")]
 use mneme_root::{
-    CheckpointLog, RootHistoryPeak, RootHistoryPeakConsistencyProof, RootHistoryPeakDigest,
-    RootHistoryPeakFrontierProof, RootHistoryPeakInclusionProof, RootHistoryPeakState,
-    RootHistoryProofDirection, RootHistoryProofStep, StoredRoot,
+    CheckpointLog, RootHistoryPeakConsistencyProof, RootHistoryPeakDigest,
+    RootHistoryPeakFrontierProof, RootHistoryPeakInclusionProof, RootHistoryProofDirection,
+    RootHistoryProofStep, StoredRoot,
 };
+use mneme_root::{RootHistoryPeak, RootHistoryPeakState};
 use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
-#[cfg(feature = "operator_tools")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "operator_tools")]
 use serde_json::{Value, json};
@@ -60,6 +60,9 @@ enum Commands {
         /// a full-snapshot rollback that is otherwise indistinguishable from disk (§2.4).
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
+        /// External peak-state pin JSON; rejects rollback unless current history extends it.
+        #[arg(long = "pin-peak-state")]
+        pin_peak_state: Option<PathBuf>,
     },
     /// Operator audit: emit root-history/peak digest JSON for a store
     #[cfg(feature = "operator_tools")]
@@ -268,7 +271,6 @@ enum CliErrorKind {
     Kernel(MnemeError),
 }
 
-#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakStateJson {
@@ -280,7 +282,6 @@ struct PeakStateJson {
     peaks: Vec<PeakJson>,
 }
 
-#[cfg(feature = "operator_tools")]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PeakJson {
@@ -428,7 +429,11 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("initialized store at {}", path.display());
             Ok(())
         }
-        Commands::Verify { store, pin_root } => {
+        Commands::Verify {
+            store,
+            pin_root,
+            pin_peak_state,
+        } => {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let trust = TrustConfig::new(operator.public_key_bytes());
@@ -439,6 +444,9 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 if report.root.preimage_hash != expected {
                     return Err(CliErrorKind::VerifyFailed(MnemeError::RootReplayed));
                 }
+            }
+            if let Some(pin_path) = pin_peak_state {
+                verify_store_extends_peak_state_pin(&store, &pin_path, operator, cli.vault)?;
             }
             println!(
                 "verify ok: root seq {} objects {}",
@@ -750,6 +758,33 @@ fn parse_logical_key(key: &str) -> LogicalKey {
     }
 }
 
+fn verify_store_extends_peak_state_pin(
+    store: &Path,
+    pin_path: &Path,
+    operator: KeyPair,
+    vault: VaultArg,
+) -> Result<(), CliErrorKind> {
+    ensure_peak_pin_outside_store(store, pin_path, false)?;
+    let pinned = read_peak_state_json(pin_path)?;
+    let mneme_store = open_store(store, operator, vault).map_err(|err| match err {
+        CliErrorKind::Kernel(e) => CliErrorKind::VerifyFailed(e),
+        other => other,
+    })?;
+    let peak_digest = mneme_store
+        .root_history_peak_digest()
+        .map_err(CliErrorKind::VerifyFailed)?;
+    let proof = mneme_store
+        .root_history_peak_consistency_proof(&pinned)
+        .map_err(CliErrorKind::VerifyFailed)?;
+    mneme_root::verify_root_history_peak_consistency(
+        &mneme_store.trust().operator_keys,
+        &pinned,
+        &peak_digest,
+        &proof,
+    )
+    .map_err(CliErrorKind::VerifyFailed)
+}
+
 #[cfg(feature = "operator_tools")]
 fn run_audit(request: AuditRequest<'_>) -> Result<(), CliErrorKind> {
     if let Some(proof_path) = request.verify_peak_proof {
@@ -1010,7 +1045,7 @@ fn update_peak_state_pin(
     peak_state: &RootHistoryPeakState,
     peak_digest: &RootHistoryPeakDigest,
 ) -> Result<Value, CliErrorKind> {
-    ensure_peak_pin_outside_store(store, path)?;
+    ensure_peak_pin_outside_store(store, path, true)?;
     let existed = path.exists();
     let report = if existed {
         let older = read_peak_state_json(path)?;
@@ -1063,17 +1098,22 @@ fn update_peak_state_pin(
     Ok(report)
 }
 
-#[cfg(feature = "operator_tools")]
-fn ensure_peak_pin_outside_store(store: &Path, path: &Path) -> Result<(), CliErrorKind> {
+fn ensure_peak_pin_outside_store(
+    store: &Path,
+    path: &Path,
+    create_parent: bool,
+) -> Result<(), CliErrorKind> {
     let store = std::fs::canonicalize(store).map_err(|_| CliErrorKind::Usage)?;
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+    if create_parent {
+        std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+    }
     let parent = std::fs::canonicalize(parent).map_err(|_| CliErrorKind::Usage)?;
     if parent.starts_with(&store) {
-        eprintln!("mneme: --pin-peak-state must be outside STORE");
+        eprintln!("mneme: --pin-peak-state must reference a path outside STORE");
         return Err(CliErrorKind::Usage);
     }
     Ok(())
@@ -1220,7 +1260,6 @@ fn write_peak_state_json_atomic(
     Ok(())
 }
 
-#[cfg(feature = "operator_tools")]
 fn read_peak_state_json(path: &Path) -> Result<RootHistoryPeakState, CliErrorKind> {
     require_file_exists(path, "peak state")?;
     let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
@@ -1252,7 +1291,6 @@ fn peak_state_to_json(state: &RootHistoryPeakState) -> PeakStateJson {
     }
 }
 
-#[cfg(feature = "operator_tools")]
 fn peak_state_from_json(parsed: PeakStateJson) -> Result<RootHistoryPeakState, CliErrorKind> {
     if parsed.schema != "mneme.audit.peak_state.v1" {
         return Err(CliErrorKind::Usage);

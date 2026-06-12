@@ -920,7 +920,7 @@ fn audit_pin_peak_state_creates_advances_and_rejects_rollback() {
         .assert()
         .failure()
         .code(2)
-        .stderr(predicate::str::contains("must be outside STORE"));
+        .stderr(predicate::str::contains("outside STORE"));
 
     let output = mneme()
         .args([
