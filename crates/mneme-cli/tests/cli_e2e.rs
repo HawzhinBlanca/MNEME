@@ -974,7 +974,23 @@ fn audit_pin_peak_state_creates_advances_and_rejects_rollback() {
             .assert()
             .failure()
             .code(2)
-            .stderr(predicate::str::contains("outside STORE"));
+            .stderr(predicate::str::contains("not a symlink"));
+
+        let hardlink_pin = dir.path().join("hardlink-root-history-pin.json");
+        fs::hard_link(&inside_pin, &hardlink_pin).expect("hardlink pin fixture");
+        mneme()
+            .args([
+                "--operator-seed",
+                &seed,
+                "audit",
+                store.to_str().unwrap(),
+                "--pin-peak-state",
+                hardlink_pin.to_str().unwrap(),
+            ])
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("hard-linked"));
     }
 
     mneme()

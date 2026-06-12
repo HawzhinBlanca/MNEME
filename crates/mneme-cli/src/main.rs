@@ -1111,7 +1111,8 @@ fn ensure_peak_pin_outside_store(
     if create_parent {
         std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
     }
-    if path.exists() {
+    if let Some(metadata) = existing_peak_pin_metadata(path)? {
+        reject_existing_peak_pin_if_aliased(path, &metadata)?;
         let target = std::fs::canonicalize(path).map_err(|_| CliErrorKind::Usage)?;
         if target.starts_with(&store) {
             eprintln!("mneme: --pin-peak-state must reference a path outside STORE");
@@ -1122,6 +1123,47 @@ fn ensure_peak_pin_outside_store(
     if parent.starts_with(&store) {
         eprintln!("mneme: --pin-peak-state must reference a path outside STORE");
         return Err(CliErrorKind::Usage);
+    }
+    Ok(())
+}
+
+fn existing_peak_pin_metadata(path: &Path) -> Result<Option<std::fs::Metadata>, CliErrorKind> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(CliErrorKind::Usage),
+    }
+}
+
+fn reject_existing_peak_pin_if_aliased(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> Result<(), CliErrorKind> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        eprintln!(
+            "mneme: --pin-peak-state must reference a regular file, not a symlink: {}",
+            path.display()
+        );
+        return Err(CliErrorKind::Usage);
+    }
+    if !file_type.is_file() {
+        eprintln!(
+            "mneme: --pin-peak-state must reference a regular file: {}",
+            path.display()
+        );
+        return Err(CliErrorKind::Usage);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() != 1 {
+            eprintln!(
+                "mneme: --pin-peak-state must not be hard-linked: {}",
+                path.display()
+            );
+            return Err(CliErrorKind::Usage);
+        }
     }
     Ok(())
 }

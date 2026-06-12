@@ -206,7 +206,23 @@ fn default_verify_accepts_external_peak_state_pin_and_rejects_rollback() {
             .assert()
             .failure()
             .code(2)
-            .stderr(predicate::str::contains("outside STORE"));
+            .stderr(predicate::str::contains("not a symlink"));
+
+        let hardlink_pin = dir.path().join("hardlink-peak-state.json");
+        fs::hard_link(&inside_pin, &hardlink_pin).expect("hardlink pin fixture");
+        mneme()
+            .args([
+                "--operator-seed",
+                &seed_hex,
+                "verify",
+                store.to_str().unwrap(),
+                "--pin-peak-state",
+                hardlink_pin.to_str().unwrap(),
+            ])
+            .assert()
+            .failure()
+            .code(2)
+            .stderr(predicate::str::contains("hard-linked"));
     }
 
     Store::create(&rolled_back_store, KeyPair::from_seed(seed)).expect("rolled-back fixture");

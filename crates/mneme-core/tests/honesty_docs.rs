@@ -47,6 +47,7 @@ fn readiness_doc_does_not_self_certify_absolute_readiness() {
         "not an authoritative proof",
         "fresh validation evidence",
         "out-of-band trusted root pin or an external peak-state pin",
+        "regular single-link files, not symlinks or hard links",
         "same-host pin files can still be rolled back",
         "do not prove semantic truth",
         "exact-nearest-neighbor",

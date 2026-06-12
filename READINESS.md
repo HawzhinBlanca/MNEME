@@ -18,7 +18,7 @@ fresh validation evidence.
   `--pin-peak-state` witness for append-only root-history extension.
 - Disk-detectable replay is rejected through the checkpoint log. A full
   self-consistent snapshot rollback still requires an out-of-band trusted root pin or an external peak-state pin.
-- Peak-state pins must live outside the store; same-host pin files can still be rolled back if the store and pin are snapshotted together.
+- Peak-state pins must live outside the store and existing pins must be regular single-link files, not symlinks or hard links; same-host pin files can still be rolled back if the store and pin are snapshotted together.
 - Default product builds hide operator-only `audit`, `init`, and
   `determinism`; operator tools remain behind the `operator_tools` feature.
 - Recall receipts prove integrity, provenance, authorization, and declared
