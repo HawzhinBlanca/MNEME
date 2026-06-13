@@ -66,7 +66,72 @@ echo "==> bypass attempts"
 } >"$BYPASS_LOG"
 append_e2e_filter "$BYPASS_LOG" e2e_bypass_
 
+echo "==> Building mneme CLI binary (with optional root_pace_log feature)"
+cargo build -p mneme-cli --bin mneme --features root_pace_log
+# mneme_ci_init exports CARGO_TARGET_DIR (out/agent-targets/ci-demo-killer); resolve the
+# binary from there rather than the default ./target so the demo runs the binary it just
+# built (with the feature), not a stale default-target one.
+MNEME_BIN="${CARGO_TARGET_DIR:-$ROOT/target}/debug/mneme"
+[[ -x "$MNEME_BIN" ]] || { echo "killer-demo: built binary missing at $MNEME_BIN" >&2; exit 1; }
+
+echo "==> Running end-to-end memory narrative (remember -> recall -> ROBR receipt -> forget+ForgetProof -> hash-chained root pace-log -> Agent Card)"
+STORE_DIR="out/demo/store_e2e"
+rm -rf "$STORE_DIR"
+mkdir -p "out/demo"
+
+# 1. Initialize store
+"$MNEME_BIN" init "$STORE_DIR" \
+  --operator-seed 1111111111111111111111111111111111111111111111111111111111111111
+
+# 2. Remember memory
+"$MNEME_BIN" remember "$STORE_DIR" \
+  --namespace user --name "secret-crd" \
+  --body "confidential-agent-data" \
+  --operator-seed 1111111111111111111111111111111111111111111111111111111111111111
+
+# 3. Recall memory (verified)
+"$MNEME_BIN" recall "$STORE_DIR" \
+  -q "secret-crd" --key "secret-crd" --namespace user --min-tier trusted \
+  --operator-seed 1111111111111111111111111111111111111111111111111111111111111111
+
+# 4. Generate ROBR receipt
+echo "recalled confidential agent data successfully" > out/demo/output_tokens.txt
+"$MNEME_BIN" robr "$STORE_DIR" \
+  --keys "secret-crd" \
+  --namespace user \
+  --min-tier quarantine \
+  --prompt "Retrieve the secret-crd memory" \
+  --weight-measurement "0000000000000000000000000000000000000000000000000000000000000099" \
+  --sampling "model=gpt-4;temp=0" \
+  --output-file out/demo/output_tokens.txt \
+  --out out/demo/robr_receipt.bin \
+  --operator-seed 1111111111111111111111111111111111111111111111111111111111111111
+
+# 5. Offline verify ROBR receipt
+"$MNEME_BIN" verify-robr out/demo/robr_receipt.bin
+
+# 6. Forget the memory, emitting the FCC proof
+"$MNEME_BIN" forget "$STORE_DIR" \
+  --key "user/secret-crd" \
+  --mode shred \
+  --emit-proof out/demo/forget_proof.cbor \
+  --operator-seed 1111111111111111111111111111111111111111111111111111111111111111
+
+# 7. Verify the hash-chained root pace-log (NOT an RFC6962 transparency log: no
+#    inclusion/consistency proofs, single-operator. A derived, rebuildable artifact.)
+"$MNEME_BIN" pace verify "$STORE_DIR/meta/root-pace.log"
+
+# 8. Generate A2A Agent Card
+"$MNEME_BIN" agent-card "$STORE_DIR" \
+  --attestation-endpoint "http://localhost:7845/v1/attest" \
+  --out out/demo/agent.jws \
+  --operator-seed 1111111111111111111111111111111111111111111111111111111111111111
+
+# 9. Verify Agent Card
+"$MNEME_BIN" verify-card out/demo/agent.jws
+
 echo
-echo "killer-demo: OK (§21 Agent-A vs Agent-B + A-DB/A-INJ + bypass harness)"
+echo "killer-demo: OK (§21 Agent-A vs Agent-B + A-DB/A-INJ + bypass harness + end-to-end memory narrative)"
 echo "  transcript: $DEMO_LOG"
 echo "  bypass:     $BYPASS_LOG"
+

@@ -795,3 +795,71 @@ fn pace_calibrate_run_verify_journey() {
         .stdout(predicate::str::contains("pace verify ok"))
         .stderr(predicate::str::contains("post-quantum"));
 }
+
+#[test]
+fn agent_card_sign_and_verify_journey() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let card_path = dir.path().join("agent.jws");
+    let seed = [0x55; 32];
+    let seed_hex = hex::encode(seed);
+
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed_hex,
+            "init",
+            store.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    // 1. Generate agent card
+    mneme()
+        .args([
+            "--operator-seed",
+            &seed_hex,
+            "agent-card",
+            store.to_str().unwrap(),
+            "--attestation-endpoint",
+            "http://localhost:7845/v1/attest",
+            "--out",
+            card_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agent card written"));
+
+    // 2. Verify agent card
+    mneme()
+        .args(["verify-card", card_path.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify-card ok"));
+
+    // 3. Verify agent card with pinned operator public key
+    let operator_pk_hex = hex::encode(KeyPair::from_seed(seed).public_key_bytes());
+    mneme()
+        .args([
+            "verify-card",
+            card_path.to_str().unwrap(),
+            "--operator-pk",
+            &operator_pk_hex,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify-card ok"));
+
+    // 4. Verify agent card with wrong pinned operator public key should fail
+    let wrong_pk_hex = hex::encode([0x99; 32]);
+    mneme()
+        .args([
+            "verify-card",
+            card_path.to_str().unwrap(),
+            "--operator-pk",
+            &wrong_pk_hex,
+        ])
+        .assert()
+        .failure()
+        .code(4);
+}

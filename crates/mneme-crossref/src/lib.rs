@@ -20,6 +20,9 @@ pub mod wire_cap;
 pub mod wire_cert;
 pub mod wire_complete_knn;
 pub mod wire_context_lock;
+pub mod wire_forget_proof;
+pub mod wire_pace;
+pub mod wire_robr;
 pub mod wire_root;
 
 pub use error::CrossrefError;

@@ -70,6 +70,8 @@ struct RememberResponse {
 #[derive(Serialize)]
 struct RecallResponse {
     entries: Vec<RecallEntryJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    robr_receipt_b64: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -82,6 +84,8 @@ struct RecallEntryJson {
 #[derive(Serialize)]
 struct ForgetResponse {
     root_hash_hex: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proof_cbor_b64: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -222,22 +226,67 @@ async fn recall(
     let entries = store
         .recall_verified_default(&query, &cap)
         .map_err(ApiError::from_mneme)?;
-    let entries = entries
+
+    let mut robr_receipt_b64 = None;
+    if let (Some(prompt), Some(weight_hex), Some(sampling), Some(output_hex)) = (
+        &params.prompt,
+        &params.weight_measurement_hex,
+        &params.sampling_params,
+        &params.output_token_commit_hex,
+    ) {
+        let mut weight = [0u8; 32];
+        hex::decode_to_slice(weight_hex, &mut weight)
+            .map_err(|_| ApiError::bad_request("invalid weight_measurement_hex"))?;
+        let mut output_commit = [0u8; 32];
+        hex::decode_to_slice(output_hex, &mut output_commit)
+            .map_err(|_| ApiError::bad_request("invalid output_token_commit_hex"))?;
+
+        let mut context_entries = Vec::new();
+        for e in &entries {
+            context_entries.push((e.id.0, e.plaintext.clone()));
+        }
+        let receipt_wire = store
+            .create_robr_receipt(
+                prompt,
+                weight,
+                sampling.clone(),
+                &context_entries,
+                output_commit,
+            )
+            .map_err(ApiError::from_mneme)?;
+        use base64::Engine as _;
+        robr_receipt_b64 = Some(base64::engine::general_purpose::STANDARD.encode(receipt_wire));
+    }
+
+    let entries_json = entries
         .into_iter()
         .map(recall_entry_json)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Json(RecallResponse { entries }))
+    Ok(Json(RecallResponse {
+        entries: entries_json,
+        robr_receipt_b64,
+    }))
 }
 
 #[derive(Deserialize)]
 struct RecallParams {
     min_tier: Option<String>,
+    prompt: Option<String>,
+    weight_measurement_hex: Option<String>,
+    sampling_params: Option<String>,
+    output_token_commit_hex: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ForgetQueryParams {
+    emit_proof: Option<bool>,
 }
 
 async fn forget(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((namespace, name)): Path<(String, String)>,
+    axum::extract::Query(params): axum::extract::Query<ForgetQueryParams>,
 ) -> Result<Json<ForgetResponse>, ApiError> {
     let cap = auth_cap(&headers)?;
     check_rate_limit(&state, &cap)?;
@@ -246,15 +295,27 @@ async fn forget(
         .store
         .lock()
         .map_err(|_| ApiError::internal("store lock poisoned"))?;
-    let (_tomb, root) = store
-        .forget(
-            ForgetTarget::LogicalKey(LogicalKey { namespace, name }),
-            &cap,
-            ForgetMode::Shred,
-        )
-        .map_err(ApiError::from_mneme)?;
+    let key = LogicalKey { namespace, name };
+
+    let mut proof_cbor_b64 = None;
+    let root = if params.emit_proof.unwrap_or(false) {
+        let proven = store
+            .forget_with_proof(ForgetTarget::LogicalKey(key), &cap, ForgetMode::Shred, None)
+            .map_err(ApiError::from_mneme)?;
+        let proof_bytes = encode_forget_proof(&proven.proof).map_err(ApiError::from_mneme)?;
+        use base64::Engine as _;
+        proof_cbor_b64 = Some(base64::engine::general_purpose::STANDARD.encode(proof_bytes));
+        proven.root
+    } else {
+        let (_tomb, root) = store
+            .forget(ForgetTarget::LogicalKey(key), &cap, ForgetMode::Shred)
+            .map_err(ApiError::from_mneme)?;
+        root
+    };
+
     Ok(Json(ForgetResponse {
         root_hash_hex: hex::encode(root.preimage_hash),
+        proof_cbor_b64,
     }))
 }
 

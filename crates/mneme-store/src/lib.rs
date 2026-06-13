@@ -983,11 +983,75 @@ impl Store {
         // the lean default so remember/forget stay O(1) on the write path.
         #[cfg(feature = "bitemporal_recall")]
         layout::snapshot_key_index_at_seq(&self.path, self.sequence, self)?;
+
+        // Optional hash-chained root pace-log. HONESTY: this is a BLAKE3-sequential
+        // pace log (mneme-pace) whose segment labels carry "seq:root_preimage" — it is
+        // NOT an RFC6962 transparency log: it has no Merkle inclusion/consistency proofs
+        // and, being single-operator, does not prevent equivocation. It is a derived,
+        // rebuildable artifact (every root is already in the signed checkpoint log). It
+        // rewrites the whole CBOR file per commit (O(n)), so it is gated OFF by default
+        // to keep the lean write path O(1); enable with the `root_pace_log` feature.
+        #[cfg(feature = "root_pace_log")]
+        self.append_root_pace_log(&self.roots[self.roots.len() - 1])?;
+
+        Ok(())
+    }
+
+    /// Crash-safe append of the just-committed root to the optional pace-log
+    /// (`meta/root-pace.log`). Written via a `.incomplete` temp + atomic rename so a
+    /// crash mid-write never leaves a torn log. Mirrors the post-`write_head` pattern
+    /// used by the bitemporal snapshot: the root is already durable, so this runs last.
+    #[cfg(feature = "root_pace_log")]
+    fn append_root_pace_log(&self, root: &Root) -> Result<(), MnemeError> {
+        let log_path = self.path.join("meta/root-pace.log");
+        let mut log = if log_path.exists() {
+            let bytes = std::fs::read(&log_path).map_err(|_| MnemeError::IndexPathInvalid)?;
+            mneme_pace::load_log(&bytes)?
+        } else {
+            let cal = mneme_pace::PaceCalibration {
+                alg: mneme_pace::PACE_ALG_BLAKE3_SEQUENTIAL,
+                iterations_per_tick: 10,
+                tick_target_ms: 1,
+            };
+            mneme_pace::create_log(self.operator.public_key_bytes(), cal)
+                .map_err(|e| e.to_mneme())?
+        };
+        let label = Some(format!(
+            "{}:{}",
+            root.sequence,
+            hex::encode(root.preimage_hash)
+        ));
+        let iters = log.calibration.iterations_per_tick;
+        mneme_pace::append_segment(&mut log, iters, label).map_err(|e| e.to_mneme())?;
+        let bytes = mneme_pace::save_log(&log)?;
+        let tmp_path = self.path.join("meta/root-pace.log.incomplete");
+        std::fs::write(&tmp_path, bytes).map_err(|_| MnemeError::IndexPathInvalid)?;
+        std::fs::rename(&tmp_path, &log_path).map_err(|_| MnemeError::IndexPathInvalid)?;
         Ok(())
     }
 
     fn commit_root(&mut self) -> Result<(), MnemeError> {
         self.commit_root_inner()
+    }
+
+    pub fn create_robr_receipt(
+        &self,
+        prompt: &str,
+        weight_measurement: [u8; 32],
+        sampling: String,
+        context: &[([u8; 32], Vec<u8>)],
+        output_commit: [u8; 32],
+    ) -> Result<Vec<u8>, MnemeError> {
+        let root = self.current_root()?;
+        mneme_account::robr::mint_robr_receipt(
+            &self.operator,
+            &root,
+            prompt,
+            weight_measurement,
+            sampling,
+            context,
+            output_commit,
+        )
     }
 
     fn verify_cap(&self, cap: &Capability) -> Result<(), MnemeError> {

@@ -3,6 +3,8 @@
 #![forbid(unsafe_code)]
 #![deny(warnings)]
 
+pub mod robr;
+
 #[cfg(any(not(feature = "phase_iii_bind_action"), test))]
 use mneme_core::ACTION_RECEIPT_VERSION;
 #[cfg(any(not(feature = "phase_iii_prove_forget"), test))]

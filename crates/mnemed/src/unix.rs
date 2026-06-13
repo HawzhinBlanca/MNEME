@@ -101,12 +101,22 @@ pub enum KernelRequest {
         cap_b64: String,
         namespace: String,
         name: String,
+        #[serde(default)]
+        prompt: Option<String>,
+        #[serde(default)]
+        weight_measurement_hex: Option<String>,
+        #[serde(default)]
+        sampling_params: Option<String>,
+        #[serde(default)]
+        output_token_commit_hex: Option<String>,
     },
     Forget {
         cap_b64: String,
         namespace: String,
         name: String,
         mode: String,
+        #[serde(default)]
+        emit_proof: Option<bool>,
     },
     ForgetProof {
         cap_b64: String,
@@ -673,13 +683,29 @@ fn dispatch_inner(state: &AppState, req: KernelRequest) -> Result<serde_json::Va
             cap_b64,
             namespace,
             name,
-        } => recall(state, &cap_b64, namespace, name),
+            prompt,
+            weight_measurement_hex,
+            sampling_params,
+            output_token_commit_hex,
+        } => recall(
+            state,
+            &cap_b64,
+            namespace,
+            name,
+            RobrRecallParams {
+                prompt,
+                weight_measurement_hex,
+                sampling_params,
+                output_token_commit_hex,
+            },
+        ),
         KernelRequest::Forget {
             cap_b64,
             namespace,
             name,
             mode,
-        } => forget(state, &cap_b64, namespace, name, mode),
+            emit_proof,
+        } => forget(state, &cap_b64, namespace, name, mode, emit_proof),
         KernelRequest::ForgetProof {
             cap_b64,
             namespace,
@@ -718,6 +744,13 @@ fn invalid_logical_key_error() -> MnemeError {
 fn decode_unix_body_b64(body_b64: &str) -> Result<Vec<u8>, MnemeError> {
     base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body_b64.trim())
         .map_err(|_| unix_kernel_failure_to_mneme(UnixKernelFailure::BodyBase64Decode))
+}
+
+fn decode_unix_hex32(hex_str: &str) -> Result<[u8; 32], MnemeError> {
+    let mut out = [0u8; 32];
+    hex::decode_to_slice(hex_str, &mut out)
+        .map_err(|_| unix_kernel_failure_to_mneme(UnixKernelFailure::BodyBase64Decode))?;
+    Ok(out)
 }
 
 fn decode_unix_sync_frame_b64(bytes_b64: &str) -> Result<SyncMessage, MnemeError> {
@@ -785,11 +818,22 @@ fn remember(
     }))
 }
 
+/// Optional ROBR-1 binding-receipt inputs carried on a recall request. When all four
+/// are present, the recall emits a signed receipt bound to the verified context.
+#[derive(Default)]
+struct RobrRecallParams {
+    prompt: Option<String>,
+    weight_measurement_hex: Option<String>,
+    sampling_params: Option<String>,
+    output_token_commit_hex: Option<String>,
+}
+
 fn recall(
     state: &AppState,
     cap_b64: &str,
     namespace: String,
     name: String,
+    robr: RobrRecallParams,
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
@@ -800,7 +844,36 @@ fn recall(
         embedding: None,
     };
     let entries = store.recall_verified_default(&query, &cap)?;
-    Ok(serde_json::json!({ "count": entries.len() }))
+
+    let mut robr_receipt_b64 = None;
+    if let (Some(prompt), Some(weight_hex), Some(sampling), Some(output_hex)) = (
+        &robr.prompt,
+        &robr.weight_measurement_hex,
+        &robr.sampling_params,
+        &robr.output_token_commit_hex,
+    ) {
+        let weight = decode_unix_hex32(weight_hex)?;
+        let output_commit = decode_unix_hex32(output_hex)?;
+
+        let mut context_entries = Vec::new();
+        for e in &entries {
+            context_entries.push((e.id.0, e.plaintext.clone()));
+        }
+        let receipt_wire = store.create_robr_receipt(
+            prompt,
+            weight,
+            sampling.clone(),
+            &context_entries,
+            output_commit,
+        )?;
+        use base64::Engine as _;
+        robr_receipt_b64 = Some(base64::engine::general_purpose::STANDARD.encode(receipt_wire));
+    }
+
+    Ok(serde_json::json!({
+        "count": entries.len(),
+        "robr_receipt_b64": robr_receipt_b64,
+    }))
 }
 
 fn forget(
@@ -809,6 +882,7 @@ fn forget(
     namespace: String,
     name: String,
     mode: String,
+    emit_proof: Option<bool>,
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
@@ -819,8 +893,25 @@ fn forget(
     };
     let mut store = lock_unix_store(state, "forget")?;
     let key = LogicalKey { namespace, name };
-    store.forget(ForgetTarget::LogicalKey(key), &cap, forget_mode)?;
-    Ok(serde_json::json!({ "forgot": true }))
+
+    let mut proof_cbor_b64 = None;
+    let root = if emit_proof.unwrap_or(false) {
+        let proven =
+            store.forget_with_proof(ForgetTarget::LogicalKey(key), &cap, forget_mode, None)?;
+        let proof_bytes = encode_forget_proof(&proven.proof)?;
+        use base64::Engine as _;
+        proof_cbor_b64 = Some(base64::engine::general_purpose::STANDARD.encode(proof_bytes));
+        proven.root
+    } else {
+        let (_tomb, root) = store.forget(ForgetTarget::LogicalKey(key), &cap, forget_mode)?;
+        root
+    };
+
+    Ok(serde_json::json!({
+        "forgot": true,
+        "root_hash_hex": hex::encode(root.preimage_hash),
+        "proof_cbor_b64": proof_cbor_b64,
+    }))
 }
 
 fn forget_proof(

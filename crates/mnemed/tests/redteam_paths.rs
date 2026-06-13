@@ -265,6 +265,10 @@ async fn expect_unix_response(sock: &PathBuf, cap_b64: String, context: &str) ->
             cap_b64,
             namespace: "unix".into(),
             name: "adb".into(),
+            prompt: None,
+            weight_measurement_hex: None,
+            sampling_params: None,
+            output_token_commit_hex: None,
         },
     )
     .await

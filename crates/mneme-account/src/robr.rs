@@ -1,7 +1,7 @@
 //! ROBR — Recall-to-Output Binding Receipt (capability 1, task ROBR-1: the envelope).
 //!
-//! `mneme robr receipt` emits a signed, offline-verifiable envelope that binds a model
-//! output commitment to the EXACT inputs that produced it:
+//! A signed, offline-verifiable envelope that binds a model output commitment to the
+//! EXACT inputs that produced it:
 //!
 //!   envelope = H( memory_root ‖ prompt ‖ weight_measurement ‖ sampling_params ‖ context )
 //!   receipt  = sig_operator( envelope ‖ output_token_commit ‖ … )
@@ -20,11 +20,11 @@
 //!   only under a TEE measurement (ROBR-4). And it NEVER proves semantic truth —
 //!   authenticated != true.
 //!
-//! Wire: deterministic length-prefixed v1 layout reusing the strict fail-closed reader
-//! from [`crate::replay`] (unknown version, length mismatch, or trailing bytes ⇒ typed
-//! error). The signature covers the full payload.
+//! Relocated from mneme-cli to mneme-account so the store kernel can mint receipts
+//! (`Store::create_robr_receipt`). Self-contained strict fail-closed wire: unknown
+//! version, length mismatch, or trailing bytes ⇒ typed error; the signature covers the
+//! full payload.
 
-use crate::replay::{Reader, put_id_list, put_str};
 use mneme_core::MnemeError;
 use mneme_crypto::{KeyPair, sign_message, verify_signature_bytes, verifying_key_from_bytes};
 
@@ -72,8 +72,7 @@ pub struct RobrReceiptV1 {
     pub sig: [u8; 64],
 }
 
-/// Chained context hash over (id, body) pairs in recall order. Distinct domain tag
-/// from CCR so a context hash from one protocol can never be replayed as the other.
+/// Chained context hash over (id, body) pairs in recall order.
 pub fn context_hash(entries: &[([u8; 32], Vec<u8>)]) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
     h.update(CONTEXT_DOMAIN);
@@ -86,9 +85,7 @@ pub fn context_hash(entries: &[([u8; 32], Vec<u8>)]) -> [u8; 32] {
     *h.finalize().as_bytes()
 }
 
-/// The binding envelope. This is the load-bearing relation ROBR asserts: the output
-/// commitment is bound to exactly these inputs. Any change to root, prompt, weights,
-/// sampling, or context changes the envelope and the receipt no longer verifies.
+/// The binding envelope.
 pub fn envelope_hash(
     root_preimage: &[u8; 32],
     prompt_hash: &[u8; 32],
@@ -168,9 +165,6 @@ impl RobrReceiptV1 {
     }
 
     /// Strict fail-closed decode + signature + envelope-consistency verification.
-    ///
-    /// `pinned_pk`: optional out-of-band operator public key; if provided it must match
-    /// the embedded key.
     pub fn verify(wire: &[u8], pinned_pk: Option<&[u8; 32]>) -> Result<Self, MnemeError> {
         let mut r = Reader::new(wire);
         r.expect(PAYLOAD_DOMAIN)?;
@@ -200,9 +194,6 @@ impl RobrReceiptV1 {
         let vk = verifying_key_from_bytes(&operator_pk)?;
         verify_signature_bytes(&vk, &wire[..payload_len], &sig)?;
 
-        // Internal consistency: the carried envelope MUST equal the envelope recomputed
-        // from the bound inputs. A signed-but-inconsistent receipt (e.g. envelope that
-        // does not match the declared root/prompt/weights/sampling/context) is rejected.
         let recomputed = envelope_hash(
             &root_preimage,
             &prompt_hash,
@@ -228,6 +219,108 @@ impl RobrReceiptV1 {
             sig,
         })
     }
+}
+
+/// Strict cursor: every read is bounds-checked; trailing bytes are rejected.
+struct Reader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+    fn consumed(&self) -> usize {
+        self.pos
+    }
+    fn take(&mut self, n: usize) -> Result<&'a [u8], MnemeError> {
+        let end = self.pos.checked_add(n).ok_or(MnemeError::SchemaDrift)?;
+        let s = self.buf.get(self.pos..end).ok_or(MnemeError::SchemaDrift)?;
+        self.pos = end;
+        Ok(s)
+    }
+    fn take_arr<const N: usize>(&mut self) -> Result<[u8; N], MnemeError> {
+        let s = self.take(N)?;
+        let mut out = [0u8; N];
+        out.copy_from_slice(s);
+        Ok(out)
+    }
+    fn expect(&mut self, tag: &[u8]) -> Result<(), MnemeError> {
+        if self.take(tag.len())? != tag {
+            return Err(MnemeError::SchemaDrift);
+        }
+        Ok(())
+    }
+    fn take_str(&mut self) -> Result<String, MnemeError> {
+        let len = u16::from_le_bytes(self.take_arr::<2>()?);
+        let bytes = self.take(usize::from(len))?;
+        String::from_utf8(bytes.to_vec()).map_err(|_| MnemeError::SchemaDrift)
+    }
+    fn take_id_list(&mut self) -> Result<Vec<[u8; 32]>, MnemeError> {
+        let len = u16::from_le_bytes(self.take_arr::<2>()?);
+        let mut out = Vec::with_capacity(usize::from(len));
+        for _ in 0..len {
+            out.push(self.take_arr::<32>()?);
+        }
+        Ok(out)
+    }
+    fn expect_end(&self) -> Result<(), MnemeError> {
+        if self.pos != self.buf.len() {
+            return Err(MnemeError::SchemaDrift);
+        }
+        Ok(())
+    }
+}
+
+fn put_str(out: &mut Vec<u8>, s: &str) -> Result<(), MnemeError> {
+    let b = s.as_bytes();
+    let len: u16 = b.len().try_into().map_err(|_| MnemeError::SchemaDrift)?;
+    out.extend_from_slice(&len.to_le_bytes());
+    out.extend_from_slice(b);
+    Ok(())
+}
+
+fn put_id_list(out: &mut Vec<u8>, ids: &[[u8; 32]]) -> Result<(), MnemeError> {
+    let len: u16 = ids.len().try_into().map_err(|_| MnemeError::SchemaDrift)?;
+    out.extend_from_slice(&len.to_le_bytes());
+    for id in ids {
+        out.extend_from_slice(id);
+    }
+    Ok(())
+}
+
+pub fn mint_robr_receipt(
+    operator: &KeyPair,
+    root: &mneme_core::Root,
+    prompt: &str,
+    weight_measurement: [u8; 32],
+    sampling: String,
+    context: &[([u8; 32], Vec<u8>)],
+    output_commit: [u8; 32],
+) -> Result<Vec<u8>, MnemeError> {
+    let ctx_hash = context_hash(context);
+    let env = envelope_hash(
+        &root.preimage_hash,
+        blake3::hash(prompt.as_bytes()).as_bytes(),
+        &weight_measurement,
+        &sampling,
+        &ctx_hash,
+    );
+    let receipt = RobrReceiptV1 {
+        root_seq: root.sequence,
+        root_preimage: root.preimage_hash,
+        prompt_hash: *blake3::hash(prompt.as_bytes()).as_bytes(),
+        weight_measurement,
+        sampling_params: sampling,
+        context_ids: context.iter().map(|(id, _)| *id).collect(),
+        context_hash: ctx_hash,
+        envelope_hash: env,
+        output_token_commit: output_commit,
+        operator_pk: operator.public_key_bytes(),
+        sig: [0u8; 64],
+    };
+    receipt.sign_and_encode(operator)
 }
 
 #[cfg(test)]
@@ -483,5 +576,108 @@ mod tests {
             !replay_reproduces_output(&c),
             "changing a bound input must break replay even with a consistent envelope"
         );
+    }
+
+    #[test]
+    fn mint_robr_receipt_roundtrips_through_verify() {
+        // The store-kernel mint path (`mint_robr_receipt`) produces a wire that verifies
+        // and whose carried fields match the inputs.
+        let op = KeyPair::from_seed([7u8; 32]);
+        let root = mneme_core::Root {
+            version: 1,
+            preimage_hash: [0x33; 32],
+            dag_head_root: [0; 32],
+            key_index_root: [0; 32],
+            semantic_commit: [0; 32],
+            hlc_max: [0; 14],
+            prev_root: [0; 32],
+            signature: Vec::new(),
+            sequence: 5,
+        };
+        let ctx = vec![([0x44u8; 32], b"ctx body".to_vec())];
+        let output_commit = *blake3::hash(b"out").as_bytes();
+        let wire = mint_robr_receipt(
+            &op,
+            &root,
+            "the prompt",
+            [0x99; 32],
+            "model=x;temp=0".to_string(),
+            &ctx,
+            output_commit,
+        )
+        .expect("mint");
+        let r = RobrReceiptV1::verify(&wire, Some(&op.public_key_bytes())).expect("verify");
+        assert_eq!(r.root_seq, 5);
+        assert_eq!(r.root_preimage, [0x33; 32]);
+        assert_eq!(r.output_token_commit, output_commit);
+        assert_eq!(r.prompt_hash, *blake3::hash(b"the prompt").as_bytes());
+    }
+
+    /// Regenerates the committed cross-implementation vectors under `proof/vectors/`.
+    /// Ignored in normal runs (it writes into the source tree and assumes CWD = crate
+    /// dir); run with `cargo test -p mneme-account -- --ignored generate_crossref_vectors`
+    /// when the wire format changes. The committed vectors are independently re-verified
+    /// by `mneme-crossref` (which imports no `mneme-*` crate).
+    #[test]
+    #[ignore = "writes vectors into the source tree; run explicitly to regenerate"]
+    fn generate_crossref_vectors() {
+        let operator = KeyPair::from_seed([9u8; 32]);
+        let pk = operator.public_key_bytes();
+
+        // 1. Generate ROBR Receipt Vector
+        let context_entry_id = [0x11u8; 32];
+        let context_entry_body = b"hello crossref".to_vec();
+        let ctx = vec![(context_entry_id, context_entry_body)];
+        let ctx_hash = context_hash(&ctx);
+        let root_preimage = [0xab; 32];
+        let prompt_hash = *blake3::hash(b"test prompt").as_bytes();
+        let weight_measurement = [0xcd; 32];
+        let sampling = "model=crossref-v1;temp=0".to_string();
+        let env = envelope_hash(
+            &root_preimage,
+            &prompt_hash,
+            &weight_measurement,
+            &sampling,
+            &ctx_hash,
+        );
+        let robr_receipt = RobrReceiptV1 {
+            root_seq: 42,
+            root_preimage,
+            prompt_hash,
+            weight_measurement,
+            sampling_params: sampling,
+            context_ids: vec![context_entry_id],
+            context_hash: ctx_hash,
+            envelope_hash: env,
+            output_token_commit: *blake3::hash(b"test output").as_bytes(),
+            operator_pk: pk,
+            sig: [0; 64],
+        };
+        let robr_bytes = robr_receipt.sign_and_encode(&operator).unwrap();
+        std::fs::write("../../proof/vectors/robr_vector_v1.bin", &robr_bytes).unwrap();
+
+        // 2. Generate PaceLog Vector
+        let cal = mneme_pace::PaceCalibration {
+            alg: mneme_pace::PACE_ALG_BLAKE3_SEQUENTIAL,
+            iterations_per_tick: 10,
+            tick_target_ms: 1,
+        };
+        let mut log = mneme_pace::create_log(pk, cal).unwrap();
+        mneme_pace::append_segment(&mut log, 10, Some("root-seq-42".to_string())).unwrap();
+        let log_bytes = mneme_pace::save_log(&log).unwrap();
+        std::fs::write("../../proof/vectors/pace_log_vector_v1.cbor", &log_bytes).unwrap();
+
+        // 3. Generate ForgetProof Vector
+        let fp = mneme_core::ForgetProof {
+            version: mneme_core::FORGET_PROOF_VERSION,
+            target_commit: [0x55; 32],
+            mode: mneme_core::ForgetMode::Shred,
+            shred_commit: [0x66; 32],
+            absence_path: vec![[0x77; 32]; 256],
+            root_bound: [0x88; 32],
+            cognition_cert_commit: None,
+        };
+        let fp_bytes = mneme_core::encode_forget_proof(&fp).unwrap();
+        std::fs::write("../../proof/vectors/forget_proof_vector_v1.cbor", &fp_bytes).unwrap();
     }
 }
