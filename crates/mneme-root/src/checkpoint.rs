@@ -38,6 +38,20 @@ impl CheckpointLog {
         StoredRoot::from_bytes(&bytes)
     }
 
+    /// Read an optional checkpoint without following aliases. Missing means the
+    /// checkpoint entry is absent; a symlink or malformed present entry still fails
+    /// closed.
+    pub fn try_read_checkpoint(
+        store: &Path,
+        sequence: u64,
+    ) -> Result<Option<StoredRoot>, MnemeError> {
+        let path = checkpoint_path(store, sequence);
+        if !atomic::entry_exists(&path)? {
+            return Ok(None);
+        }
+        Self::read_checkpoint(store, sequence).map(Some)
+    }
+
     /// Persist checkpoint then atomically update HEAD (store commit order).
     pub fn commit(store: &Path, root: &StoredRoot) -> Result<(), MnemeError> {
         Self::append(store, root)?;

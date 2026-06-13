@@ -130,6 +130,17 @@ fn verify_store_object_filename_rejection_is_named_not_schema_collapsed() {
         "object path failures should keep a focused classifier regression test"
     );
 
+    let root_load_sites = source_between_markers(&store, "fn read_head(", "fn io_err(");
+    assert!(
+        root_load_sites.contains("CheckpointLog::read_head(path)")
+            && root_load_sites.contains("CheckpointLog::try_read_checkpoint(path"),
+        "verify_store root loading should delegate to mneme-root no-follow checkpoint readers"
+    );
+    assert!(
+        !root_load_sites.contains("fs::read("),
+        "verify_store root loading must not use raw path-following fs::read"
+    );
+
     let load_error_sites = source_between_markers(&store, "fn load_previous_root(", "fn io_err(");
     assert!(
         !load_error_sites.contains("MnemeError::SchemaDrift"),

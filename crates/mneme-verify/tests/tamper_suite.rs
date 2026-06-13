@@ -1856,6 +1856,35 @@ fn tamper_verify_signed_head_only_signature_only_rootsiginvalid() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn tamper_verify_store_rejects_symlinked_head_without_following_target() {
+    let (dir, trust) = persisted_store_with_entry();
+    let head = dir.path().join("roots/HEAD");
+    let external = dir.path().join("external-head.cbor");
+    std::fs::rename(&head, &external).expect("move HEAD fixture");
+    std::os::unix::fs::symlink(&external, &head).expect("HEAD symlink");
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        verify_store(dir.path(), &trust)
+    }));
+
+    assert!(result.is_ok(), "verify_store panicked on symlinked HEAD");
+    match result.expect("panic checked") {
+        Err(MnemeError::IoFailed { .. }) => {}
+        Err(err) => panic!("expected IO failure for symlinked HEAD, got {err:?}"),
+        Ok(_) => panic!("verify_store followed a symlinked HEAD to valid external bytes"),
+    }
+    assert!(
+        std::fs::symlink_metadata(&head)
+            .expect("HEAD symlink metadata")
+            .file_type()
+            .is_symlink(),
+        "failed verification must not replace the symlink"
+    );
+    assert!(external.exists(), "external HEAD target must remain intact");
+}
+
 /// F-3: a tampered NON-adjacent intermediate checkpoint (`roots/1.root.cbor` while
 /// HEAD is seq 3) must now fail closed; previously only HEAD's `seq-1` predecessor
 /// was re-verified, so this left `verify_store == Ok`.

@@ -3,10 +3,8 @@ use mneme_core::{MnemeError, ObjectRecord, Root, from_bytes_strict, hash_obj};
 use mneme_crypto::TrustConfig;
 use mneme_dag::load_content_addressed_objects;
 use mneme_index::{load_key_index_tree, load_semantic_commit};
-use mneme_root::StoredRoot;
+use mneme_root::{CheckpointLog, StoredRoot};
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::ErrorKind;
 use std::path::Path;
 
 /// Stand-alone store verifier report (§7 `verify_store`, boot-time / CI gate).
@@ -120,21 +118,14 @@ fn verified_object_count(objects: &BTreeMap<[u8; 32], Vec<u8>>) -> usize {
 }
 
 fn read_head(path: &Path) -> Result<StoredRoot, MnemeError> {
-    let head_path = path.join("roots/HEAD");
-    let bytes = fs::read(&head_path).map_err(|e| io_err(&head_path, e))?;
-    StoredRoot::from_bytes(&bytes)
+    CheckpointLog::read_head(path)
 }
 
 fn load_previous_root(path: &Path, sequence: u64) -> Result<Option<Root>, MnemeError> {
     if sequence <= 1 {
         return Ok(None);
     }
-    let prev_path = path.join(format!("roots/{}.root.cbor", sequence - 1));
-    match fs::read(&prev_path) {
-        Ok(bytes) => Ok(Some(StoredRoot::from_bytes(&bytes)?.to_root())),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(io_err(&prev_path, err)),
-    }
+    Ok(CheckpointLog::try_read_checkpoint(path, sequence - 1)?.map(|stored| stored.to_root()))
 }
 
 fn io_err(path: &Path, err: std::io::Error) -> MnemeError {
