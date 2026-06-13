@@ -99,6 +99,19 @@ deletion-capacity (Sekhari NeurIPS'21) + ZK proof-of-unlearning (Eisenhofer'25).
   field `tier_achieved ∈ {T1, T1+T2}` is mandatory and signed. **Proof:** after forget, T1 absence
   verifies AND T2 shows the record absent from the re-rooted index (membership query fails closed);
   tamper suite forging any tier rejects; cert states tier explicitly.
+  - **✅ LANDED (cert framework + storage-erasure tiers).** `fcc` module:
+    `ForgettingClosureCertV1::from_forget_proof` builds a signed cert over a real
+    `ForgetProof`; mandatory `tier_achieved` is **re-derived at verify** from the carried
+    evidence and an overclaimed tier is rejected even when signed. Tiers as shipped:
+    **T1 = crypto-shred** (wrapping key destroyed), **T2 = crypto-shred + proof-of-absence**
+    bound to the signed root. `mneme fcc` / `mneme verify-fcc`. **Proof:** unit (T2
+    round-trip, T1 when no absence, redact-without-shred has no closure, overclaim
+    rejected even if signed, every-byte-flip, truncation/trailing, wrong-pinned-pk) +
+    e2e (shred→T2 cert→offline verify; tamper fails closed exit 4; missing key fails
+    closed). **DEFERRED:** the work-order's distinct "T2 = retrieval-erasure from the
+    authenticated ANN/HNSW index via re-rooting" proof is NOT yet implemented — the
+    shipped T2 is storage-erasure (shred + absence), not ANN-index-removal. Honesty
+    (`FCC_HONESTY`): substrate deletion ≠ model unlearning (FCC-3/T3 frontier).
 - **FCC-2 `[CORE/conditional]` — T3(a) DP-influence bound.** If (and only if) the model was trained
   under DP, emit a `(ε,δ)` influence-bound tier; otherwise emit `tier_achieved` unchanged with an
   explicit `T3: not-applicable (model not DP-trained)`. **Proof:** the cert never claims T3 without a
