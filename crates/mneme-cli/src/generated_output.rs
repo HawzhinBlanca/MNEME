@@ -83,6 +83,7 @@ fn write_file_from_nonces(
     data: &[u8],
     next_nonce: impl FnMut() -> u64,
 ) -> Result<(), GeneratedOutputError> {
+    reject_parent_alias(path)?;
     validate_path(path)?;
     let (tmp_path, mut file) = create_tmp_file_from_nonces(path, next_nonce)?;
     let result = (|| {
@@ -145,6 +146,7 @@ fn sync_parent_dir(path: &Path) -> Result<(), GeneratedOutputError> {
             if parent.as_os_str().is_empty() {
                 return Ok(());
             }
+            reject_dir_alias(parent)?;
             File::open(parent)?.sync_all()?;
         }
         Ok(())
@@ -153,6 +155,32 @@ fn sync_parent_dir(path: &Path) -> Result<(), GeneratedOutputError> {
     {
         let _ = path;
         Ok(())
+    }
+}
+
+fn reject_parent_alias(path: &Path) -> Result<(), GeneratedOutputError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            reject_dir_alias(parent)?;
+        }
+    }
+    Ok(())
+}
+
+fn reject_dir_alias(dir: &Path) -> Result<(), GeneratedOutputError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(GeneratedOutputError::Symlink);
+            }
+            if !file_type.is_dir() {
+                return Err(GeneratedOutputError::NotRegularFile);
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 
@@ -211,6 +239,38 @@ mod tests {
                 .file_type()
                 .is_symlink(),
             "failed tmp collision must leave the preexisting symlink untouched"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_file_rejects_symlinked_parent_without_writing_external_output() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-output-parent");
+        let parent = dir.path().join("linked-output-parent");
+        fs::create_dir(&external).expect("external output parent target");
+        std::os::unix::fs::symlink(&external, &parent).expect("output parent symlink");
+
+        let err = write_file(&parent.join("proof.cbor"), b"proof")
+            .expect_err("generated output writer should reject a symlinked parent");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::read_dir(&external)
+                .expect("external parent read")
+                .next()
+                .is_none(),
+            "generated output writer must not create temp or output files through a symlinked parent"
+        );
+        assert!(
+            fs::symlink_metadata(&parent)
+                .expect("parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed generated output write must leave the symlinked parent for explicit repair"
         );
     }
 }
