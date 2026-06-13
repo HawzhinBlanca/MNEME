@@ -163,3 +163,89 @@ fn robr_missing_key_fails_closed() {
         .assert()
         .failure();
 }
+
+#[test]
+fn robr2_reference_kernel_receipt_replay_verifies() {
+    // ROBR-2: a reference-kernel receipt re-executes to the same committed output.
+    let dir = tempdir().expect("tempdir");
+    let store = dir.path().join("store");
+    let store_s = store.to_str().expect("path");
+    let cert = dir.path().join("robr2.bin");
+    let cert_s = cert.to_str().expect("path");
+
+    mneme().args(["init", store_s]).assert().success();
+    remember(store_s, "alpha", "the sky was clear");
+
+    // No --output-file: the deterministic reference kernel produces the output.
+    mneme()
+        .args([
+            "robr",
+            store_s,
+            "--keys",
+            "alpha",
+            "--prompt",
+            "summarize",
+            "--weight-measurement",
+            WEIGHT,
+            "--sampling",
+            "model=ref;temp=0;seed=1",
+            "--reference-kernel",
+            "--out",
+            cert_s,
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("reference_kernel=true"));
+
+    // Replay verification re-executes the kernel and matches bit-for-bit.
+    mneme()
+        .args(["verify-robr", cert_s, "--replay"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("replay ok"));
+}
+
+#[test]
+fn robr2_replay_rejects_non_reference_kernel_output() {
+    // A receipt whose output is arbitrary (not the reference kernel's) passes the
+    // binding check but MUST fail --replay: replay binds output to faithful execution.
+    let dir = tempdir().expect("tempdir");
+    let store = dir.path().join("store");
+    let store_s = store.to_str().expect("path");
+    let cert = dir.path().join("robr2b.bin");
+    let cert_s = cert.to_str().expect("path");
+    let output = dir.path().join("out.txt");
+    std::fs::write(&output, b"hand-written output not from the kernel").expect("write");
+    let output_s = output.to_str().expect("path");
+
+    mneme().args(["init", store_s]).assert().success();
+    remember(store_s, "alpha", "entry");
+    mneme()
+        .args([
+            "robr",
+            store_s,
+            "--keys",
+            "alpha",
+            "--prompt",
+            "p",
+            "--weight-measurement",
+            WEIGHT,
+            "--sampling",
+            "s",
+            "--output-file",
+            output_s,
+            "--out",
+            cert_s,
+        ])
+        .assert()
+        .success();
+
+    // Binding verify still succeeds (signature + envelope consistent)...
+    mneme().args(["verify-robr", cert_s]).assert().success();
+    // ...but replay fails closed (exit 4): the output was not the kernel's.
+    mneme()
+        .args(["verify-robr", cert_s, "--replay"])
+        .assert()
+        .failure()
+        .code(4);
+}
