@@ -22,6 +22,20 @@ if ! rustup run "$FUZZ_TOOLCHAIN" rustc -V &>/dev/null; then
   exit 1
 fi
 
+# Seed the wire-parser targets with their committed valid vectors so the fuzzer mutates
+# from a real, structurally-valid input (far better coverage than the \x00 fallback).
+seed_corpus_from_vector() {
+  local target="$1" vector="$2"
+  local corpus="$ROOT/fuzz/corpus/$target"
+  mkdir -p "$corpus"
+  if [[ -f "$ROOT/$vector" ]]; then
+    cp "$ROOT/$vector" "$corpus/seed_vector_v1"
+  fi
+}
+seed_corpus_from_vector robr_verify proof/vectors/robr_vector_v1.bin
+seed_corpus_from_vector forget_proof_verify proof/vectors/forget_proof_vector_v1.cbor
+seed_corpus_from_vector pace_log_verify proof/vectors/pace_log_vector_v1.cbor
+
 FUZZ_TARGETS=(dcbor_parse smt_parse cap_parse receipt_parse index_wire sync_message_parse cognition_cert_parse federation_cert_parse federation_cert_verify robr_verify forget_proof_verify pace_log_verify)
 for target in "${FUZZ_TARGETS[@]}"; do
   corpus="$ROOT/fuzz/corpus/$target"
