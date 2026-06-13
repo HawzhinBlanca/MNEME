@@ -4,12 +4,13 @@ use mneme_core::{Hlc, MnemeError, NodeId, RootPreimage, hash_ckpt, to_bytes_cano
 use mneme_crypto::KeyPair;
 use mneme_root::{
     CheckpointLog, ROOT_VERSION, RootHistoryProofDirection, StoredRoot, check_replay,
-    read_root_history_peak_state, root_history_consistency_proof, root_history_digest,
-    root_history_inclusion_proof, root_history_peak_consistency_proof, root_history_peak_digest,
-    root_history_peak_frontier_proof, root_history_peak_inclusion_proof, update_root_history_peaks,
-    verify_root_chain, verify_root_history_consistency, verify_root_history_digest,
-    verify_root_history_inclusion, verify_root_history_peak_consistency,
-    verify_root_history_peak_frontier, verify_root_history_peak_inclusion,
+    path_entry_exists_no_follow, read_root_history_peak_state, root_history_consistency_proof,
+    root_history_digest, root_history_inclusion_proof, root_history_peak_consistency_proof,
+    root_history_peak_digest, root_history_peak_frontier_proof, root_history_peak_inclusion_proof,
+    update_root_history_peaks, verify_root_chain, verify_root_history_consistency,
+    verify_root_history_digest, verify_root_history_inclusion,
+    verify_root_history_peak_consistency, verify_root_history_peak_frontier,
+    verify_root_history_peak_inclusion,
 };
 use std::path::Path;
 
@@ -939,6 +940,25 @@ fn root_history_peak_update_rejects_broken_symlink_sidecar() {
     assert!(
         !missing.exists(),
         "peak update must not materialize a dangling sidecar target"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn path_entry_exists_no_follow_counts_dangling_symlink() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing-entry");
+    let entry = dir.path().join("entry");
+    std::os::unix::fs::symlink(&missing, &entry).expect("dangling symlink fixture");
+    assert!(!entry.exists(), "fixture should be a dangling symlink");
+
+    assert!(
+        path_entry_exists_no_follow(&entry).expect("entry probe"),
+        "no-follow entry probe must count dangling symlinks as present"
+    );
+    assert!(
+        !missing.exists(),
+        "entry probe must not materialize dangling symlink targets"
     );
 }
 

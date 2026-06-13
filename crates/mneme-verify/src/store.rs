@@ -31,10 +31,7 @@ pub fn verify_signed_head_only(
 /// Fail-closed verifier for an on-disk store directory (§7, §10).
 pub fn verify_store(path: &Path, trust: &TrustConfig) -> Result<RootReport, MnemeError> {
     let incomplete_marker = path.join(".incomplete");
-    if incomplete_marker
-        .try_exists()
-        .map_err(|err| io_err(&incomplete_marker, err))?
-    {
+    if mneme_root::path_entry_exists_no_follow(&incomplete_marker)? {
         return Err(MnemeError::IncompleteTransaction);
     }
     let stored = read_head(path)?;
@@ -126,11 +123,4 @@ fn load_previous_root(path: &Path, sequence: u64) -> Result<Option<Root>, MnemeE
         return Ok(None);
     }
     Ok(CheckpointLog::try_read_checkpoint(path, sequence - 1)?.map(|stored| stored.to_root()))
-}
-
-fn io_err(path: &Path, err: std::io::Error) -> MnemeError {
-    MnemeError::IoFailed {
-        path: path.display().to_string(),
-        kind: err.kind().to_string(),
-    }
 }

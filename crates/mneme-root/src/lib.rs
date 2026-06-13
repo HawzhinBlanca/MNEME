@@ -23,6 +23,7 @@ pub use history::{
 
 use mneme_core::{MnemeError, Root, RootPreimage, cmp_wire, from_bytes_strict, to_bytes_canonical};
 use mneme_crypto::{KeyPair, verify_signature_bytes};
+use std::path::Path;
 
 pub const ROOT_VERSION: u16 = 1;
 
@@ -144,4 +145,13 @@ pub fn check_replay(current: &Root, last_seen_hlc: Option<[u8; 14]>) -> Result<(
         }
     }
     Ok(())
+}
+
+/// Check whether a root/store-owned path has a directory entry without
+/// following aliases.
+///
+/// Verifier callers use this to reject present symlinks, including dangling
+/// symlinks, without adding direct filesystem traversal to the verifier TCB.
+pub fn path_entry_exists_no_follow(path: &Path) -> Result<bool, MnemeError> {
+    atomic::entry_exists(path)
 }

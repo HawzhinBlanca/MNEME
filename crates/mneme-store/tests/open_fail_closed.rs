@@ -377,6 +377,10 @@ fn cold_open_matrix_covers_verify_store_inventory() {
             "cold_open_rejects_incomplete_marker",
         ),
         (
+            "tamper_verify_store_dangling_symlink_incomplete_marker",
+            "cold_open_rejects_dangling_symlink_incomplete_marker",
+        ),
+        (
             "tamper_verify_store_multibyte_key_index_schema_drift",
             "cold_open_rejects_multibyte_key_index_snapshot_without_panic",
         ),
@@ -525,6 +529,18 @@ fn cold_open_matrix_covers_verify_store_inventory() {
             "cold_open_rejects_object_keys_snapshot_unknown_object_id",
         ),
         (
+            "tamper_verify_store_rejects_symlinked_head_without_following_target",
+            "cold_open_rejects_symlinked_head_without_following_target",
+        ),
+        (
+            "tamper_verify_store_rejects_symlinked_key_index_snapshot_without_following_target",
+            "cold_open_rejects_symlinked_key_index_snapshot_without_following_target",
+        ),
+        (
+            "tamper_verify_store_rejects_symlinked_semantic_journal_without_following_target",
+            "cold_open_rejects_symlinked_semantic_journal_without_following_target",
+        ),
+        (
             "tamper_verify_store_intermediate_checkpoint_fails_closed",
             "cold_open_rejects_tampered_intermediate_checkpoint",
         ),
@@ -620,6 +636,39 @@ fn cold_open_rejects_incomplete_marker() {
         operator,
         MnemeError::IncompleteTransaction,
         "incomplete transaction marker",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cold_open_rejects_dangling_symlink_incomplete_marker() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+
+    let mut store = Store::create(dir.path(), operator.clone()).expect("create store");
+    store
+        .remember(
+            episodic_draft("dangling-incomplete-marker", b"durable body"),
+            &cap,
+        )
+        .expect("remember object");
+    drop(store);
+
+    let missing = dir.path().join("missing-incomplete-marker");
+    let marker = dir.path().join(".incomplete");
+    std::os::unix::fs::symlink(&missing, &marker).expect("dangling marker symlink");
+    assert!(!marker.exists(), "fixture should be a dangling symlink");
+
+    assert_open_error_without_panic(
+        dir.path(),
+        operator,
+        MnemeError::IncompleteTransaction,
+        "dangling symlink incomplete transaction marker",
+    );
+    assert!(
+        !missing.exists(),
+        "cold-open must not materialize a dangling marker target"
     );
 }
 
@@ -730,6 +779,38 @@ fn cold_open_rejects_missing_head_checkpoint() {
         operator,
         MnemeError::RootInconsistent,
         "missing current HEAD checkpoint",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cold_open_rejects_symlinked_head_without_following_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+
+    let mut store = Store::create(dir.path(), operator.clone()).expect("create store");
+    store
+        .remember(episodic_draft("symlink-head", b"durable body"), &cap)
+        .expect("remember object");
+    drop(store);
+
+    let head = dir.path().join("roots/HEAD");
+    let external_head = dir.path().join("external-head.cbor");
+    fs::rename(&head, &external_head).expect("move HEAD fixture");
+    std::os::unix::fs::symlink(&external_head, &head).expect("HEAD symlink");
+
+    assert_open_io_failed_without_panic(dir.path(), operator, "symlinked HEAD");
+    assert!(
+        fs::symlink_metadata(&head)
+            .expect("HEAD symlink metadata")
+            .file_type()
+            .is_symlink(),
+        "failed cold-open must leave the symlink entry intact"
+    );
+    assert!(
+        external_head.exists(),
+        "failed cold-open must not remove the external HEAD target"
     );
 }
 
@@ -1113,6 +1194,38 @@ fn cold_open_rejects_symlinked_key_index_snapshot_without_following_target() {
         .expect("key-index snapshot symlink");
 
     assert_open_io_failed_without_panic(dir.path(), operator, "symlinked key_index.json");
+}
+
+#[cfg(unix)]
+#[test]
+fn cold_open_rejects_symlinked_semantic_journal_without_following_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+
+    let mut store = Store::create(dir.path(), operator.clone()).expect("create store");
+    store
+        .remember(
+            semantic_draft("symlink-embeddings-journal", b"durable semantic body"),
+            &cap,
+        )
+        .expect("remember semantic object");
+    let embeddings = dir.path().join("meta/embeddings.journal");
+    let external_embeddings = dir.path().join("external-embeddings.journal");
+    fs::copy(&embeddings, &external_embeddings).expect("external embeddings journal copy");
+    let external_before = fs::read(&external_embeddings).expect("external embeddings journal");
+    drop(store);
+
+    fs::remove_file(&embeddings).expect("remove real embeddings journal");
+    std::os::unix::fs::symlink(&external_embeddings, &embeddings)
+        .expect("embeddings journal symlink");
+
+    assert_open_io_failed_without_panic(dir.path(), operator, "symlinked embeddings.journal");
+    assert_eq!(
+        fs::read(&external_embeddings).expect("external embeddings journal"),
+        external_before,
+        "failed cold-open must not rewrite the external embeddings target"
+    );
 }
 
 #[cfg(unix)]

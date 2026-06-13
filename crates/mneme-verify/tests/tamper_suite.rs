@@ -491,6 +491,28 @@ fn tamper_verify_store_incomplete_marker() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn tamper_verify_store_dangling_symlink_incomplete_marker() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("missing-incomplete-marker");
+    let marker = dir.path().join(".incomplete");
+    std::os::unix::fs::symlink(&missing, &marker).expect("dangling marker symlink");
+    assert!(!marker.exists(), "fixture should be a dangling symlink");
+
+    let f = build_valid_recall();
+    assert_verify_store_error_without_panic(
+        dir.path(),
+        &f.trust,
+        MnemeError::IncompleteTransaction,
+        "dangling symlink incomplete marker",
+    );
+    assert!(
+        !missing.exists(),
+        "verify_store must not materialize a dangling marker target"
+    );
+}
+
 fn hex32(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

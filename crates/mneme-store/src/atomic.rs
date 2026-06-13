@@ -284,7 +284,7 @@ pub fn begin_incomplete(store: &Path) -> Result<(), MnemeError> {
 
 pub fn end_incomplete(store: &Path) -> Result<(), MnemeError> {
     let marker = incomplete_marker(store);
-    if marker.exists() {
+    if entry_exists(&marker)? {
         fs::remove_file(&marker).map_err(|e| io_err(&marker, e))?;
         if durability_fsync_enabled() {
             sync_parent_dir(&marker)?;
@@ -294,7 +294,7 @@ pub fn end_incomplete(store: &Path) -> Result<(), MnemeError> {
 }
 
 pub fn check_no_incomplete(store: &Path) -> Result<(), MnemeError> {
-    if incomplete_marker(store).exists() {
+    if entry_exists(&incomplete_marker(store))? {
         return Err(MnemeError::IncompleteTransaction);
     }
     Ok(())
@@ -530,6 +530,29 @@ mod tests {
         assert!(
             !missing.exists(),
             "create_new must not follow or materialize the symlink target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn incomplete_marker_checks_count_dangling_symlink_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("missing-incomplete-marker");
+        let marker = incomplete_marker(dir.path());
+        std::os::unix::fs::symlink(&missing, &marker).expect("dangling marker symlink");
+        assert!(!marker.exists(), "fixture should be a dangling symlink");
+
+        let err = check_no_incomplete(dir.path()).expect_err("dangling marker must fail closed");
+        assert_eq!(err, MnemeError::IncompleteTransaction);
+
+        end_incomplete(dir.path()).expect("remove dangling marker entry");
+        assert!(
+            std::fs::symlink_metadata(&marker).is_err(),
+            "end_incomplete should remove the symlink entry"
+        );
+        assert!(
+            !missing.exists(),
+            "marker cleanup must not materialize a dangling target"
         );
     }
 

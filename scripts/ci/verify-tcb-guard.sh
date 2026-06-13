@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="${MNEME_GUARD_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-FORBIDDEN='\bunsafe\b|\b(debug_assert|debug_assert_eq|debug_assert_ne|assert|assert_eq|assert_ne)\s*!|\b(dbg|print|println|eprint|eprintln|trace|debug|info|warn|error)\s*!|\b(log|tracing)\s*::|\bunwrap_err\s*\(|\bexpect_err\s*\(|\bunwrap_or(?:_else|_default)?\s*\(|\bmap_or(?:_else)?\s*\(|\bDefault\b|::\s*default\s*\(|\.\s*or_default\s*\(|\b(?:std\s*::\s*)?mem\s*::\s*take\s*\(|\.\s*(ok|err|is_ok|is_err|is_some|is_none|contains_key|contains|filter|filter_map|find_map|flat_map|flatten|next|next_back|last|nth|find|position|rposition|count|all|any|retain|retain_mut|clear|truncate|drain|splice|split_off|sort|sort_by|sort_by_key|sort_unstable|sort_unstable_by|sort_unstable_by_key|dedup|dedup_by|dedup_by_key|reverse|swap_remove|remove|pop)\s*\(|\bmatches\s*!|\b(f32|f64|NAN|INFINITY|NEG_INFINITY)\b|\b[0-9]+\.[0-9]+(?:[eE][+-]?[0-9]+)?(?:f32|f64)?\b|\b[0-9]+(?:f32|f64)\b|\.\s*(partial_cmp|total_cmp|is_nan|is_finite|is_infinite|is_normal|classify)\s*\(|\bunwrap\s*\(|\bexpect\s*\(|\bpanic_any\s*\(|\bresume_unwind\s*\(|\bcatch_unwind\s*\(|\b(SystemTime|Instant)\s*::\s*now\s*\(|\b(?:std\s*::\s*)?env\s*::\s*(args|args_os|current_dir|current_exe|set_current_dir|temp_dir|var|var_os|vars|vars_os)\s*\(|\b(?:(?:std\s*::\s*)?io\s*::\s*)?(stdin|stdout|stderr)\s*\(|\b(?:std\s*::\s*)?process\s*::\s*id\s*\(|\b(?:std\s*::\s*)?thread\s*::\s*current\s*\(|\b(?:std\s*::\s*)?backtrace\s*::\s*Backtrace\s*::\s*(capture|force_capture)\s*\(|\b(env|option_env|include|include_str|include_bytes)\s*!|\b(?:(?:(std|tokio)\s*::\s*)?process\s*::\s*)?Command\s*::\s*new\s*\(|\b(?:(std|tokio)\s*::\s*)?net\s*::\s*(TcpListener|TcpStream|ToSocketAddrs|UdpSocket|UnixListener|UnixStream|lookup_host)\b|\b(reqwest|hyper|ureq|isahc)\s*::|\b(?:std\s*::\s*)?fs\s*::\s*(metadata|symlink_metadata|canonicalize|read_dir|read_link|copy|create_dir|create_dir_all|hard_link|remove_dir|remove_dir_all|remove_file|rename|set_permissions|write)\s*\(|\b(?:File\s*::\s*(create|open)|OpenOptions\s*::\s*new)\s*\(|\.\s*(metadata|symlink_metadata|canonicalize|read_dir|read_link)\s*\(|\b(?:std\s*::\s*)?thread\s*::\s*spawn\s*\(|\b(?:tokio\s*::\s*)?(?:task\s*::\s*)?(spawn|spawn_blocking|spawn_local)\s*\(|\b(?:tokio\s*::\s*task\s*::\s*)?JoinSet\s*::|\b(rand|rand_core|getrandom)\s*::|\b(OsRng|StdRng|SmallRng|ThreadRng)\b|\b(from_entropy|from_os_rng|thread_rng|SystemRandom\s*::\s*new)\s*\(|\bstatic\s+mut\b|\blazy_static\s*!|\b(Once|OnceCell|OnceLock|LazyCell|LazyLock|Mutex|RwLock|Cell|RefCell)\b|\bAtomic(Bool|U8|U16|U32|U64|Usize|I8|I16|I32|I64|Isize|Ptr)\b|\bthread_local\s*!|\b(HashMap|HashSet|DefaultHasher|RandomState|BuildHasher|SipHasher|IndexMap|IndexSet)\b|\b(hashbrown|indexmap)\s*::|\.\s*exists\s*\(|\bPath\s*::\s*exists\s*\(|\b(?:std\s*::\s*)?mem\s*::\s*forget\s*\(|\b(ManuallyDrop|MaybeUninit|NonNull)\b|\b(?:std\s*::\s*)?ptr\s*::|\b(?:Box|String|Vec)\s*::\s*leak\s*\(|\binto_raw(?:_parts)?\s*\(|\bfrom_raw(?:_parts|_parts_mut)?\s*\(|\btransmute(?:_copy)?\s*\(|\bextern\b|\b(libc|nix)\s*::|\b(?:std|core)\s*::\s*arch\s*::|\b(?:asm|global_asm)\s*!|\b(?:std\s*::\s*)?process\s*::\s*(abort|exit)\s*\(|\bpanic\s*!|\bunreachable\s*!|\btodo\s*!|\bunimplemented\s*!|\banyhow::'
+FORBIDDEN='\bunsafe\b|\b(debug_assert|debug_assert_eq|debug_assert_ne|assert|assert_eq|assert_ne)\s*!|\b(dbg|print|println|eprint|eprintln|trace|debug|info|warn|error)\s*!|\b(log|tracing)\s*::|\bunwrap_err\s*\(|\bexpect_err\s*\(|\bunwrap_or(?:_else|_default)?\s*\(|\bmap_or(?:_else)?\s*\(|\bDefault\b|::\s*default\s*\(|\.\s*or_default\s*\(|\b(?:std\s*::\s*)?mem\s*::\s*take\s*\(|\.\s*(ok|err|is_ok|is_err|is_some|is_none|contains_key|contains|filter|filter_map|find_map|flat_map|flatten|next|next_back|last|nth|find|position|rposition|count|all|any|retain|retain_mut|clear|truncate|drain|splice|split_off|sort|sort_by|sort_by_key|sort_unstable|sort_unstable_by|sort_unstable_by_key|dedup|dedup_by|dedup_by_key|reverse|swap_remove|remove|pop)\s*\(|\bmatches\s*!|\b(f32|f64|NAN|INFINITY|NEG_INFINITY)\b|\b[0-9]+\.[0-9]+(?:[eE][+-]?[0-9]+)?(?:f32|f64)?\b|\b[0-9]+(?:f32|f64)\b|\.\s*(partial_cmp|total_cmp|is_nan|is_finite|is_infinite|is_normal|classify)\s*\(|\bunwrap\s*\(|\bexpect\s*\(|\bpanic_any\s*\(|\bresume_unwind\s*\(|\bcatch_unwind\s*\(|\b(SystemTime|Instant)\s*::\s*now\s*\(|\b(?:std\s*::\s*)?env\s*::\s*(args|args_os|current_dir|current_exe|set_current_dir|temp_dir|var|var_os|vars|vars_os)\s*\(|\b(?:(?:std\s*::\s*)?io\s*::\s*)?(stdin|stdout|stderr)\s*\(|\b(?:std\s*::\s*)?process\s*::\s*id\s*\(|\b(?:std\s*::\s*)?thread\s*::\s*current\s*\(|\b(?:std\s*::\s*)?backtrace\s*::\s*Backtrace\s*::\s*(capture|force_capture)\s*\(|\b(env|option_env|include|include_str|include_bytes)\s*!|\b(?:(?:(std|tokio)\s*::\s*)?process\s*::\s*)?Command\s*::\s*new\s*\(|\b(?:(std|tokio)\s*::\s*)?net\s*::\s*(TcpListener|TcpStream|ToSocketAddrs|UdpSocket|UnixListener|UnixStream|lookup_host)\b|\b(reqwest|hyper|ureq|isahc)\s*::|\b(?:std\s*::\s*)?fs\s*::\s*(metadata|symlink_metadata|canonicalize|read_dir|read_link|copy|create_dir|create_dir_all|hard_link|remove_dir|remove_dir_all|remove_file|rename|set_permissions|write)\s*\(|\b(?:File\s*::\s*(create|open)|OpenOptions\s*::\s*new)\s*\(|\.\s*(metadata|symlink_metadata|canonicalize|read_dir|read_link)\s*\(|\b(?:std\s*::\s*)?thread\s*::\s*spawn\s*\(|\b(?:tokio\s*::\s*)?(?:task\s*::\s*)?(spawn|spawn_blocking|spawn_local)\s*\(|\b(?:tokio\s*::\s*task\s*::\s*)?JoinSet\s*::|\b(rand|rand_core|getrandom)\s*::|\b(OsRng|StdRng|SmallRng|ThreadRng)\b|\b(from_entropy|from_os_rng|thread_rng|SystemRandom\s*::\s*new)\s*\(|\bstatic\s+mut\b|\blazy_static\s*!|\b(Once|OnceCell|OnceLock|LazyCell|LazyLock|Mutex|RwLock|Cell|RefCell)\b|\bAtomic(Bool|U8|U16|U32|U64|Usize|I8|I16|I32|I64|Isize|Ptr)\b|\bthread_local\s*!|\b(HashMap|HashSet|DefaultHasher|RandomState|BuildHasher|SipHasher|IndexMap|IndexSet)\b|\b(hashbrown|indexmap)\s*::|\.\s*(?:try_)?exists\s*\(|\bPath\s*::\s*(?:try_)?exists\s*\(|\b(?:std\s*::\s*)?mem\s*::\s*forget\s*\(|\b(ManuallyDrop|MaybeUninit|NonNull)\b|\b(?:std\s*::\s*)?ptr\s*::|\b(?:Box|String|Vec)\s*::\s*leak\s*\(|\binto_raw(?:_parts)?\s*\(|\bfrom_raw(?:_parts|_parts_mut)?\s*\(|\btransmute(?:_copy)?\s*\(|\bextern\b|\b(libc|nix)\s*::|\b(?:std|core)\s*::\s*arch\s*::|\b(?:asm|global_asm)\s*!|\b(?:std\s*::\s*)?process\s*::\s*(abort|exit)\s*\(|\bpanic\s*!|\bunreachable\s*!|\btodo\s*!|\bunimplemented\s*!|\banyhow::'
 
 rust_code_hits() {
   local pattern allow_marker stop_at_cfg_test
@@ -2232,9 +2232,14 @@ RS
   cat >"$(self_test_tcb_src "$tmp")/nested/mod.rs" <<'RS'
 use std::path::{Path, PathBuf};
 
-pub fn real_path_exists_probe(path: &Path) -> bool {
+pub fn real_path_exists_probe(path: &Path) -> Result<bool, std::io::Error> {
     let generated = PathBuf::from("meta/object_keys.json");
-    path.exists() || generated.exists() || Path::new("roots/HEAD").exists() || Path::exists(path)
+    Ok(path.exists()
+        || generated.exists()
+        || Path::new("roots/HEAD").exists()
+        || Path::exists(path)
+        || path.try_exists()?
+        || Path::try_exists(path)?)
 }
 RS
   if out="$(run_self_test_guard "$tmp")"; then
@@ -2249,6 +2254,16 @@ RS
   fi
   if [[ "$out" != *"Path::exists"* || "$out" != *"nested/mod.rs"* ]]; then
     echo "TCB guard self-test FAILED — Path::exists UFCS hit was not reported"
+    echo "$out"
+    return 1
+  fi
+  if [[ "$out" != *".try_exists("* || "$out" != *"nested/mod.rs"* ]]; then
+    echo "TCB guard self-test FAILED — Path::try_exists method hit was not reported"
+    echo "$out"
+    return 1
+  fi
+  if [[ "$out" != *"Path::try_exists"* || "$out" != *"nested/mod.rs"* ]]; then
+    echo "TCB guard self-test FAILED — Path::try_exists UFCS hit was not reported"
     echo "$out"
     return 1
   fi

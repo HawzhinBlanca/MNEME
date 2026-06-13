@@ -1,6 +1,6 @@
 //! Offline repair: clear a self-consistent `.incomplete` marker and sweep orphan blobs.
 
-use crate::atomic::incomplete_marker;
+use crate::atomic::{entry_exists, incomplete_marker};
 use mneme_core::MnemeError;
 use mneme_crypto::{KeyPair, TrustConfig};
 use std::collections::HashSet;
@@ -19,7 +19,7 @@ pub struct RepairReport {
 pub fn repair_store(path: &Path, operator: &KeyPair) -> Result<RepairReport, MnemeError> {
     let trust = TrustConfig::new(operator.public_key_bytes());
     let incomplete = incomplete_marker(path);
-    let had_incomplete = incomplete.exists();
+    let had_incomplete = entry_exists(&incomplete)?;
     if had_incomplete {
         let backup = path.join(".incomplete.repair-check");
         fs::rename(&incomplete, &backup).map_err(|e| io_err(&incomplete, e))?;
@@ -145,6 +145,49 @@ mod tests {
         let report = repair_store(dir.path(), &operator).expect("repair");
         assert!(report.cleared_incomplete);
         assert!(!incomplete_marker(dir.path()).exists());
+        Store::open(dir.path(), operator).expect("reopen");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repair_clears_self_consistent_dangling_symlink_incomplete_marker() {
+        let dir = TempDir::new().expect("tempdir");
+        let operator = KeyPair::generate();
+        let mut store = Store::create(dir.path(), operator.clone()).expect("create");
+        let cap = agent_cap(&operator, operator.public_key_bytes()).expect("cap");
+        let draft = Draft {
+            namespace: "repair".into(),
+            logical_name: "dangling-entry".into(),
+            kind: MemoryKind::Episodic,
+            body: b"payload".to_vec(),
+            parent_ids: vec![],
+            session: [0x02; 16],
+            trust_tier: None,
+            embedding: None,
+            valid_time_ms: None,
+        };
+        store.remember(draft, &cap).expect("remember");
+        drop(store);
+
+        let missing = dir.path().join("missing-incomplete-marker");
+        let marker = incomplete_marker(dir.path());
+        std::os::unix::fs::symlink(&missing, &marker).expect("dangling marker symlink");
+        assert!(!marker.exists(), "fixture should be a dangling symlink");
+
+        let report = repair_store(dir.path(), &operator).expect("repair");
+        assert!(report.cleared_incomplete);
+        assert!(
+            std::fs::symlink_metadata(&marker).is_err(),
+            "repair should remove the marker symlink entry"
+        );
+        assert!(
+            std::fs::symlink_metadata(dir.path().join(".incomplete.repair-check")).is_err(),
+            "repair backup entry should be removed after consistency proof"
+        );
+        assert!(
+            !missing.exists(),
+            "repair must not materialize a dangling marker target"
+        );
         Store::open(dir.path(), operator).expect("reopen");
     }
 }
