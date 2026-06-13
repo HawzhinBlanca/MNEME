@@ -7,7 +7,10 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
-use std::os::unix::io::AsRawFd;
+use std::os::unix::{
+    fs::{MetadataExt, OpenOptionsExt},
+    io::AsRawFd,
+};
 
 pub(crate) fn durability_fsync_enabled() -> bool {
     !debug_no_fsync_requested()
@@ -210,12 +213,7 @@ pub fn open_store_lock(store: &Path) -> Result<File, MnemeError> {
     }
     fs::create_dir_all(store).map_err(|e| io_err(store, e))?;
     let lock = store.join(".mneme.lock");
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock)
-        .map_err(|e| io_err(&lock, e))?;
+    let file = open_store_lock_file(&lock)?;
     #[cfg(unix)]
     {
         let ret = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
@@ -238,6 +236,87 @@ pub fn open_store_lock(store: &Path) -> Result<File, MnemeError> {
         });
     }
     Ok(file)
+}
+
+#[cfg(unix)]
+fn open_store_lock_file(lock: &Path) -> Result<File, MnemeError> {
+    let mut create = OpenOptions::new();
+    create
+        .create_new(true)
+        .write(true)
+        .truncate(false)
+        .custom_flags(libc::O_NOFOLLOW);
+    match create.open(lock) {
+        Ok(file) => {
+            validate_open_lock_file(lock, &file)?;
+            return Ok(file);
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(err) => return Err(io_err(lock, err)),
+    }
+
+    validate_lock_path(lock)?;
+    let mut open = OpenOptions::new();
+    open.write(true)
+        .truncate(false)
+        .custom_flags(libc::O_NOFOLLOW);
+    let file = open.open(lock).map_err(|e| io_err(lock, e))?;
+    validate_open_lock_file(lock, &file)?;
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn open_store_lock_file(lock: &Path) -> Result<File, MnemeError> {
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(lock)
+        .map_err(|e| io_err(lock, e))
+}
+
+#[cfg(unix)]
+fn validate_lock_path(lock: &Path) -> Result<fs::Metadata, MnemeError> {
+    let metadata = fs::symlink_metadata(lock).map_err(|e| io_err(lock, e))?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: lock.display().to_string(),
+            kind: "lockfile symlink".into(),
+        });
+    }
+    if !file_type.is_file() {
+        return Err(MnemeError::IoFailed {
+            path: lock.display().to_string(),
+            kind: "lockfile non-regular".into(),
+        });
+    }
+    if metadata.nlink() != 1 {
+        return Err(MnemeError::IoFailed {
+            path: lock.display().to_string(),
+            kind: "lockfile hard-linked".into(),
+        });
+    }
+    Ok(metadata)
+}
+
+#[cfg(unix)]
+fn validate_open_lock_file(lock: &Path, file: &File) -> Result<(), MnemeError> {
+    let path_metadata = validate_lock_path(lock)?;
+    let file_metadata = file.metadata().map_err(|e| io_err(lock, e))?;
+    if !file_metadata.file_type().is_file() || file_metadata.nlink() != 1 {
+        return Err(MnemeError::IoFailed {
+            path: lock.display().to_string(),
+            kind: "opened lockfile is not a regular single-link file".into(),
+        });
+    }
+    if path_metadata.dev() != file_metadata.dev() || path_metadata.ino() != file_metadata.ino() {
+        return Err(MnemeError::IoFailed {
+            path: lock.display().to_string(),
+            kind: "lockfile changed during open".into(),
+        });
+    }
+    Ok(())
 }
 
 const DURABILITY_DISABLED_META: &str = "meta/durability_disabled.json";
@@ -332,6 +411,74 @@ mod tests {
             err.to_string()
                 .contains("temporary path collisions exhausted")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_store_lock_creates_regular_single_link_lockfile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dir.path().join("store");
+
+        let file = open_store_lock(&store).expect("lock open");
+        let lock = store.join(".mneme.lock");
+        let path_metadata = std::fs::symlink_metadata(&lock).expect("lock metadata");
+        let file_metadata = file.metadata().expect("open lock metadata");
+
+        assert!(path_metadata.file_type().is_file());
+        assert_eq!(path_metadata.nlink(), 1);
+        assert_eq!(path_metadata.dev(), file_metadata.dev());
+        assert_eq!(path_metadata.ino(), file_metadata.ino());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_store_lock_rejects_symlink_lockfile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dir.path().join("store");
+        std::fs::create_dir_all(&store).expect("store dir");
+        let target = dir.path().join("external.lock");
+        std::fs::write(&target, b"external").expect("external lock fixture");
+        std::os::unix::fs::symlink(&target, store.join(".mneme.lock"))
+            .expect("lock symlink fixture");
+
+        let err = open_store_lock(&store).expect_err("symlink lockfile rejected");
+
+        assert!(err.to_string().contains("lockfile symlink"));
+        assert_eq!(
+            std::fs::read(&target).expect("external lock target"),
+            b"external"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_store_lock_rejects_hard_linked_lockfile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dir.path().join("store");
+        std::fs::create_dir_all(&store).expect("store dir");
+        let target = dir.path().join("external.lock");
+        std::fs::write(&target, b"external").expect("external lock fixture");
+        std::fs::hard_link(&target, store.join(".mneme.lock")).expect("lock hard-link fixture");
+
+        let err = open_store_lock(&store).expect_err("hard-linked lockfile rejected");
+
+        assert!(err.to_string().contains("lockfile hard-linked"));
+        assert_eq!(
+            std::fs::read(&target).expect("external lock target"),
+            b"external"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_store_lock_rejects_non_regular_lockfile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dir.path().join("store");
+        std::fs::create_dir_all(store.join(".mneme.lock")).expect("directory lock fixture");
+
+        let err = open_store_lock(&store).expect_err("directory lockfile rejected");
+
+        assert!(err.to_string().contains("lockfile non-regular"));
     }
 
     #[test]
