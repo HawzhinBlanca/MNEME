@@ -132,6 +132,29 @@ pub(crate) fn entry_exists(path: &Path) -> Result<bool, MnemeError> {
     }
 }
 
+pub(crate) fn reject_store_root_alias(store: &Path) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(store) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(MnemeError::IoFailed {
+                    path: store.display().to_string(),
+                    kind: "store directory symlink".into(),
+                });
+            }
+            if !file_type.is_dir() {
+                return Err(MnemeError::IoFailed {
+                    path: store.display().to_string(),
+                    kind: "store path non-directory".into(),
+                });
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(store, err)),
+    }
+}
+
 /// Read a file without following symlinks (§15.1 no-follow-open on Unix).
 pub fn read_no_follow(path: &Path) -> Result<Vec<u8>, MnemeError> {
     #[cfg(unix)]
@@ -307,7 +330,9 @@ pub fn open_store_lock(store: &Path) -> Result<File, MnemeError> {
             fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
         }
     }
+    reject_store_root_alias(store)?;
     fs::create_dir_all(store).map_err(|e| io_err(store, e))?;
+    reject_store_root_alias(store)?;
     let lock = store.join(".mneme.lock");
     let file = open_store_lock_file(&lock)?;
     #[cfg(unix)]

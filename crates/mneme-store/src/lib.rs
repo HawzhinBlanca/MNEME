@@ -144,8 +144,16 @@ pub fn store_head_entry_exists_no_follow(path: &Path) -> Result<bool, MnemeError
     atomic::entry_exists(&path.join("roots/HEAD"))
 }
 
+/// Reject a store root whose final path component is an alias rather than a real
+/// directory. A mutable store path must not be a symlink: the process holds the
+/// lock for the opened directory, and subsequent writes use the same path.
+pub fn reject_store_root_alias(path: &Path) -> Result<(), MnemeError> {
+    atomic::reject_store_root_alias(path)
+}
+
 impl Store {
     pub fn create(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
+        reject_store_root_alias(path)?;
         let vault = Box::new(FileKeyVault::new(path)?);
         Self::create_with_vault(path, operator, vault)
     }
@@ -158,6 +166,7 @@ impl Store {
         operator: KeyPair,
         vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
+        reject_store_root_alias(path)?;
         layout::init_store(path)?;
         atomic::audit_durability_at_open(path)?;
         let _store_lock = atomic::open_store_lock(path)?;
@@ -203,6 +212,7 @@ impl Store {
         operator: KeyPair,
         pinned_root: Option<[u8; 32]>,
     ) -> Result<Self, MnemeError> {
+        reject_store_root_alias(path)?;
         let vault = Box::new(FileKeyVault::new(path)?);
         Self::open_pinned_with_vault(path, operator, pinned_root, vault)
     }
@@ -223,6 +233,7 @@ impl Store {
         pinned_root: Option<[u8; 32]>,
         vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
+        reject_store_root_alias(path)?;
         layout::check_incomplete(path)?;
         atomic::audit_durability_at_open(path)?;
         let _store_lock = atomic::open_store_lock(path)?;

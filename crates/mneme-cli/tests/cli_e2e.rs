@@ -112,6 +112,31 @@ fn verify_missing_store_path_exits_usage() {
         .stderr(predicate::str::contains("not found"));
 }
 
+#[cfg(unix)]
+#[test]
+fn verify_rejects_symlink_store_root_before_operator_custody_writes() {
+    let dir = tempdir().unwrap();
+    let external = dir.path().join("external-store-target");
+    fs::create_dir(&external).expect("external store target");
+    let store_link = dir.path().join("store-link");
+    std::os::unix::fs::symlink(&external, &store_link).expect("store root symlink");
+
+    mneme()
+        .args(["verify", store_link.to_str().unwrap()])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("symlink"));
+
+    assert!(
+        fs::read_dir(&external)
+            .expect("external target readable")
+            .next()
+            .is_none(),
+        "CLI must reject the symlinked store root before writing operator custody files"
+    );
+}
+
 #[test]
 fn certify_and_verify_cert_succeeds() {
     let dir = tempdir().unwrap();

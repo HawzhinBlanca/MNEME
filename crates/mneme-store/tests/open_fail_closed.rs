@@ -145,6 +145,36 @@ fn assert_open_io_failed_without_panic(store_dir: &Path, operator: KeyPair, cont
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn store_create_rejects_symlink_store_root_without_writing_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let external = dir.path().join("external-store-target");
+    fs::create_dir(&external).expect("external store target");
+    let store_link = dir.path().join("store-link");
+    std::os::unix::fs::symlink(&external, &store_link).expect("store root symlink");
+    let operator = KeyPair::from_seed([0x31; 32]);
+
+    match Store::create(&store_link, operator) {
+        Err(MnemeError::IoFailed { kind, .. }) => {
+            assert!(
+                kind.contains("symlink"),
+                "store-root alias rejection should mention symlink, got {kind}"
+            );
+        }
+        Err(err) => panic!("expected IoFailed for symlinked store root, got {err:?}"),
+        Ok(_) => panic!("Store::create accepted a symlinked store root"),
+    }
+
+    assert!(
+        fs::read_dir(&external)
+            .expect("external target readable")
+            .next()
+            .is_none(),
+        "Store::create must reject the symlink before creating layout under its target"
+    );
+}
+
 fn read_object_key_journal_entries(store_dir: &Path) -> Vec<serde_json::Value> {
     let journal = store_dir.join("meta/object_keys.journal");
     fs::read_to_string(&journal)

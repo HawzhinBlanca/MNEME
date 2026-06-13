@@ -36,6 +36,7 @@ fn open_runtime_with_operator_seed(
     store_path: &Path,
     seed_hex: Option<&str>,
 ) -> Result<McpRuntime, mneme_core::MnemeError> {
+    mneme_store::reject_store_root_alias(store_path)?;
     let operator = load_or_generate_operator(store_path, seed_hex)?;
     let tool_writer = derive_tool_writer_keypair(&operator);
     let store = open_or_create_store(store_path, operator.clone())?;
@@ -113,6 +114,35 @@ mod tests {
         std::os::unix::fs::symlink(&missing, &head).expect("dangling HEAD symlink");
         assert!(!head.exists(), "fixture should be a dangling symlink");
         missing
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_runtime_rejects_symlink_store_root_before_vault_writes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-store-target");
+        std::fs::create_dir(&external).expect("external store target");
+        let store_link = dir.path().join("store-link");
+        std::os::unix::fs::symlink(&external, &store_link).expect("store root symlink");
+
+        match open_runtime_with_operator_seed(&store_link, Some(TEST_OPERATOR_SEED_HEX)) {
+            Err(mneme_core::MnemeError::IoFailed { kind, .. }) => {
+                assert!(
+                    kind.contains("symlink"),
+                    "store-root alias rejection should mention symlink, got {kind}"
+                );
+            }
+            Err(err) => panic!("expected IoFailed for symlinked store root, got {err:?}"),
+            Ok(_) => panic!("MCP runtime accepted a symlinked store root"),
+        }
+
+        assert!(
+            std::fs::read_dir(&external)
+                .expect("external target readable")
+                .next()
+                .is_none(),
+            "MCP runtime must reject the symlinked root before vault or store writes"
+        );
     }
 
     #[cfg(unix)]

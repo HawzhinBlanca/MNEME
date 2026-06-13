@@ -138,6 +138,7 @@ fn boot_daemon_state_with_operator_seed(
     store_path: &Path,
     seed_hex: Option<&str>,
 ) -> Result<(AppState, KeyPair, KeyPair), MnemeError> {
+    mneme_store::reject_store_root_alias(store_path)?;
     let operator = load_or_generate_operator(store_path, seed_hex)?;
     let store = if store_head_entry_exists_no_follow(store_path)? {
         Store::open(store_path, operator.clone())?
@@ -344,6 +345,35 @@ mod tests {
         std::os::unix::fs::symlink(&missing, &head).expect("dangling HEAD symlink");
         assert!(!head.exists(), "fixture should be a dangling symlink");
         missing
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn daemon_boot_rejects_symlink_store_root_before_operator_custody_resolution() {
+        let dir = expect_running_server_tempdir("daemon symlink store root fixture");
+        let external = dir.path().join("external-store-target");
+        fs::create_dir(&external).expect("external store target");
+        let store_link = dir.path().join("store-link");
+        std::os::unix::fs::symlink(&external, &store_link).expect("store root symlink");
+
+        match boot_daemon_state_with_operator_seed(&store_link, None) {
+            Err(MnemeError::IoFailed { kind, .. }) => {
+                assert!(
+                    kind.contains("symlink"),
+                    "store-root alias rejection should mention symlink, got {kind}"
+                );
+            }
+            Err(err) => panic!("expected IoFailed for symlinked store root, got {err:?}"),
+            Ok(_) => panic!("daemon boot accepted a symlinked store root"),
+        }
+
+        assert!(
+            fs::read_dir(&external)
+                .expect("external target readable")
+                .next()
+                .is_none(),
+            "daemon boot must reject the symlinked root before custody or store writes"
+        );
     }
 
     #[test]
