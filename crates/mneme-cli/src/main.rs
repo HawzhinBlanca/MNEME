@@ -3,6 +3,7 @@
 mod attest;
 mod cert;
 mod determinism;
+mod fcc;
 mod freivalds;
 mod pace;
 mod replay;
@@ -268,6 +269,25 @@ enum Commands {
         /// Tamper one entry of C (the check must then reject)
         #[arg(long = "tamper", default_value_t = false)]
         tamper: bool,
+    },
+    /// FCC-1: crypto-shred a key and emit a tiered Forgetting-Closure Certificate
+    /// (T1 crypto-shred, T2 + provable absence) bound to the signed root.
+    Fcc {
+        store: PathBuf,
+        #[arg(long = "namespace", default_value = "user")]
+        namespace: String,
+        /// Logical key name to forget
+        #[arg(long = "name")]
+        name: String,
+        #[arg(long = "out")]
+        out: PathBuf,
+    },
+    /// Offline verify a Forgetting-Closure Certificate (signature + tier re-derivation)
+    VerifyFcc {
+        cert: PathBuf,
+        /// Optional pinned operator public key (64 hex chars)
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
     },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
@@ -840,6 +860,83 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             if accepted == tamper {
                 return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
             }
+            Ok(())
+        }
+        Commands::Fcc {
+            store,
+            namespace,
+            name,
+            out,
+        } => {
+            if name.trim().is_empty() {
+                eprintln!("mneme: fcc --name must not be empty");
+                return Err(CliErrorKind::Usage);
+            }
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            let cap =
+                agent_cap(&operator, operator.public_key_bytes()).map_err(CliErrorKind::Kernel)?;
+            let logical_key = LogicalKey {
+                namespace: namespace.clone(),
+                name: name.clone(),
+            };
+            // Crypto-shred + tombstone + proof-of-absence, then certify the closure.
+            let proven = mneme_store
+                .forget_with_proof(
+                    ForgetTarget::LogicalKey(logical_key),
+                    &cap,
+                    ForgetMode::Shred,
+                    None,
+                )
+                .map_err(CliErrorKind::Kernel)?;
+            let cert = fcc::ForgettingClosureCertV1::from_forget_proof(
+                &proven.proof,
+                proven.root.sequence,
+            )
+            .map_err(CliErrorKind::Kernel)?;
+            let tier = cert.tier_achieved;
+            let wire = cert
+                .sign_and_encode(&operator)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "fcc cert written: {} ({} bytes) root_seq={} tier_achieved={}",
+                out.display(),
+                wire.len(),
+                proven.root.sequence,
+                tier
+            );
+            println!("honesty: {}", fcc::FCC_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyFcc { cert, operator_pk } => {
+            let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = fcc::ForgettingClosureCertV1::verify(&wire, pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            let tier_label = match parsed.tier_achieved {
+                fcc::TIER_CRYPTO_SHRED => "T1 crypto-shred",
+                fcc::TIER_TOMBSTONE_ABSENCE => "T2 crypto-shred + provable absence",
+                _ => "unknown",
+            };
+            println!(
+                "verify-fcc ok: root_seq={} tier_achieved={} ({}) target_commit={} operator_pk={}",
+                parsed.root_seq,
+                parsed.tier_achieved,
+                tier_label,
+                hex::encode(parsed.target_commit),
+                hex::encode(parsed.operator_pk)
+            );
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", fcc::FCC_HONESTY);
             Ok(())
         }
         Commands::Init { path } => {
