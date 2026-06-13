@@ -160,6 +160,13 @@ fn reject_store_parent_alias(store: &Path) -> Result<(), MnemeError> {
     if let Some(parent) = store.parent() {
         if !parent.as_os_str().is_empty() {
             reject_atomic_dir_alias(parent, "store parent")?;
+            // Limit the alias scan to the mutable store-boundary suffix; scanning
+            // every absolute ancestor would reject platform aliases like macOS /var.
+            if let Some(ancestor) = parent.parent() {
+                if !ancestor.as_os_str().is_empty() {
+                    reject_atomic_dir_alias(ancestor, "store parent ancestor")?;
+                }
+            }
         }
     }
     Ok(())
