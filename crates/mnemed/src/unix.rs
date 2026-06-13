@@ -362,6 +362,20 @@ fn reject_socket_parent_alias(parent: &Path) -> Result<(), std::io::Error> {
 }
 
 fn remove_socket_path(path: &Path) -> Result<(), std::io::Error> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {}
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "Unix kernel socket path changed to a non-socket before cleanup: {}",
+                    path.display()
+                ),
+            ));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    }
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1020,6 +1034,21 @@ mod tests {
                 .expect("linked parent metadata")
                 .file_type()
                 .is_symlink()
+        );
+    }
+
+    #[test]
+    fn remove_socket_path_rejects_regular_file_without_removing_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kernel.sock");
+        std::fs::write(&path, b"do not unlink").expect("regular file fixture");
+
+        let err = remove_socket_path(&path).expect_err("regular file must not be unlinked");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(&path).expect("regular file should remain"),
+            b"do not unlink"
         );
     }
 
