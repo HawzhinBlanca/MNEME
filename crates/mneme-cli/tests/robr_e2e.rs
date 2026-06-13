@@ -165,6 +165,21 @@ fn robr_missing_key_fails_closed() {
 }
 
 #[test]
+fn robr3_freivalds_demo_accepts_honest_and_detects_tamper() {
+    // ROBR-3: honest matmul accepts; a tampered entry is detected (accepted=false).
+    mneme()
+        .args(["robr-freivalds", "--dim", "6", "--rounds", "32"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("accepted=true"));
+    mneme()
+        .args(["robr-freivalds", "--dim", "6", "--rounds", "32", "--tamper"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("accepted=false"));
+}
+
+#[test]
 fn robr2_reference_kernel_receipt_replay_verifies() {
     // ROBR-2: a reference-kernel receipt re-executes to the same committed output.
     let dir = tempdir().expect("tempdir");
