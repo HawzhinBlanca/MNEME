@@ -5,6 +5,7 @@ mod cert;
 mod determinism;
 mod fcc;
 mod freivalds;
+mod mtl;
 mod pace;
 mod replay;
 mod robr;
@@ -285,6 +286,24 @@ enum Commands {
     /// Offline verify a Forgetting-Closure Certificate (signature + tier re-derivation)
     VerifyFcc {
         cert: PathBuf,
+        /// Optional pinned operator public key (64 hex chars)
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
+    /// MTL-1: append the store's current signed root to an append-only transparency
+    /// log and emit an offline-verifiable inclusion receipt for it.
+    Mtl {
+        store: PathBuf,
+        /// Append-only log file (created if absent); one `seq:preimage_hex` per line
+        #[arg(long = "log")]
+        log: PathBuf,
+        /// Output path for the inclusion receipt
+        #[arg(long = "out")]
+        out: PathBuf,
+    },
+    /// Offline verify an MTL inclusion receipt (signatures + Merkle inclusion)
+    VerifyMtl {
+        receipt: PathBuf,
         /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
@@ -937,6 +956,86 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 );
             }
             println!("honesty: {}", fcc::FCC_HONESTY);
+            Ok(())
+        }
+        Commands::Mtl { store, log, out } => {
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let mneme_store = open_store(&store, operator.clone(), cli.vault)?;
+            let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
+
+            // Parse the existing append-only log (one `seq:preimage_hex` per line).
+            let mut statements: Vec<mtl::LogStatement> = Vec::new();
+            if log.exists() {
+                let body = std::fs::read_to_string(&log).map_err(|_| CliErrorKind::Usage)?;
+                for line in body.lines().filter(|l| !l.trim().is_empty()) {
+                    let (seq_s, hex_s) = line.split_once(':').ok_or(CliErrorKind::Usage)?;
+                    let root_seq: u64 = seq_s.trim().parse().map_err(|_| CliErrorKind::Usage)?;
+                    let root_preimage = parse_seed_hex(hex_s.trim())?;
+                    statements.push(mtl::LogStatement {
+                        root_seq,
+                        root_preimage,
+                    });
+                }
+            }
+            // Append the current root unless it is already the last logged statement.
+            let current = mtl::LogStatement {
+                root_seq: root.sequence,
+                root_preimage: root.preimage_hash,
+            };
+            if statements.last() != Some(&current) {
+                statements.push(current);
+            }
+            // Rewrite the append-only log file.
+            let mut body = String::new();
+            for s in &statements {
+                let _ = writeln!(body, "{}:{}", s.root_seq, hex::encode(s.root_preimage));
+            }
+            std::fs::write(&log, body).map_err(|_| CliErrorKind::Usage)?;
+
+            let size = statements.len();
+            let index = size - 1;
+            let tlog = mtl::TransparencyLog::from_statements(statements);
+            let wire = tlog
+                .inclusion_receipt(index, &operator)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "mtl receipt written: {} ({} bytes) log_size={} leaf_index={} root_seq={}",
+                out.display(),
+                wire.len(),
+                size,
+                index,
+                root.sequence
+            );
+            println!("honesty: {}", mtl::MTL_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyMtl {
+            receipt,
+            operator_pk,
+        } => {
+            let wire = std::fs::read(&receipt).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = mtl::InclusionReceiptV1::verify(&wire, pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            println!(
+                "verify-mtl ok: log_size={} leaf_index={} root_seq={} merkle_root={} operator_pk={}",
+                parsed.size,
+                parsed.leaf_index,
+                parsed.statement.root_seq,
+                hex::encode(parsed.merkle_root),
+                hex::encode(parsed.operator_pk)
+            );
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", mtl::MTL_HONESTY);
             Ok(())
         }
         Commands::Init { path } => {
