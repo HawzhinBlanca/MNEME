@@ -130,6 +130,120 @@ pub fn root_from_path(
     Ok(r)
 }
 
+// ----- MTL-2: RFC 6962 §2.1.2 consistency proofs (append-only / non-equivocation) -----
+
+/// RFC 6962 SUBPROOF(m, D[0:n], b).
+fn subproof(m: usize, leaves: &[[u8; 32]], b: bool) -> Vec<[u8; 32]> {
+    let n = leaves.len();
+    if m == n {
+        if b {
+            return vec![]; // prefix root derivable from the second tree — omit
+        }
+        return vec![merkle_root(leaves)];
+    }
+    // m < n
+    let k = split_point(n);
+    if m <= k {
+        let mut p = subproof(m, &leaves[..k], b);
+        p.push(merkle_root(&leaves[k..]));
+        p
+    } else {
+        let mut p = subproof(m - k, &leaves[k..], false);
+        p.push(merkle_root(&leaves[..k]));
+        p
+    }
+}
+
+/// RFC 6962 consistency proof that the size-`m` prefix is consistent with the full
+/// tree over `leaves` (size n ≥ m). Empty when m == n.
+pub fn consistency_proof(leaves: &[[u8; 32]], m: usize) -> Vec<[u8; 32]> {
+    let n = leaves.len();
+    if m == 0 || m > n {
+        return vec![];
+    }
+    if m == n {
+        return vec![];
+    }
+    subproof(m, leaves, true)
+}
+
+/// Verify an RFC 6962 consistency proof: that a log of size `m` with root `first` is an
+/// append-only prefix of a log of size `n` with root `second`. Fail-closed on any
+/// malformed proof. (Canonical CT verification algorithm.)
+pub fn verify_consistency(
+    m: usize,
+    n: usize,
+    first: &[u8; 32],
+    second: &[u8; 32],
+    proof: &[[u8; 32]],
+) -> Result<bool, MnemeError> {
+    if m > n {
+        return Err(MnemeError::SchemaDrift);
+    }
+    if m == n {
+        return Ok(proof.is_empty() && first == second);
+    }
+    if m == 0 {
+        return Ok(proof.is_empty());
+    }
+    if proof.is_empty() {
+        return Err(MnemeError::SchemaDrift);
+    }
+
+    // Shift out the low set bits of node (the size-1 index path of the m-prefix).
+    let mut node = m - 1;
+    let mut last = n - 1;
+    while node & 1 == 1 {
+        node >>= 1;
+        last >>= 1;
+    }
+
+    let mut idx = 0usize;
+    // Seed: if m is an exact power of two, node == 0 and the seed is `first`; otherwise
+    // it is the first proof element.
+    let (mut hash1, mut hash2) = if node != 0 {
+        let seed = proof[idx];
+        idx += 1;
+        (seed, seed)
+    } else {
+        (*first, *first)
+    };
+
+    while node != 0 {
+        if idx >= proof.len() {
+            return Err(MnemeError::SchemaDrift); // proof too short
+        }
+        if node & 1 == 1 {
+            let p = &proof[idx];
+            idx += 1;
+            hash1 = node_hash(p, &hash1);
+            hash2 = node_hash(p, &hash2);
+        } else if node < last {
+            let p = &proof[idx];
+            idx += 1;
+            hash2 = node_hash(&hash2, p);
+        }
+        // node == last && even: lone rightmost node, no sibling consumed.
+        node >>= 1;
+        last >>= 1;
+    }
+
+    // Fold the remaining proof entries into the second root along the right spine.
+    while last != 0 {
+        if idx >= proof.len() {
+            return Err(MnemeError::SchemaDrift);
+        }
+        hash2 = node_hash(&hash2, &proof[idx]);
+        idx += 1;
+        last >>= 1;
+    }
+
+    if idx != proof.len() {
+        return Err(MnemeError::SchemaDrift); // proof too long
+    }
+    Ok(&hash1 == first && &hash2 == second)
+}
+
 /// Offline-verifiable inclusion receipt bound to a signed log head.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InclusionReceiptV1 {
@@ -244,6 +358,120 @@ impl InclusionReceiptV1 {
     }
 }
 
+const CONSISTENCY_DOMAIN: &[u8] = b"MNEME-mtl-consistency-v1";
+
+/// Operator signature input binding two log heads for a consistency proof.
+fn consistency_message(
+    first_size: u64,
+    first_root: &[u8; 32],
+    second_size: u64,
+    second_root: &[u8; 32],
+) -> Vec<u8> {
+    let mut m = Vec::with_capacity(CONSISTENCY_DOMAIN.len() + 80);
+    m.extend_from_slice(CONSISTENCY_DOMAIN);
+    m.extend_from_slice(&first_size.to_le_bytes());
+    m.extend_from_slice(first_root);
+    m.extend_from_slice(&second_size.to_le_bytes());
+    m.extend_from_slice(second_root);
+    m
+}
+
+/// Offline-verifiable proof that one signed head is an append-only extension of another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsistencyReceiptV1 {
+    pub first_size: u64,
+    pub second_size: u64,
+    pub first_root: [u8; 32],
+    pub second_root: [u8; 32],
+    pub proof_path: Vec<[u8; 32]>,
+    pub operator_pk: [u8; 32],
+    /// Operator signature over both heads.
+    pub sig: [u8; 64],
+}
+
+impl ConsistencyReceiptV1 {
+    fn payload(&self) -> Result<Vec<u8>, MnemeError> {
+        let mut out = Vec::with_capacity(256);
+        out.extend_from_slice(CONSISTENCY_DOMAIN);
+        out.extend_from_slice(&MTL_RECEIPT_VERSION.to_le_bytes());
+        out.extend_from_slice(&self.first_size.to_le_bytes());
+        out.extend_from_slice(&self.second_size.to_le_bytes());
+        out.extend_from_slice(&self.first_root);
+        out.extend_from_slice(&self.second_root);
+        put_id_list(&mut out, &self.proof_path)?;
+        out.extend_from_slice(&self.operator_pk);
+        Ok(out)
+    }
+
+    pub fn sign_and_encode(mut self, operator: &KeyPair) -> Result<Vec<u8>, MnemeError> {
+        self.operator_pk = operator.public_key_bytes();
+        let head_sig = sign_message(
+            operator.signing_key(),
+            &consistency_message(
+                self.first_size,
+                &self.first_root,
+                self.second_size,
+                &self.second_root,
+            ),
+        );
+        self.sig = head_sig;
+        let mut wire = self.payload()?;
+        let envelope_sig = sign_message(operator.signing_key(), &wire);
+        wire.extend_from_slice(&envelope_sig);
+        wire.extend_from_slice(&self.sig);
+        Ok(wire)
+    }
+
+    /// Strict decode + envelope sig + head sig + RFC 6962 consistency check.
+    pub fn verify(wire: &[u8], pinned_pk: Option<&[u8; 32]>) -> Result<Self, MnemeError> {
+        let mut r = Reader::new(wire);
+        r.expect(CONSISTENCY_DOMAIN)?;
+        let version = u16::from_le_bytes(r.take_arr::<2>()?);
+        if version != MTL_RECEIPT_VERSION {
+            return Err(MnemeError::UnsupportedVersion { got: version });
+        }
+        let first_size = u64::from_le_bytes(r.take_arr::<8>()?);
+        let second_size = u64::from_le_bytes(r.take_arr::<8>()?);
+        let first_root = r.take_arr::<32>()?;
+        let second_root = r.take_arr::<32>()?;
+        let proof_path = r.take_id_list()?;
+        let operator_pk = r.take_arr::<32>()?;
+        let payload_len = r.consumed();
+        let envelope_sig = r.take_arr::<64>()?;
+        let head_sig = r.take_arr::<64>()?;
+        r.expect_end()?;
+
+        if let Some(pk) = pinned_pk {
+            if pk != &operator_pk {
+                return Err(MnemeError::RootSigInvalid);
+            }
+        }
+        let vk = verifying_key_from_bytes(&operator_pk)?;
+        verify_signature_bytes(&vk, &wire[..payload_len], &envelope_sig)?;
+        verify_signature_bytes(
+            &vk,
+            &consistency_message(first_size, &first_root, second_size, &second_root),
+            &head_sig,
+        )?;
+
+        let m = usize::try_from(first_size).map_err(|_| MnemeError::SchemaDrift)?;
+        let n = usize::try_from(second_size).map_err(|_| MnemeError::SchemaDrift)?;
+        if !verify_consistency(m, n, &first_root, &second_root, &proof_path)? {
+            return Err(MnemeError::ReceiptRootMismatch);
+        }
+
+        Ok(Self {
+            first_size,
+            second_size,
+            first_root,
+            second_root,
+            proof_path,
+            operator_pk,
+            sig: head_sig,
+        })
+    }
+}
+
 /// Append-only transparency log over `LogStatement`s.
 #[derive(Debug, Default, Clone)]
 pub struct TransparencyLog {
@@ -274,6 +502,30 @@ impl TransparencyLog {
             statement: self.statements[index],
             audit_path: audit_path(&leaves, index),
             merkle_root: merkle_root(&leaves),
+            operator_pk: [0u8; 32],
+            sig: [0u8; 64],
+        };
+        receipt.sign_and_encode(operator)
+    }
+
+    /// Build a signed consistency receipt proving the size-`first_size` head is an
+    /// append-only prefix of the current head.
+    pub fn consistency_receipt(
+        &self,
+        first_size: usize,
+        operator: &KeyPair,
+    ) -> Result<Vec<u8>, MnemeError> {
+        let n = self.statements.len();
+        if first_size == 0 || first_size > n {
+            return Err(MnemeError::IndexPathInvalid);
+        }
+        let leaves = self.leaves();
+        let receipt = ConsistencyReceiptV1 {
+            first_size: first_size as u64,
+            second_size: n as u64,
+            first_root: merkle_root(&leaves[..first_size]),
+            second_root: merkle_root(&leaves),
+            proof_path: consistency_proof(&leaves, first_size),
             operator_pk: [0u8; 32],
             sig: [0u8; 64],
         };
@@ -377,5 +629,91 @@ mod tests {
             r5.merkle_root, r6.merkle_root,
             "appending must change the signed head root"
         );
+    }
+
+    fn leaves_of(n: usize) -> Vec<[u8; 32]> {
+        (0..n as u64).map(|i| leaf_hash(&stmt(i))).collect()
+    }
+
+    #[test]
+    fn consistency_proof_verifies_for_all_m_le_n() {
+        // Exhaustive: for every prefix size m of every tree size n (1..=24), the honest
+        // consistency proof must verify against the real prefix/full roots.
+        for n in 1..=24usize {
+            let leaves = leaves_of(n);
+            let root_n = merkle_root(&leaves);
+            for m in 1..=n {
+                let root_m = merkle_root(&leaves[..m]);
+                let proof = consistency_proof(&leaves, m);
+                assert!(
+                    verify_consistency(m, n, &root_m, &root_n, &proof).unwrap(),
+                    "honest consistency m={m} n={n} must verify"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn consistency_rejects_wrong_roots_and_tampered_proof() {
+        let leaves = leaves_of(13);
+        let root_n = merkle_root(&leaves);
+        let root_m = merkle_root(&leaves[..5]);
+        let proof = consistency_proof(&leaves, 5);
+        assert!(verify_consistency(5, 13, &root_m, &root_n, &proof).unwrap());
+        // Wrong first root.
+        assert!(!verify_consistency(5, 13, &[0u8; 32], &root_n, &proof).unwrap());
+        // Wrong second root.
+        assert!(!verify_consistency(5, 13, &root_m, &[0u8; 32], &proof).unwrap());
+        // Tampered proof element.
+        let mut bad = proof.clone();
+        bad[0][0] ^= 1;
+        assert!(!verify_consistency(5, 13, &root_m, &root_n, &bad).unwrap());
+        // Wrong-length proof.
+        let mut short = proof.clone();
+        short.pop();
+        assert!(verify_consistency(5, 13, &root_m, &root_n, &short).is_err());
+    }
+
+    #[test]
+    fn consistency_rejects_non_append_only_fork() {
+        // A "second" tree that is NOT an extension of the prefix (a prefix leaf differs)
+        // must fail: the size-m root no longer matches.
+        let base = leaves_of(10);
+        let root_m = merkle_root(&base[..6]);
+        let mut forked = base.clone();
+        forked[2][0] ^= 0x80; // mutate a leaf inside the prefix
+        let forked_root = merkle_root(&forked);
+        let proof = consistency_proof(&forked, 6); // honest proof for the FORKED tree
+        // Against the original prefix root, the forked tree is not consistent.
+        assert!(!verify_consistency(6, 10, &root_m, &forked_root, &proof).unwrap());
+    }
+
+    #[test]
+    fn consistency_receipt_roundtrip_and_byte_flip() {
+        let op = KeyPair::from_seed([3u8; 32]);
+        let log = log_of(20);
+        let wire = log.consistency_receipt(7, &op).expect("receipt");
+        let r = ConsistencyReceiptV1::verify(&wire, Some(&op.public_key_bytes())).expect("verify");
+        assert_eq!(r.first_size, 7);
+        assert_eq!(r.second_size, 20);
+        for i in 0..wire.len() {
+            let mut bad = wire.clone();
+            bad[i] ^= 0x01;
+            assert!(
+                ConsistencyReceiptV1::verify(&bad, Some(&op.public_key_bytes())).is_err(),
+                "byte flip at {i} must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn consistency_receipt_wrong_pinned_pk_rejected() {
+        let op = KeyPair::from_seed([3u8; 32]);
+        let other = KeyPair::from_seed([4u8; 32]);
+        let wire = log_of(9).consistency_receipt(4, &op).expect("receipt");
+        assert!(matches!(
+            ConsistencyReceiptV1::verify(&wire, Some(&other.public_key_bytes())),
+            Err(MnemeError::RootSigInvalid)
+        ));
     }
 }
