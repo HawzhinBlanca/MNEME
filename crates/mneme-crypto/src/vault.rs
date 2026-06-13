@@ -164,8 +164,9 @@ pub struct FileKeyVault {
 
 impl FileKeyVault {
     pub fn new(store_root: impl AsRef<Path>) -> Result<Self, MnemeError> {
-        let root = store_root.as_ref().join("keys").join("vault");
-        fs::create_dir_all(&root).map_err(|e| io_error(root.display().to_string(), e))?;
+        let store_root = store_root.as_ref();
+        let root = store_root.join("keys").join("vault");
+        ensure_vault_root_dir(store_root, &root)?;
         let (live, shredded) = load_vault_dir(&root)?;
         Ok(Self {
             root,
@@ -473,6 +474,45 @@ pub(crate) fn entry_exists(path: &Path) -> Result<bool, MnemeError> {
         Ok(_) => Ok(true),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(io_error(path.display().to_string(), err)),
+    }
+}
+
+pub(crate) fn ensure_vault_root_dir(store_root: &Path, root: &Path) -> Result<(), MnemeError> {
+    ensure_private_vault_dir(store_root, "vault store root")?;
+    let keys_dir = root.parent().ok_or_else(|| MnemeError::IoFailed {
+        path: root.display().to_string(),
+        kind: "vault root missing parent".into(),
+    })?;
+    ensure_private_vault_dir(keys_dir, "vault keys")?;
+    ensure_private_vault_dir(root, "vault")
+}
+
+fn ensure_private_vault_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    reject_vault_dir_alias(dir, label)?;
+    fs::create_dir_all(dir).map_err(|e| io_error(dir.display().to_string(), e))?;
+    reject_vault_dir_alias(dir, label)
+}
+
+fn reject_vault_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(MnemeError::IoFailed {
+                    path: dir.display().to_string(),
+                    kind: format!("{label} directory symlink"),
+                });
+            }
+            if !file_type.is_dir() {
+                return Err(MnemeError::IoFailed {
+                    path: dir.display().to_string(),
+                    kind: format!("{label} path non-directory"),
+                });
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_error(dir.display().to_string(), err)),
     }
 }
 

@@ -220,6 +220,123 @@ fn expect_envelope_vault_open_err(store: &Path, master: [u8; 32], context: &str)
 }
 
 #[cfg(unix)]
+fn create_symlinked_vault_dir_fixture(store: &Path, external: &Path) {
+    std::fs::create_dir_all(store.join("keys")).expect("keys dir");
+    std::fs::create_dir(external).expect("external vault target");
+    std::os::unix::fs::symlink(external, store.join("keys").join("vault"))
+        .expect("vault dir symlink");
+}
+
+#[cfg(unix)]
+fn create_symlinked_keys_dir_fixture(store: &Path, external: &Path) {
+    std::fs::create_dir(external).expect("external keys target");
+    std::os::unix::fs::symlink(external, store.join("keys")).expect("keys dir symlink");
+}
+
+#[cfg(unix)]
+#[test]
+fn file_vault_constructor_rejects_symlinked_vault_dir_without_writing_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let external = dir.path().join("external-vault");
+    create_symlinked_vault_dir_fixture(dir.path(), &external);
+
+    let err = expect_file_vault_open_err(dir.path(), "symlinked file vault dir");
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "vault directory alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(&external)
+            .expect("external vault target readable")
+            .next()
+            .is_none(),
+        "FileKeyVault::new must reject symlinked vault dirs before writing target files"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.path().join("keys").join("vault"))
+            .expect("vault symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed vault open must leave the symlink entry for explicit repair"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn envelope_vault_constructor_rejects_symlinked_vault_dir_without_writing_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let external = dir.path().join("external-envelope-vault");
+    create_symlinked_vault_dir_fixture(dir.path(), &external);
+
+    let err =
+        expect_envelope_vault_open_err(dir.path(), [0x9e; 32], "symlinked envelope vault dir");
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "envelope vault directory alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(&external)
+            .expect("external vault target readable")
+            .next()
+            .is_none(),
+        "EnvelopeKeyVault::from_master must reject symlinked vault dirs before writing target files"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.path().join("keys").join("vault"))
+            .expect("vault symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed envelope vault open must leave the symlink entry for explicit repair"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn file_vault_constructor_rejects_symlinked_keys_dir_without_writing_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let external = dir.path().join("external-keys");
+    create_symlinked_keys_dir_fixture(dir.path(), &external);
+
+    let err = expect_file_vault_open_err(dir.path(), "symlinked keys dir");
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "vault keys alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(&external)
+            .expect("external keys target readable")
+            .next()
+            .is_none(),
+        "FileKeyVault::new must reject symlinked keys dirs before creating vault targets"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn envelope_vault_constructor_rejects_symlinked_keys_dir_without_writing_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let external = dir.path().join("external-envelope-keys");
+    create_symlinked_keys_dir_fixture(dir.path(), &external);
+
+    let err = expect_envelope_vault_open_err(dir.path(), [0x7e; 32], "symlinked envelope keys dir");
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "envelope vault keys alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(&external)
+            .expect("external keys target readable")
+            .next()
+            .is_none(),
+        "EnvelopeKeyVault::from_master must reject symlinked keys dirs before creating vault targets"
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn file_vault_batch_flush_rejects_symlinked_journal_and_keeps_batch_cancelable() {
     let dir = tempfile::tempdir().expect("tempdir");

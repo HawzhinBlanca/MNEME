@@ -15,9 +15,9 @@ use mneme_core::MnemeError;
 use crate::aead::{open, random_nonce, seal};
 use crate::types::{KEY_ID_LEN, KeyId, OBJECT_KEY_LEN, ObjectKey};
 use crate::vault::{
-    SecretFileMode, entry_exists, io_error, open_append_single_link, random_key_id,
-    random_object_key, read_single_link_file, sync_parent_dir, validate_single_link_file,
-    write_new_secret_file,
+    SecretFileMode, ensure_vault_root_dir, entry_exists, io_error, open_append_single_link,
+    random_key_id, random_object_key, read_single_link_file, sync_parent_dir,
+    validate_single_link_file, write_new_secret_file,
 };
 
 const ENVELOPE_AAD: &[u8] = b"mneme-envelope-key-v1";
@@ -51,8 +51,9 @@ impl EnvelopeKeyVault {
     }
 
     pub fn from_master(store_root: impl AsRef<Path>, master: [u8; 32]) -> Result<Self, MnemeError> {
-        let root = store_root.as_ref().join("keys").join("vault");
-        fs::create_dir_all(&root).map_err(|e| io_error(root.display().to_string(), e))?;
+        let store_root = store_root.as_ref();
+        let root = store_root.join("keys").join("vault");
+        ensure_vault_root_dir(store_root, &root)?;
         let (live, shredded) = load_envelope_dir(&root, &master)?;
         Ok(Self {
             root,
