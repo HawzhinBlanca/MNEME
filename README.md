@@ -28,6 +28,8 @@ The opt-in `commitment_binding` feature ships a **tagged BLAKE3 binding envelope
 
 Design and API docs must never imply semantic truth, exact-NN guarantees, or SNARK/Plonky2 verification for the v0 binding path.
 
+The full agent-facing certificate surface — `robr`/`verify-robr`, `robr-freivalds`, `fcc`/`verify-fcc`, `mtl`/`verify-mtl`, `mtl-consistency`, `replay`/`shapley`, `rpt-probe`, and the MCP recall/embedding paths — is catalogued in [docs/CAPABILITIES.md](docs/CAPABILITIES.md) with a per-capability "Proves / Does NOT prove" table.
+
 ## Validation ladder (§18)
 
 ```bash
