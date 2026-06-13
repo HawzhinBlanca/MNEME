@@ -1,5 +1,6 @@
 //! Determinism foundation gate (blueprint §17.7): byte-identical roots/receipts across runs.
 
+use crate::generated_output;
 use mneme_cap::agent_cap;
 use mneme_core::{
     Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Receipt, TrustTier,
@@ -52,6 +53,8 @@ pub fn foundation_gate(
     operator_seed: Option<[u8; 32]>,
 ) -> Result<FoundationReport, MnemeError> {
     fs::create_dir_all(out).map_err(|e| io_err(out, e))?;
+    let report_path = out.join("foundation.report.json");
+    generated_output::validate_path(&report_path).map_err(|e| io_err(&report_path, e))?;
     let operator_seed = operator_seed.unwrap_or(DEFAULT_FIXTURE_OPERATOR_SEED);
 
     let run_a = build_fixture_run(&out.join("run-a"), operator_seed)?;
@@ -65,12 +68,9 @@ pub fn foundation_gate(
         byte_identical,
     };
 
-    let report_path = out.join("foundation.report.json");
-    fs::write(
-        &report_path,
-        serde_json::to_string_pretty(&report).map_err(|e| io_err(&report_path, e))?,
-    )
-    .map_err(|e| io_err(&report_path, e))?;
+    let report_json = serde_json::to_string_pretty(&report).map_err(|e| io_err(&report_path, e))?;
+    generated_output::write_file(&report_path, report_json.as_bytes())
+        .map_err(|e| io_err(&report_path, e))?;
 
     if !byte_identical {
         return Err(foundation_gate_digest_mismatch_error());
@@ -113,11 +113,8 @@ pub fn foundation_verify(
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
     }
-    fs::write(
-        output,
-        serde_json::to_string_pretty(&result).map_err(|e| io_err(output, e))?,
-    )
-    .map_err(|e| io_err(output, e))?;
+    let result_json = serde_json::to_string_pretty(&result).map_err(|e| io_err(output, e))?;
+    generated_output::write_file(output, result_json.as_bytes()).map_err(|e| io_err(output, e))?;
 
     if !verified {
         return Err(foundation_verify_digest_mismatch_error());

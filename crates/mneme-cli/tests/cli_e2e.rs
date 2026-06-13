@@ -380,6 +380,94 @@ fn forget_emit_proof_rejects_symlink_output_without_overwriting_target() {
         .stdout(predicate::str::contains("body"));
 }
 
+#[cfg(unix)]
+#[test]
+fn determinism_foundation_gate_rejects_symlink_report_without_overwriting_target() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("foundation");
+    fs::create_dir(&out).expect("foundation output dir");
+    let report = out.join("foundation.report.json");
+    let external = dir.path().join("external-report");
+    fs::write(&external, b"external").expect("external fixture");
+    std::os::unix::fs::symlink(&external, &report).expect("report symlink fixture");
+
+    mneme()
+        .args([
+            "determinism",
+            "foundation-gate",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("not a symlink"));
+
+    assert_eq!(
+        fs::read(&external).expect("external target"),
+        b"external",
+        "foundation-gate report writer must not follow and overwrite output symlink targets"
+    );
+    assert!(
+        fs::symlink_metadata(&report)
+            .expect("report symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed foundation-gate write must leave the symlink entry untouched"
+    );
+    assert!(
+        !out.join("run-a").exists(),
+        "foundation-gate should reject report aliases before building fixture runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn determinism_foundation_verify_rejects_symlink_output_without_overwriting_target() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("foundation");
+    let verify_output = dir.path().join("verify.json");
+    let external = dir.path().join("external-verify");
+    fs::write(&external, b"external").expect("external fixture");
+    std::os::unix::fs::symlink(&external, &verify_output).expect("verify symlink fixture");
+
+    mneme()
+        .args([
+            "determinism",
+            "foundation-gate",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    mneme()
+        .args([
+            "determinism",
+            "foundation-verify",
+            out.join("foundation.report.json").to_str().unwrap(),
+            "--output",
+            verify_output.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("not a symlink"));
+
+    assert_eq!(
+        fs::read(&external).expect("external target"),
+        b"external",
+        "foundation-verify writer must not follow and overwrite output symlink targets"
+    );
+    assert!(
+        fs::symlink_metadata(&verify_output)
+            .expect("verify symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed foundation-verify write must leave the symlink entry untouched"
+    );
+}
+
 #[test]
 fn cli_envelope_vault_writes_wrapped_object_keys() {
     let dir = tempdir().unwrap();
