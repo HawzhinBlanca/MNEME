@@ -681,6 +681,9 @@ fn append_journal_line(path: &Path, name: &str, line: &str) -> Result<(), MnemeE
 /// snapshot write and this removal is safe (stale upserts re-apply the same state).
 fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
     let journal = path.join("meta").join(name);
+    if let Some(parent) = journal.parent() {
+        reject_layout_dir_alias(parent, "journal parent")?;
+    }
     if crate::atomic::entry_exists(&journal)? {
         fs::remove_file(&journal).map_err(|e| io_err(&journal, e))?;
         if durability_fsync_enabled() {
@@ -721,10 +724,40 @@ fn apply_key_index_journal(path: &Path, sidecar: &mut KeyIndexSidecar) -> Result
 
 fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
     if let Some(parent) = path.parent() {
+        reject_layout_dir_alias(parent, "layout sync parent")?;
         let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
         dir.sync_all().map_err(|e| io_err(parent, e))?;
     }
     Ok(())
+}
+
+fn reject_layout_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => validate_layout_dir_metadata(dir, label, metadata).map(|_| ()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(dir, err)),
+    }
+}
+
+fn validate_layout_dir_metadata(
+    dir: &Path,
+    label: &str,
+    metadata: fs::Metadata,
+) -> Result<fs::Metadata, MnemeError> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} directory symlink"),
+        });
+    }
+    if !file_type.is_dir() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} path non-directory"),
+        });
+    }
+    Ok(metadata)
 }
 
 fn apply_sidecar(sidecar: &KeyIndexSidecar) -> Result<LoadedKeyIndex, MnemeError> {
@@ -939,6 +972,40 @@ mod tests {
             .split_once(end_marker)
             .unwrap_or_else(|| panic!("{context} should contain end marker `{end_marker}`"));
         section
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn truncate_journal_rejects_symlinked_meta_without_removing_external_journal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dir.path().join("store");
+        let external_meta = dir.path().join("external-meta");
+        fs::create_dir_all(&store).expect("store dir");
+        fs::create_dir(&external_meta).expect("external meta dir");
+        let external_journal = external_meta.join("key_index.journal");
+        fs::write(&external_journal, b"external journal").expect("external journal fixture");
+        std::os::unix::fs::symlink(&external_meta, store.join("meta"))
+            .expect("meta symlink fixture");
+
+        let err = truncate_journal(&store, "key_index.journal")
+            .expect_err("journal truncation should reject symlinked meta");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "meta alias rejection should mention symlink, got {err}"
+        );
+        assert_eq!(
+            fs::read(&external_journal).expect("external journal remains"),
+            b"external journal",
+            "journal truncation must not remove files through a symlinked meta dir"
+        );
+        assert!(
+            fs::symlink_metadata(store.join("meta"))
+                .expect("meta symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed truncation must leave symlinked meta for explicit repair"
+        );
     }
 
     #[test]
