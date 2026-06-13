@@ -234,7 +234,7 @@ pub fn write_objects_batch(store: &Path, objects: &[([u8; 32], &[u8])]) -> Resul
 pub fn remove_object(path: &Path, id: &[u8; 32]) -> Result<(), MnemeError> {
     let hex = hex_encode(id);
     let obj_path = path.join(format!("objects/{}/{}.cbor", &hex[..2], hex));
-    if obj_path.exists() {
+    if crate::atomic::entry_exists(&obj_path)? {
         fs::remove_file(&obj_path).map_err(|e| io_err(&obj_path, e))?;
     }
     Ok(())

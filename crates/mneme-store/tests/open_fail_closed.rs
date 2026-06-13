@@ -1341,6 +1341,40 @@ fn promote_rejects_symlinked_promotion_log_without_appending_target() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn promote_removes_dangling_symlink_for_superseded_object_blob() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+    let mut store = Store::create(dir.path(), operator).expect("create store");
+    let (id, _) = store
+        .remember(
+            episodic_draft("promote-dangling-object-blob", b"durable body"),
+            &cap,
+        )
+        .expect("remember object");
+    let old_blob = only_object_blob_path(dir.path());
+    let missing = dir.path().join("missing-old-object.cbor");
+
+    fs::remove_file(&old_blob).expect("remove real object blob");
+    std::os::unix::fs::symlink(&missing, &old_blob).expect("dangling object symlink");
+    assert!(!old_blob.exists(), "fixture should be a dangling symlink");
+
+    store
+        .promote(&id, TrustTier::Trusted, &cap)
+        .expect("promote should clean up the superseded object entry");
+
+    assert!(
+        std::fs::symlink_metadata(&old_blob).is_err(),
+        "promote must remove a superseded dangling object entry"
+    );
+    assert!(
+        !missing.exists(),
+        "promote must not materialize the dangling object target"
+    );
+}
+
 #[test]
 fn cold_open_rejects_live_key_index_without_object_key_mapping() {
     let dir = TempDir::new().expect("tempdir");
