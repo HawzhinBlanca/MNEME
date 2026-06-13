@@ -1525,6 +1525,7 @@ dependencies = [
  "hex",
  "mneme-core",
  "mneme-crypto",
+ "rand 0.8.6",
  "tempfile",
 ]
 
