@@ -133,6 +133,7 @@ pub(crate) fn entry_exists(path: &Path) -> Result<bool, MnemeError> {
 }
 
 pub(crate) fn reject_store_root_alias(store: &Path) -> Result<(), MnemeError> {
+    reject_store_parent_alias(store)?;
     match fs::symlink_metadata(store) {
         Ok(metadata) => {
             let file_type = metadata.file_type();
@@ -153,6 +154,15 @@ pub(crate) fn reject_store_root_alias(store: &Path) -> Result<(), MnemeError> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(io_err(store, err)),
     }
+}
+
+fn reject_store_parent_alias(store: &Path) -> Result<(), MnemeError> {
+    if let Some(parent) = store.parent() {
+        if !parent.as_os_str().is_empty() {
+            reject_atomic_dir_alias(parent, "store parent")?;
+        }
+    }
+    Ok(())
 }
 
 /// Read a file without following symlinks (§15.1 no-follow-open on Unix).
@@ -373,9 +383,11 @@ pub fn check_no_incomplete(store: &Path) -> Result<(), MnemeError> {
 
 /// Advisory exclusive lock for single-writer store access (L2 deployment invariant).
 pub fn open_store_lock(store: &Path) -> Result<File, MnemeError> {
+    reject_store_parent_alias(store)?;
     if let Some(parent) = store.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+            reject_store_parent_alias(store)?;
         }
     }
     reject_store_root_alias(store)?;

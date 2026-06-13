@@ -1260,4 +1260,35 @@ mod tests {
             "HEAD entry probe must not materialize or follow the dangling target"
         );
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn store_create_rejects_symlinked_parent_without_creating_external_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external_parent = dir.path().join("external-parent");
+        let linked_parent = dir.path().join("linked-parent");
+        std::fs::create_dir(&external_parent).expect("external parent fixture");
+        std::os::unix::fs::symlink(&external_parent, &linked_parent)
+            .expect("store parent symlink fixture");
+
+        let err = match Store::create(&linked_parent.join("store"), KeyPair::generate()) {
+            Ok(_) => panic!("symlinked store parent must fail closed"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            !external_parent.join("store").exists(),
+            "Store::create must not create a store through a symlinked parent"
+        );
+        assert!(
+            std::fs::symlink_metadata(&linked_parent)
+                .expect("linked parent metadata")
+                .file_type()
+                .is_symlink()
+        );
+    }
 }
