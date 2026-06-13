@@ -15,6 +15,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
+#[cfg(unix)]
+use std::fs::{File, OpenOptions};
+#[cfg(unix)]
+use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
 /// Live provenance index: head-set SMT root + known-object set + checkpoint log.
 #[derive(Clone, Debug)]
 pub struct DagIndex {
@@ -39,8 +46,20 @@ impl Default for DagIndex {
 pub fn load_content_addressed_objects(store: &Path) -> Result<PersistedDagState, MnemeError> {
     let mut objects = BTreeMap::new();
     let objects_dir = store.join("objects");
-    if objects_dir.exists() {
-        walk_objects(&objects_dir, &objects_dir, &mut objects)?;
+    match fs::symlink_metadata(&objects_dir) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(MnemeError::IoFailed {
+                    path: objects_dir.display().to_string(),
+                    kind: "object directory symlink".into(),
+                });
+            }
+            if metadata.file_type().is_dir() {
+                walk_objects(&objects_dir, &objects_dir, &mut objects)?;
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(io_err(&objects_dir, err)),
     }
     let entries = objects
         .iter()
@@ -61,20 +80,106 @@ fn walk_objects(
     dir: &Path,
     out: &mut BTreeMap<[u8; 32], Vec<u8>>,
 ) -> Result<(), MnemeError> {
+    let dir_metadata = fs::symlink_metadata(dir).map_err(|e| io_err(dir, e))?;
+    let dir_type = dir_metadata.file_type();
+    if dir_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: "object directory symlink".into(),
+        });
+    }
+    if !dir_type.is_dir() {
+        return Ok(());
+    }
     for entry in fs::read_dir(dir).map_err(|e| io_err(dir, e))? {
         let entry = entry.map_err(|e| io_err(dir, e))?;
         let path = entry.path();
-        if path.is_dir() {
+        let file_type = entry.file_type().map_err(|e| io_err(&path, e))?;
+        if file_type.is_symlink() {
+            return Err(MnemeError::IoFailed {
+                path: path.display().to_string(),
+                kind: "object path symlink".into(),
+            });
+        }
+        if file_type.is_dir() {
             walk_objects(objects_dir, &path, out)?;
         } else if path.extension().is_some_and(|e| e == "cbor") {
+            if !file_type.is_file() {
+                return Err(MnemeError::IoFailed {
+                    path: path.display().to_string(),
+                    kind: "object path non-regular".into(),
+                });
+            }
             // Preserve the on-disk claim. Verifiers must compare this id with
             // the blob hash separately so byte flips remain non-tautological.
             let claimed_id = decode_content_addressed_object_path(objects_dir, &path)?;
-            let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+            let bytes = read_object_file(&path)?;
             if out.insert(claimed_id, bytes).is_some() {
                 return Err(MnemeError::SchemaDrift);
             }
         }
+    }
+    Ok(())
+}
+
+fn read_object_file(path: &Path) -> Result<Vec<u8>, MnemeError> {
+    #[cfg(unix)]
+    {
+        let mut options = OpenOptions::new();
+        options.read(true).custom_flags(libc::O_NOFOLLOW);
+        let mut file = options.open(path).map_err(|e| io_err(path, e))?;
+        validate_open_object_file(path, &file)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|e| io_err(path, e))?;
+        Ok(bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        validate_object_file(path)?;
+        fs::read(path).map_err(|e| io_err(path, e))
+    }
+}
+
+fn validate_object_file(path: &Path) -> Result<fs::Metadata, MnemeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| io_err(path, e))?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "object path symlink".into(),
+        });
+    }
+    if !file_type.is_file() {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "object path non-regular".into(),
+        });
+    }
+    #[cfg(unix)]
+    if metadata.nlink() != 1 {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "object path hard-linked".into(),
+        });
+    }
+    Ok(metadata)
+}
+
+#[cfg(unix)]
+fn validate_open_object_file(path: &Path, file: &File) -> Result<(), MnemeError> {
+    let path_metadata = validate_object_file(path)?;
+    let file_metadata = file.metadata().map_err(|e| io_err(path, e))?;
+    if !file_metadata.file_type().is_file() || file_metadata.nlink() != 1 {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "opened object path is not a regular single-link file".into(),
+        });
+    }
+    if path_metadata.dev() != file_metadata.dev() || path_metadata.ino() != file_metadata.ino() {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "object path changed during open".into(),
+        });
     }
     Ok(())
 }
@@ -550,6 +655,55 @@ mod tests {
         match load_content_addressed_objects(&store.path) {
             Err(err) => assert_eq!(err, MnemeError::SchemaDrift),
             Ok(_) => panic!("nested object path must fail closed"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_content_addressed_objects_rejects_symlinked_object_blob() {
+        let store = TempStore::new("symlink-object");
+        let (id, bytes) = fixture_object();
+        let id_hex = hex32(&id);
+        write_object(&store, &id_hex[..2], &id_hex, &bytes);
+        let object_path = store
+            .path
+            .join("objects")
+            .join(&id_hex[..2])
+            .join(format!("{id_hex}.cbor"));
+        let external = store.path.join("external-object.cbor");
+        fs::rename(&object_path, &external).expect("move object fixture");
+        std::os::unix::fs::symlink(&external, &object_path).expect("object symlink");
+
+        match load_content_addressed_objects(&store.path) {
+            Err(MnemeError::IoFailed { kind, .. }) => {
+                assert_eq!(kind, "object path symlink");
+            }
+            Err(err) => panic!("expected object symlink IO failure, got {err:?}"),
+            Ok(_) => panic!("symlinked object path must fail closed"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_content_addressed_objects_rejects_hardlinked_object_blob() {
+        let store = TempStore::new("hardlinked-object");
+        let (id, bytes) = fixture_object();
+        let id_hex = hex32(&id);
+        write_object(&store, &id_hex[..2], &id_hex, &bytes);
+        let object_path = store
+            .path
+            .join("objects")
+            .join(&id_hex[..2])
+            .join(format!("{id_hex}.cbor"));
+        let external = store.path.join("external-object.cbor");
+        fs::hard_link(&object_path, &external).expect("object hardlink");
+
+        match load_content_addressed_objects(&store.path) {
+            Err(MnemeError::IoFailed { kind, .. }) => {
+                assert_eq!(kind, "object path hard-linked");
+            }
+            Err(err) => panic!("expected object hardlink IO failure, got {err:?}"),
+            Ok(_) => panic!("hard-linked object path must fail closed"),
         }
     }
 

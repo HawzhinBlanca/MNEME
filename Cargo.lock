@@ -1453,6 +1453,7 @@ dependencies = [
 name = "mneme-dag"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mneme-core",
  "mneme-smt",
 ]
