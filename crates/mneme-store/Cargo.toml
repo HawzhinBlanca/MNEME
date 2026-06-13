@@ -56,6 +56,10 @@ hex.workspace = true
 mneme-pace.workspace = true
 
 [[test]]
+name = "checkpoint_log"
+path = "tests/checkpoint_log.rs"
+
+[[test]]
 name = "e2e"
 path = "../../tests/e2e/mod.rs"
 harness = true

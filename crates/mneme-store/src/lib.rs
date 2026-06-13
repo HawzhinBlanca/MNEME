@@ -1054,6 +1054,24 @@ impl Store {
         )
     }
 
+    /// The `(sequence, root preimage)` of every persisted checkpoint root in the
+    /// append-only log, oldest first (genesis is sequence 1). This is the kernel's
+    /// authoritative root history — the basis for an MTL transparency log that cannot
+    /// drift from what was actually committed. O(n) on-demand read over the checkpoint
+    /// files; it is NOT on the write path. HONESTY: a single-operator log of these
+    /// statements proves append-order and inclusion, NOT non-equivocation (that needs
+    /// witness gossip / multiple operators).
+    pub fn checkpoint_log_statements(&self) -> Result<Vec<(u64, [u8; 32])>, MnemeError> {
+        let current = self.current_root()?.sequence;
+        let mut out = Vec::with_capacity(current as usize);
+        for seq in 1..=current {
+            let stored = mneme_root::CheckpointLog::read_checkpoint(&self.path, seq)?;
+            let root = stored.to_root();
+            out.push((root.sequence, root.preimage_hash));
+        }
+        Ok(out)
+    }
+
     fn verify_cap(&self, cap: &Capability) -> Result<(), MnemeError> {
         cap.verify(&self.operator, &self.hlc)
     }

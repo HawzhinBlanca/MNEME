@@ -302,6 +302,12 @@ enum Commands {
         /// Output path for the inclusion receipt
         #[arg(long = "out")]
         out: PathBuf,
+        /// Derive the log from the kernel's persisted checkpoint roots (the authoritative
+        /// committed history) instead of appending only the current root to --log. The
+        /// derived statements are written to --log canonically and the receipt covers the
+        /// latest root. The log cannot drift from what was actually committed.
+        #[arg(long = "from-checkpoints")]
+        from_checkpoints: bool,
     },
     /// Offline verify an MTL inclusion receipt (signatures + Merkle inclusion)
     VerifyMtl {
@@ -1025,33 +1031,57 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             println!("honesty: {}", fcc::FCC_HONESTY);
             Ok(())
         }
-        Commands::Mtl { store, log, out } => {
+        Commands::Mtl {
+            store,
+            log,
+            out,
+            from_checkpoints,
+        } => {
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let mneme_store = open_store(&store, operator.clone(), cli.vault)?;
             let root = mneme_store.current_root().map_err(CliErrorKind::Kernel)?;
 
-            // Parse the existing append-only log (one `seq:preimage_hex` per line).
             let mut statements: Vec<mtl::LogStatement> = Vec::new();
-            if log.exists() {
-                let body = std::fs::read_to_string(&log).map_err(|_| CliErrorKind::Usage)?;
-                for line in body.lines().filter(|l| !l.trim().is_empty()) {
-                    let (seq_s, hex_s) = line.split_once(':').ok_or(CliErrorKind::Usage)?;
-                    let root_seq: u64 = seq_s.trim().parse().map_err(|_| CliErrorKind::Usage)?;
-                    let root_preimage = parse_seed_hex(hex_s.trim())?;
+            if from_checkpoints {
+                // Derive the full log from the kernel's authoritative committed history,
+                // so the transparency log cannot drift from what was actually committed.
+                for (root_seq, root_preimage) in mneme_store
+                    .checkpoint_log_statements()
+                    .map_err(CliErrorKind::Kernel)?
+                {
                     statements.push(mtl::LogStatement {
                         root_seq,
                         root_preimage,
                     });
                 }
+            } else {
+                // Parse the existing append-only log (one `seq:preimage_hex` per line).
+                if log.exists() {
+                    let body = std::fs::read_to_string(&log).map_err(|_| CliErrorKind::Usage)?;
+                    for line in body.lines().filter(|l| !l.trim().is_empty()) {
+                        let (seq_s, hex_s) = line.split_once(':').ok_or(CliErrorKind::Usage)?;
+                        let root_seq: u64 =
+                            seq_s.trim().parse().map_err(|_| CliErrorKind::Usage)?;
+                        let root_preimage = parse_seed_hex(hex_s.trim())?;
+                        statements.push(mtl::LogStatement {
+                            root_seq,
+                            root_preimage,
+                        });
+                    }
+                }
+                // Append the current root unless it is already the last logged statement.
+                let current = mtl::LogStatement {
+                    root_seq: root.sequence,
+                    root_preimage: root.preimage_hash,
+                };
+                if statements.last() != Some(&current) {
+                    statements.push(current);
+                }
             }
-            // Append the current root unless it is already the last logged statement.
-            let current = mtl::LogStatement {
-                root_seq: root.sequence,
-                root_preimage: root.preimage_hash,
-            };
-            if statements.last() != Some(&current) {
-                statements.push(current);
+            if statements.is_empty() {
+                eprintln!("mneme: mtl has no statements to log");
+                return Err(CliErrorKind::Usage);
             }
             // Rewrite the append-only log file.
             let mut body = String::new();
