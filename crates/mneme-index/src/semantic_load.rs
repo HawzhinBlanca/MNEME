@@ -9,8 +9,6 @@ use crate::SemanticIndex;
 use mneme_core::{FixedPointEmbedding, MnemeError, ObjectId, decode_hex32};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs;
-use std::io::ErrorKind;
 use std::path::Path;
 
 #[derive(serde::Deserialize, Default)]
@@ -201,11 +199,7 @@ fn parse_embedding(
 }
 
 fn semantic_load_read_optional_to_string(path: &Path) -> Result<Option<String>, MnemeError> {
-    match fs::read_to_string(path) {
-        Ok(data) => Ok(Some(data)),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(io_err(path, err)),
-    }
+    crate::store_file::read_optional_to_string(path)
 }
 
 fn semantic_load_journal_line_is_blank(line: &str) -> bool {
@@ -284,16 +278,11 @@ pub fn load_semantic_commit<'a>(
     Ok(semantic.semantic_commit())
 }
 
-fn io_err(path: &Path, err: std::io::Error) -> MnemeError {
-    MnemeError::IoFailed {
-        path: path.display().to_string(),
-        kind: err.kind().to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -355,11 +344,21 @@ mod tests {
         let start = production
             .find("fn load_embeddings(")
             .expect("semantic loader replay should stay in production source");
-        let end_marker = "fn io_err(";
-        let relative_end = production[start..]
-            .find(end_marker)
-            .expect("semantic loader replay should stay before I/O adapter");
-        &production[start..start + relative_end]
+        &production[start..]
+    }
+
+    #[test]
+    fn semantic_load_reads_sidecars_through_store_file_custody() {
+        let production = semantic_load_production_source();
+
+        assert!(
+            production.contains("crate::store_file::read_optional_to_string(path)"),
+            "semantic load optional reads should delegate to the single-link store-file reader"
+        );
+        assert!(
+            !production.contains("fs::read_to_string("),
+            "semantic load production code must not read store sidecars through path-following fs::read_to_string"
+        );
     }
 
     fn semantic_load_expect_io_failed_path(err: MnemeError, expected_path: &Path, context: &str) {
@@ -407,8 +406,12 @@ mod tests {
         semantic_load_write_embedding_snapshot_raw(meta, &document.to_string());
     }
 
+    fn semantic_load_embedding_snapshot_path(meta: &Path) -> PathBuf {
+        meta.join("embeddings.json")
+    }
+
     fn semantic_load_write_embedding_snapshot_raw(meta: &Path, document: &str) {
-        fs::write(meta.join("embeddings.json"), document)
+        fs::write(semantic_load_embedding_snapshot_path(meta), document)
             .expect("semantic snapshot fixture should be written");
     }
 
@@ -8609,6 +8612,28 @@ mod tests {
             .expect_err("non-NotFound semantic journal I/O should reject");
 
         semantic_load_expect_io_failed_path(err, &journal, "journal");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn semantic_load_rejects_symlinked_snapshot_without_following_target() {
+        let dir = SemanticLoadTestDir::new("snapshot-symlink");
+        let meta = dir.path().join("meta");
+        fs::create_dir_all(&meta).expect("semantic symlink meta dir should be created");
+        let external = dir.path().join("external-embeddings.json");
+        let snapshot = semantic_load_embedding_snapshot_path(&meta);
+        fs::write(&external, r#"{"entries":{}}"#).expect("external semantic snapshot");
+        std::os::unix::fs::symlink(&external, &snapshot).expect("semantic snapshot symlink");
+
+        let err = load_semantic_commit(dir.path(), std::iter::empty::<&[u8; 32]>())
+            .expect_err("symlinked semantic snapshot rejected");
+
+        semantic_load_expect_io_failed_path(err, &snapshot, "symlinked snapshot");
+        assert_eq!(
+            fs::read_to_string(&external).expect("external semantic snapshot"),
+            r#"{"entries":{}}"#,
+            "semantic loader must not mutate the symlink target"
+        );
     }
 
     #[test]

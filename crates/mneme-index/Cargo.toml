@@ -17,6 +17,7 @@ thiserror.workspace = true
 fast-hnsw = "1.0.1"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+libc = "0.2"
 # 12-month milestone (B3) ZK retrieval backend, only linked under `pedersen_schnorr_zk`.
 # NOTE: Plonky2 1.x requires nightly (`feature(specialization)` in plonky2_field) and is
 # incompatible with the repo's pinned stable toolchain (rust-toolchain.toml = 1.86.0). We

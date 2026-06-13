@@ -1487,6 +1487,7 @@ dependencies = [
  "curve25519-dalek",
  "fast-hnsw",
  "hex",
+ "libc",
  "mneme-context",
  "mneme-core",
  "mneme-crypto",

@@ -10,8 +10,6 @@
 use mneme_core::{LogicalKey, MnemeError, decode_hex32};
 use mneme_smt::SparseMerkleTree;
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::ErrorKind;
 use std::path::Path;
 
 #[derive(serde::Deserialize)]
@@ -125,11 +123,7 @@ fn parse_key_index_load_hex32(
 }
 
 fn read_optional_to_string(path: &Path) -> Result<Option<String>, MnemeError> {
-    match fs::read_to_string(path) {
-        Ok(data) => Ok(Some(data)),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(io_err(path, err)),
-    }
+    crate::store_file::read_optional_to_string(path)
 }
 
 fn key_index_load_journal_line_is_blank(line: &str) -> bool {
@@ -245,13 +239,6 @@ pub fn load_key_index_tree(store: &Path) -> Result<SparseMerkleTree, MnemeError>
     Ok(tree)
 }
 
-fn io_err(path: &Path, err: std::io::Error) -> MnemeError {
-    MnemeError::IoFailed {
-        path: path.display().to_string(),
-        kind: err.kind().to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,11 +255,7 @@ mod tests {
         let start = production
             .find("pub fn load_object_keys(")
             .expect("key-index load replay functions should stay in production source");
-        let end_marker = "fn io_err(";
-        let relative_end = production[start..]
-            .find(end_marker)
-            .expect("key-index load replay functions should stay before I/O adapter");
-        &production[start..start + relative_end]
+        &production[start..]
     }
 
     #[test]
@@ -360,6 +343,62 @@ mod tests {
         assert!(
             !production.contains(&forbidden),
             "key-index load replay loops should call the named blank-line predicate"
+        );
+    }
+
+    #[test]
+    fn key_index_load_reads_sidecars_through_store_file_custody() {
+        let production = key_index_load_production_source();
+
+        assert!(
+            production.contains("crate::store_file::read_optional_to_string(path)"),
+            "key-index load optional reads should delegate to the single-link store-file reader"
+        );
+        assert!(
+            !production.contains("fs::read_to_string("),
+            "key-index load production code must not read store sidecars through path-following fs::read_to_string"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn key_index_load_rejects_symlinked_snapshot_without_following_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta = dir.path().join("meta");
+        std::fs::create_dir_all(&meta).expect("meta");
+        let external = dir.path().join("external-key-index.json");
+        let snapshot = meta.join("key_index.json");
+        std::fs::write(&external, r#"{"entries":{},"tombstones":[]}"#).expect("external snapshot");
+        std::os::unix::fs::symlink(&external, &snapshot).expect("snapshot symlink");
+
+        let err = load_key_index_tree(dir.path()).expect_err("symlinked snapshot rejected");
+
+        assert!(matches!(err, MnemeError::IoFailed { .. }));
+        assert_eq!(
+            std::fs::read_to_string(&external).expect("external target"),
+            r#"{"entries":{},"tombstones":[]}"#,
+            "loader must not mutate the symlink target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn object_key_load_rejects_symlinked_journal_without_following_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta = dir.path().join("meta");
+        std::fs::create_dir_all(&meta).expect("meta");
+        let external = dir.path().join("external-object-keys.journal");
+        let journal = meta.join("object_keys.journal");
+        std::fs::write(&external, b"").expect("external journal");
+        std::os::unix::fs::symlink(&external, &journal).expect("journal symlink");
+
+        let err = load_object_keys(dir.path()).expect_err("symlinked journal rejected");
+
+        assert!(matches!(err, MnemeError::IoFailed { .. }));
+        assert_eq!(
+            std::fs::read(&external).expect("external target"),
+            b"",
+            "loader must not mutate the symlink target"
         );
     }
 

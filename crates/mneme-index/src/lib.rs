@@ -28,6 +28,7 @@ mod semantic_load;
 #[cfg(test)]
 #[path = "../../../tests/support/source_inventory.rs"]
 mod source_inventory;
+mod store_file;
 mod verify;
 mod wire;
 mod zkann;

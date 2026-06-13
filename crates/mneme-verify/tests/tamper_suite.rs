@@ -1885,6 +1885,60 @@ fn tamper_verify_store_rejects_symlinked_head_without_following_target() {
     assert!(external.exists(), "external HEAD target must remain intact");
 }
 
+#[cfg(unix)]
+#[test]
+fn tamper_verify_store_rejects_symlinked_key_index_snapshot_without_following_target() {
+    let (dir, trust) = persisted_store_with_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline store must verify clean"
+    );
+    let key_index = dir.path().join("meta/key_index.json");
+    let external = dir.path().join("external-key-index.json");
+    std::fs::copy(&key_index, &external).expect("external key-index copy");
+    let external_before = std::fs::read(&external).expect("external key-index target");
+    std::fs::remove_file(&key_index).expect("remove key-index snapshot");
+    std::os::unix::fs::symlink(&external, &key_index).expect("key-index snapshot symlink");
+
+    match verify_store(dir.path(), &trust) {
+        Err(MnemeError::IoFailed { .. }) => {}
+        Err(err) => panic!("expected IO failure for symlinked key-index snapshot, got {err:?}"),
+        Ok(_) => panic!("verify_store followed a symlinked key-index snapshot"),
+    }
+    assert_eq!(
+        std::fs::read(&external).expect("external key-index target"),
+        external_before,
+        "failed verification must leave the external key-index target readable"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn tamper_verify_store_rejects_symlinked_semantic_journal_without_following_target() {
+    let (dir, trust) = persisted_store_with_semantic_entry();
+    assert!(
+        verify_store(dir.path(), &trust).is_ok(),
+        "baseline semantic store must verify clean"
+    );
+    let embeddings = dir.path().join("meta/embeddings.journal");
+    let external = dir.path().join("external-embeddings.journal");
+    std::fs::copy(&embeddings, &external).expect("external embeddings journal copy");
+    let external_before = std::fs::read(&external).expect("external embeddings journal target");
+    std::fs::remove_file(&embeddings).expect("remove embeddings journal");
+    std::os::unix::fs::symlink(&external, &embeddings).expect("embeddings journal symlink");
+
+    match verify_store(dir.path(), &trust) {
+        Err(MnemeError::IoFailed { .. }) => {}
+        Err(err) => panic!("expected IO failure for symlinked embeddings journal, got {err:?}"),
+        Ok(_) => panic!("verify_store followed a symlinked embeddings journal"),
+    }
+    assert_eq!(
+        std::fs::read(&external).expect("external embeddings journal target"),
+        external_before,
+        "failed verification must leave the external embeddings target readable"
+    );
+}
+
 /// F-3: a tampered NON-adjacent intermediate checkpoint (`roots/1.root.cbor` while
 /// HEAD is seq 3) must now fail closed; previously only HEAD's `seq-1` predecessor
 /// was re-verified, so this left `verify_store == Ok`.
