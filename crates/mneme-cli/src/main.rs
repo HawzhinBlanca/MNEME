@@ -1,12 +1,12 @@
 //! `mneme` CLI — adoption-layer fail-closed gate (blueprint §14.2).
 
 mod attest;
+mod card;
 mod cert;
 mod determinism;
 mod fcc;
 mod freivalds;
 mod mtl;
-mod card;
 mod pace;
 mod replay;
 mod rpt;
