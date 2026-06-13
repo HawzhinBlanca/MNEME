@@ -60,6 +60,7 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
                 return Ok(());
             }
             reject_atomic_dir_alias(parent, "root sync parent")?;
+            reject_atomic_parent_ancestor_alias(parent, "root sync parent")?;
             let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
             dir.sync_all().map_err(|e| io_err(parent, e))?;
         }
@@ -77,8 +78,21 @@ fn ensure_atomic_parent_dir(parent: &Path, label: &str) -> Result<(), MnemeError
         return Ok(());
     }
     reject_atomic_dir_alias(parent, label)?;
+    reject_atomic_parent_ancestor_alias(parent, label)?;
     fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
-    reject_atomic_dir_alias(parent, label)
+    reject_atomic_dir_alias(parent, label)?;
+    reject_atomic_parent_ancestor_alias(parent, label)
+}
+
+fn reject_atomic_parent_ancestor_alias(parent: &Path, label: &str) -> Result<(), MnemeError> {
+    // Limit the alias scan to the mutable root-boundary suffix; scanning every
+    // absolute ancestor would reject platform aliases like macOS /var.
+    if let Some(ancestor) = parent.parent() {
+        if !ancestor.as_os_str().is_empty() {
+            reject_atomic_dir_alias(ancestor, &format!("{label} ancestor"))?;
+        }
+    }
+    Ok(())
 }
 
 fn reject_atomic_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
@@ -255,6 +269,41 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn atomic_write_rejects_symlinked_parent_ancestor_without_writing_external_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-roots-ancestor");
+        let linked_ancestor = dir.path().join("linked-roots-ancestor");
+        let parent = linked_ancestor.join("nested");
+        std::fs::create_dir(&external).expect("external roots ancestor target");
+        std::fs::create_dir(external.join("nested")).expect("external nested roots target");
+        std::os::unix::fs::symlink(&external, &linked_ancestor)
+            .expect("roots parent ancestor symlink");
+
+        let err = atomic_write(&parent.join("HEAD"), b"root")
+            .expect_err("root atomic write should reject a symlinked parent ancestor");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "parent ancestor alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            std::fs::read_dir(external.join("nested"))
+                .expect("external nested roots read")
+                .next()
+                .is_none(),
+            "root atomic write must not create temp or target files through a symlinked parent ancestor"
+        );
+        assert!(
+            std::fs::symlink_metadata(&linked_ancestor)
+                .expect("ancestor symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed root atomic write must leave the symlinked ancestor for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn sync_parent_dir_rejects_symlinked_parent() {
         let dir = tempfile::tempdir().expect("tempdir");
         let external = dir.path().join("external-sync-roots");
@@ -275,6 +324,34 @@ mod tests {
                 .file_type()
                 .is_symlink(),
             "failed parent sync must leave the symlinked parent for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_parent_dir_rejects_symlinked_parent_ancestor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-sync-roots-ancestor");
+        let linked_ancestor = dir.path().join("linked-sync-roots-ancestor");
+        let parent = linked_ancestor.join("nested");
+        std::fs::create_dir(&external).expect("external sync roots ancestor target");
+        std::fs::create_dir(external.join("nested")).expect("external nested sync roots target");
+        std::os::unix::fs::symlink(&external, &linked_ancestor)
+            .expect("sync parent ancestor symlink");
+
+        let err = sync_parent_dir(&parent.join("HEAD"))
+            .expect_err("root parent fsync should reject a symlinked parent ancestor");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "sync parent ancestor alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            std::fs::symlink_metadata(&linked_ancestor)
+                .expect("sync parent ancestor symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed parent sync must leave the symlinked ancestor for explicit repair"
         );
     }
 
