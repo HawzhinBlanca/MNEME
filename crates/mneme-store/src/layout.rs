@@ -139,6 +139,7 @@ pub fn append_promotion_event(path: &Path, event: &PromotionEvent) -> Result<(),
 }
 
 pub fn init_store(path: &Path) -> Result<(), MnemeError> {
+    crate::atomic::reject_store_root_alias(path)?;
     reject_store_layout_aliases(path)?;
     ensure_private_store_dir(&path.join("objects"), "objects")?;
     ensure_private_store_dir(&path.join("roots"), "roots")?;
@@ -169,8 +170,21 @@ pub fn reject_store_layout_aliases(path: &Path) -> Result<(), MnemeError> {
 
 fn ensure_private_store_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
     reject_store_dir_alias(dir, label)?;
+    reject_layout_parent_ancestor_alias(dir, label)?;
     fs::create_dir_all(dir).map_err(|e| io_err(dir, e))?;
-    reject_store_dir_alias(dir, label)
+    reject_store_dir_alias(dir, label)?;
+    reject_layout_parent_ancestor_alias(dir, label)
+}
+
+fn reject_layout_parent_ancestor_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    // Limit the alias scan to the mutable layout-boundary suffix; scanning every
+    // absolute ancestor would reject platform aliases like macOS /var.
+    if let Some(ancestor) = dir.parent() {
+        if !ancestor.as_os_str().is_empty() {
+            reject_store_dir_alias(ancestor, &format!("{label} ancestor"))?;
+        }
+    }
+    Ok(())
 }
 
 fn reject_store_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
@@ -242,7 +256,7 @@ pub fn write_redaction_record(
     record: &mneme_forget::RedactionRecord,
 ) -> Result<(), MnemeError> {
     let dir = path.join("meta/redactions");
-    fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
+    ensure_private_store_dir(&dir, "meta/redactions")?;
     let file = dir.join(format!("{}.json", hex_encode(&record.old_object_id)));
     let data =
         serde_json::to_string_pretty(record).map_err(|_| layout_redaction_record_json_error())?;
@@ -292,7 +306,7 @@ pub fn remove_object(path: &Path, id: &[u8; 32]) -> Result<(), MnemeError> {
 /// append. Deterministic: `BTreeMap` entries + sorted tombstones.
 pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
-    fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
+    ensure_private_store_dir(&meta, "meta")?;
     let mut sidecar = KeyIndexSidecar::default();
     for (k, v) in store.key_to_object_ref() {
         sidecar.entries.insert(hex_encode(k), hex_encode(v));
@@ -310,7 +324,7 @@ pub fn persist_key_index(path: &Path, store: &Store) -> Result<(), MnemeError> {
 #[cfg(feature = "bitemporal_recall")]
 pub fn snapshot_key_index_at_seq(path: &Path, seq: u64, store: &Store) -> Result<(), MnemeError> {
     let dir = path.join("meta/snapshots").join(seq.to_string());
-    fs::create_dir_all(&dir).map_err(|e| io_err(&dir, e))?;
+    ensure_private_store_dir(&dir, "meta/snapshot")?;
     let mut sidecar = KeyIndexSidecar::default();
     for (k, v) in store.key_to_object_ref() {
         sidecar.entries.insert(hex_encode(k), hex_encode(v));
@@ -370,7 +384,7 @@ pub fn persist_key_index_tombstone(path: &Path, key_hash: &[u8; 32]) -> Result<(
 /// `persist_object_keys_upsert` below to avoid an O(n) rewrite per op (§22 K5).
 pub fn persist_object_keys(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
-    fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
+    ensure_private_store_dir(&meta, "meta")?;
     let mut sidecar = ObjectKeysSidecar::default();
     for (id, key) in store.object_keys_ref() {
         sidecar.entries.insert(
@@ -545,7 +559,7 @@ pub fn load_state(path: &Path) -> Result<LoadedState, MnemeError> {
 /// `persist_object_keys`). Hot paths use the incremental helpers below.
 pub fn persist_embeddings(path: &Path, store: &Store) -> Result<(), MnemeError> {
     let meta = path.join("meta");
-    fs::create_dir_all(&meta).map_err(|e| io_err(&meta, e))?;
+    ensure_private_store_dir(&meta, "meta")?;
     let mut sidecar = EmbeddingSidecar::default();
     for (id, emb) in store.embeddings_ref() {
         sidecar.entries.insert(
@@ -683,6 +697,7 @@ fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
     let journal = path.join("meta").join(name);
     if let Some(parent) = journal.parent() {
         reject_layout_dir_alias(parent, "journal parent")?;
+        reject_layout_parent_ancestor_alias(parent, "journal parent")?;
     }
     if crate::atomic::entry_exists(&journal)? {
         fs::remove_file(&journal).map_err(|e| io_err(&journal, e))?;
@@ -725,6 +740,7 @@ fn apply_key_index_journal(path: &Path, sidecar: &mut KeyIndexSidecar) -> Result
 fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
     if let Some(parent) = path.parent() {
         reject_layout_dir_alias(parent, "layout sync parent")?;
+        reject_layout_parent_ancestor_alias(parent, "layout sync parent")?;
         let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
         dir.sync_all().map_err(|e| io_err(parent, e))?;
     }
@@ -1005,6 +1021,37 @@ mod tests {
                 .file_type()
                 .is_symlink(),
             "failed truncation must leave symlinked meta for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_store_rejects_symlinked_parent_ancestor_without_creating_external_layout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-layout-ancestor");
+        let linked_ancestor = dir.path().join("linked-layout-ancestor");
+        let store = linked_ancestor.join("nested/store");
+        fs::create_dir_all(external.join("nested")).expect("external nested target");
+        std::os::unix::fs::symlink(&external, &linked_ancestor)
+            .expect("layout parent ancestor symlink");
+
+        let err = init_store(&store)
+            .expect_err("layout init should reject a symlinked store parent ancestor");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "layout ancestor alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            !external.join("nested/store").exists(),
+            "layout init must not create a store through a symlinked parent ancestor"
+        );
+        assert!(
+            fs::symlink_metadata(&linked_ancestor)
+                .expect("layout ancestor symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed layout init must leave the symlinked ancestor for explicit repair"
         );
     }
 
