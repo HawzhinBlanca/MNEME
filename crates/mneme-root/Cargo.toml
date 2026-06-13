@@ -9,6 +9,7 @@ mneme-core.workspace = true
 mneme-crypto.workspace = true
 ed25519-dalek.workspace = true
 rand.workspace = true
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

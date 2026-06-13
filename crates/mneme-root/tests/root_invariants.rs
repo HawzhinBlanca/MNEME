@@ -181,6 +181,37 @@ fn head_write_and_read_roundtrip() {
     assert!(checkpoint_file(store, 3).exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn checkpoint_reads_reject_symlinked_head_and_sequence_files() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = dir.path().join("store");
+    let external = dir.path().join("external");
+    std::fs::create_dir_all(external.join("roots")).expect("external roots dir");
+    let op = operator();
+    let roots = commit_root_sequence(&store, &op, 2);
+    let external_bytes = roots[1].to_bytes().expect("external root bytes");
+    let external_head = external.join("roots/HEAD");
+    let external_checkpoint = external.join("roots/1.root.cbor");
+    std::fs::write(&external_head, &external_bytes).expect("external head");
+    std::fs::write(&external_checkpoint, &external_bytes).expect("external checkpoint");
+
+    let head_path = store.join("roots/HEAD");
+    std::fs::remove_file(&head_path).expect("remove real head");
+    std::os::unix::fs::symlink(&external_head, &head_path).expect("head symlink");
+
+    let head_err = CheckpointLog::read_head(&store).expect_err("symlinked HEAD rejected");
+    assert!(matches!(head_err, MnemeError::IoFailed { .. }));
+
+    let checkpoint_path = store.join("roots/1.root.cbor");
+    std::fs::remove_file(&checkpoint_path).expect("remove real checkpoint");
+    std::os::unix::fs::symlink(&external_checkpoint, &checkpoint_path).expect("checkpoint symlink");
+
+    let checkpoint_err =
+        CheckpointLog::read_checkpoint(&store, 1).expect_err("symlinked checkpoint rejected");
+    assert!(matches!(checkpoint_err, MnemeError::IoFailed { .. }));
+}
+
 #[test]
 fn root_history_digest_extends_on_append_and_rejects_stale_pin() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -855,6 +886,60 @@ fn root_history_peak_digest_rejects_well_formed_but_false_sidecar() {
     read_root_history_peak_state(store).expect("forged sidecar is syntactically valid");
     let err = root_history_peak_digest(store, &[op.public_key_bytes()], head).unwrap_err();
     assert_eq!(err, MnemeError::RootInconsistent);
+}
+
+#[cfg(unix)]
+#[test]
+fn root_history_peak_state_read_rejects_symlinked_sidecar() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = dir.path().join("store");
+    let external = dir.path().join("external");
+    std::fs::create_dir_all(&external).expect("external dir");
+    let op = operator();
+    commit_root_sequence_with_peaks(&store, &op, 3);
+
+    let sidecar = store.join("roots/HISTORY_PEAKS.cbor");
+    let external_sidecar = external.join("HISTORY_PEAKS.cbor");
+    std::fs::copy(&sidecar, &external_sidecar).expect("external sidecar copy");
+    std::fs::remove_file(&sidecar).expect("remove real sidecar");
+    std::os::unix::fs::symlink(&external_sidecar, &sidecar).expect("sidecar symlink");
+
+    let err = read_root_history_peak_state(&store).expect_err("symlinked sidecar rejected");
+
+    assert!(matches!(err, MnemeError::IoFailed { .. }));
+}
+
+#[cfg(unix)]
+#[test]
+fn root_history_peak_update_rejects_broken_symlink_sidecar() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = dir.path();
+    CheckpointLog::ensure_dir(store).expect("ensure");
+    let sidecar = store.join("roots/HISTORY_PEAKS.cbor");
+    let missing = dir.path().join("missing-peaks.cbor");
+    std::os::unix::fs::symlink(&missing, &sidecar).expect("broken sidecar symlink");
+    assert!(!sidecar.exists(), "fixture should be a dangling symlink");
+
+    let op = operator();
+    let (dag, key, sem) = sample_roots();
+    let first =
+        StoredRoot::assemble(dag, key, sem, sample_hlc(48), [0u8; 32], 1, &op).expect("first");
+    CheckpointLog::append(store, &first).expect("append first");
+
+    let err = update_root_history_peaks(store, &[op.public_key_bytes()], &first)
+        .expect_err("dangling sidecar symlink rejected");
+
+    assert!(matches!(err, MnemeError::IoFailed { .. }));
+    assert!(
+        std::fs::symlink_metadata(&sidecar)
+            .expect("sidecar symlink remains")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(
+        !missing.exists(),
+        "peak update must not materialize a dangling sidecar target"
+    );
 }
 
 #[test]

@@ -28,13 +28,13 @@ impl CheckpointLog {
 
     pub fn read_head(store: &Path) -> Result<StoredRoot, MnemeError> {
         let path = head_path(store);
-        let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+        let bytes = atomic::read_no_follow(&path)?;
         StoredRoot::from_bytes(&bytes)
     }
 
     pub fn read_checkpoint(store: &Path, sequence: u64) -> Result<StoredRoot, MnemeError> {
         let path = checkpoint_path(store, sequence);
-        let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+        let bytes = atomic::read_no_follow(&path)?;
         StoredRoot::from_bytes(&bytes)
     }
 
@@ -75,7 +75,7 @@ pub fn max_signed_checkpoint(
             Some(s) => s,
             None => continue,
         };
-        let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+        let bytes = atomic::read_no_follow(&path)?;
         let stored = match StoredRoot::from_bytes(&bytes) {
             Ok(s) => s,
             Err(_) => continue,
@@ -126,7 +126,7 @@ pub fn verify_checkpoint_chain(
             Some(s) => s,
             None => continue,
         };
-        let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+        let bytes = atomic::read_no_follow(&path)?;
         let stored = StoredRoot::from_bytes(&bytes)?;
         if stored.sequence != seq {
             return Err(MnemeError::RootInconsistent);

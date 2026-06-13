@@ -14,7 +14,6 @@ use mneme_core::{
     hash_ckpt, to_bytes_canonical,
 };
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 
 const PEAKS_VERSION: u16 = 1;
@@ -280,7 +279,7 @@ pub fn update_root_history_peaks(
         return Err(MnemeError::RootSigInvalid);
     }
     let peaks_path = root_history_peaks_path(store);
-    let previous = if peaks_path.exists() {
+    let previous = if atomic::entry_exists(&peaks_path)? {
         Some(read_root_history_peak_state(store)?)
     } else {
         None
@@ -310,7 +309,7 @@ pub fn update_root_history_peaks(
 
 pub fn read_root_history_peak_state(store: &Path) -> Result<RootHistoryPeakState, MnemeError> {
     let path = root_history_peaks_path(store);
-    let bytes = fs::read(&path).map_err(|e| io_err(&path, e))?;
+    let bytes = atomic::read_no_follow(&path)?;
     let state: RootHistoryPeakState = from_bytes_strict(&bytes)?;
     validate_peak_state(&state)?;
     Ok(state)
@@ -1071,13 +1070,6 @@ fn peak_range_for_sequence(
 
 fn root_history_peaks_path(store: &Path) -> std::path::PathBuf {
     store.join("roots/HISTORY_PEAKS.cbor")
-}
-
-fn io_err(path: &Path, e: std::io::Error) -> MnemeError {
-    MnemeError::IoFailed {
-        path: path.display().to_string(),
-        kind: e.to_string(),
-    }
 }
 
 impl DcborEncode for RootHistoryPeakState {

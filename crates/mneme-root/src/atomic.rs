@@ -2,7 +2,7 @@
 
 use mneme_core::MnemeError;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
@@ -71,21 +71,48 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
     }
 }
 
+/// Read a root-owned file without following symlinks on Unix.
+pub(crate) fn read_no_follow(path: &Path) -> Result<Vec<u8>, MnemeError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| io_err(path, e))?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|e| io_err(path, e))?;
+        Ok(bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::read(path).map_err(|e| io_err(path, e))
+    }
+}
+
 /// Create-new checkpoint entry; fails closed if the sequence file already exists.
 pub fn create_new(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
     reject_existing_entry(path)?;
     atomic_write(path, data)
 }
 
-fn reject_existing_entry(path: &Path) -> Result<(), MnemeError> {
+pub(crate) fn entry_exists(path: &Path) -> Result<bool, MnemeError> {
     match fs::symlink_metadata(path) {
-        Ok(_) => Err(MnemeError::IoFailed {
-            path: path.display().to_string(),
-            kind: "exists".into(),
-        }),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(io_err(path, err)),
     }
+}
+
+fn reject_existing_entry(path: &Path) -> Result<(), MnemeError> {
+    if entry_exists(path)? {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "exists".into(),
+        });
+    }
+    Ok(())
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> MnemeError {
