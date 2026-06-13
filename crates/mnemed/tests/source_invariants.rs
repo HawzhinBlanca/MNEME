@@ -7206,8 +7206,8 @@ fn boot_daemon_state_opens_existing_store_instead_of_recreating() {
         "mnemed should expose a production boot helper"
     );
     assert!(
-        lib.contains("store_path.join(\"roots/HEAD\").exists()"),
-        "boot path should open existing stores instead of always creating"
+        lib.contains("store_head_entry_exists_no_follow(store_path)?"),
+        "boot path should use a no-follow HEAD entry check before open-vs-create"
     );
     assert!(
         lib.contains("Store::open(store_path, operator.clone())?"),

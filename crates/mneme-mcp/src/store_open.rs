@@ -2,7 +2,7 @@
 
 use mneme_cap::{agent_cap, tool_channel_cap};
 use mneme_crypto::{EnvelopeKeyVault, FileKeyVault, KeyPair, KeyVault, load_or_generate_operator};
-use mneme_store::Store;
+use mneme_store::{Store, store_head_entry_exists_no_follow};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -58,7 +58,7 @@ fn open_or_create_store(
     store_path: &Path,
     operator: KeyPair,
 ) -> Result<Store, mneme_core::MnemeError> {
-    if store_path.join("roots/HEAD").exists() {
+    if store_head_entry_exists_no_follow(store_path)? {
         return open_store_with_vault(store_path, operator);
     }
     std::fs::create_dir_all(store_path).map_err(|e| mneme_core::MnemeError::IoFailed {
@@ -97,4 +97,60 @@ fn operator_seed_bytes(operator: &KeyPair) -> [u8; 32] {
 
 pub fn test_runtime(dir: &Path) -> McpRuntime {
     open_runtime_with_operator_seed(dir, Some(TEST_OPERATOR_SEED_HEX)).expect("test runtime")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn replace_head_with_dangling_symlink(store_path: &Path) -> PathBuf {
+        let head = store_path.join("roots/HEAD");
+        let missing = store_path.join("missing-head");
+        std::fs::remove_file(store_path.join("roots/1.root.cbor"))
+            .expect("remove genesis checkpoint");
+        std::fs::remove_file(&head).expect("remove real HEAD");
+        std::os::unix::fs::symlink(&missing, &head).expect("dangling HEAD symlink");
+        assert!(!head.exists(), "fixture should be a dangling symlink");
+        missing
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_runtime_rejects_dangling_head_entry_instead_of_recreating_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let runtime = open_runtime_with_operator_seed(dir.path(), Some(TEST_OPERATOR_SEED_HEX))
+            .expect("initial MCP runtime");
+        drop(runtime);
+
+        let missing = replace_head_with_dangling_symlink(dir.path());
+
+        match open_runtime_with_operator_seed(dir.path(), Some(TEST_OPERATOR_SEED_HEX)) {
+            Err(mneme_core::MnemeError::IoFailed { path, .. }) => {
+                assert!(
+                    path.ends_with("roots/HEAD"),
+                    "unexpected failure path: {path}"
+                );
+            }
+            Err(mneme_core::MnemeError::RootInconsistent) => {}
+            Err(err) => panic!("expected dangling HEAD failure, got {err:?}"),
+            Ok(_) => panic!("MCP runtime recreated a tampered store with dangling HEAD"),
+        }
+
+        assert!(
+            !missing.exists(),
+            "MCP boot must not materialize HEAD symlink target"
+        );
+        assert!(
+            std::fs::symlink_metadata(dir.path().join("roots/HEAD"))
+                .expect("dangling HEAD entry")
+                .file_type()
+                .is_symlink(),
+            "MCP boot must leave the tampered HEAD entry for explicit repair"
+        );
+        assert!(
+            !dir.path().join("roots/1.root.cbor").exists(),
+            "MCP boot must not recreate a deleted checkpoint"
+        );
+    }
 }

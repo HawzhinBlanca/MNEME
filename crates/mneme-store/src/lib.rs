@@ -135,6 +135,15 @@ pub struct Recall {
     pub root: Root,
 }
 
+/// Return whether `roots/HEAD` has a directory entry without following aliases.
+///
+/// Agent-facing wrappers use this before choosing open-vs-create so a present
+/// symlinked or dangling HEAD is treated as an existing, tampered store and
+/// routed through fail-closed open instead of being silently recreated.
+pub fn store_head_entry_exists_no_follow(path: &Path) -> Result<bool, MnemeError> {
+    atomic::entry_exists(&path.join("roots/HEAD"))
+}
+
 impl Store {
     pub fn create(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
         let vault = Box::new(FileKeyVault::new(path)?);
@@ -1205,5 +1214,31 @@ fn index_err(e: mneme_index::IndexError) -> MnemeError {
         mneme_index::IndexError::DuplicateObject | mneme_index::IndexError::ObjectNotIndexed => {
             MnemeError::IndexPathInvalid
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn store_head_entry_exists_no_follow_counts_dangling_head_symlink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let roots = dir.path().join("roots");
+        std::fs::create_dir_all(&roots).expect("roots dir");
+        let missing = dir.path().join("missing-head");
+        let head = roots.join("HEAD");
+        std::os::unix::fs::symlink(&missing, &head).expect("dangling HEAD symlink");
+        assert!(!head.exists(), "fixture should be a dangling symlink");
+
+        assert!(
+            store_head_entry_exists_no_follow(dir.path()).expect("HEAD entry probe"),
+            "dangling HEAD symlink must count as a present store entry"
+        );
+        assert!(
+            !missing.exists(),
+            "HEAD entry probe must not materialize or follow the dangling target"
+        );
     }
 }

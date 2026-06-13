@@ -18,7 +18,7 @@ pub use state::AppState;
 
 use mneme_core::MnemeError;
 use mneme_crypto::{KeyPair, load_or_generate_operator};
-use mneme_store::Store;
+use mneme_store::{Store, store_head_entry_exists_no_follow};
 use state::{RateLimiter, SharedStore};
 use std::fs;
 use std::net::SocketAddr;
@@ -139,7 +139,7 @@ fn boot_daemon_state_with_operator_seed(
     seed_hex: Option<&str>,
 ) -> Result<(AppState, KeyPair, KeyPair), MnemeError> {
     let operator = load_or_generate_operator(store_path, seed_hex)?;
-    let store = if store_path.join("roots/HEAD").exists() {
+    let store = if store_head_entry_exists_no_follow(store_path)? {
         Store::open(store_path, operator.clone())?
     } else {
         fs::create_dir_all(store_path).map_err(|e| MnemeError::IoFailed {
@@ -335,6 +335,17 @@ mod tests {
         state
     }
 
+    #[cfg(unix)]
+    fn replace_head_with_dangling_symlink(store_path: &Path) -> PathBuf {
+        let head = store_path.join("roots/HEAD");
+        let missing = store_path.join("missing-head");
+        fs::remove_file(store_path.join("roots/1.root.cbor")).expect("remove genesis checkpoint");
+        fs::remove_file(&head).expect("remove real HEAD");
+        std::os::unix::fs::symlink(&missing, &head).expect("dangling HEAD symlink");
+        assert!(!head.exists(), "fixture should be a dangling symlink");
+        missing
+    }
+
     #[test]
     fn running_server_shutdown_notification_reports_delivered_with_receiver() {
         let (shutdown, _shutdown_rx) = tokio::sync::watch::channel(());
@@ -435,5 +446,43 @@ mod tests {
     fn ensure_http_bind_loopback_rejects_non_loopback_without_tls() {
         let addr = "0.0.0.0:7845".parse().expect("non-loopback parse");
         assert_eq!(ensure_http_bind_loopback(addr), Err(MnemeError::CapDenied));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn daemon_boot_rejects_dangling_head_entry_instead_of_recreating_store() {
+        let dir = expect_running_server_tempdir("daemon dangling HEAD fixture");
+        let (state, _, _) = test_state(dir.path()).expect("initial daemon state");
+        drop(state);
+
+        let missing = replace_head_with_dangling_symlink(dir.path());
+
+        match test_state(dir.path()) {
+            Err(MnemeError::IoFailed { path, .. }) => {
+                assert!(
+                    path.ends_with("roots/HEAD"),
+                    "unexpected failure path: {path}"
+                );
+            }
+            Err(MnemeError::RootInconsistent) => {}
+            Err(err) => panic!("expected dangling HEAD failure, got {err:?}"),
+            Ok(_) => panic!("daemon boot recreated a tampered store with dangling HEAD"),
+        }
+
+        assert!(
+            !missing.exists(),
+            "daemon boot must not materialize HEAD symlink target"
+        );
+        assert!(
+            fs::symlink_metadata(dir.path().join("roots/HEAD"))
+                .expect("dangling HEAD entry")
+                .file_type()
+                .is_symlink(),
+            "daemon boot must leave the tampered HEAD entry for explicit repair"
+        );
+        assert!(
+            !dir.path().join("roots/1.root.cbor").exists(),
+            "daemon boot must not recreate a deleted checkpoint"
+        );
     }
 }
