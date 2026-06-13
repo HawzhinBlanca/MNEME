@@ -107,6 +107,14 @@ pub fn verify_agent_card(
         }
     }
 
+    if payload.sub != "mneme-agent" {
+        return Err(MnemeError::RootSigInvalid);
+    }
+
+    if payload.exp <= payload.iat {
+        return Err(MnemeError::RootSigInvalid);
+    }
+
     let verifying_key = verifying_key_from_bytes(&iss_pk)?;
     let signing_input = format!("{}.{}", parts[0], parts[1]);
     verify_signature_bytes(&verifying_key, signing_input.as_bytes(), &sig_bytes)?;
@@ -120,5 +128,123 @@ pub fn verify_agent_card(
         return Err(MnemeError::RootSigInvalid);
     }
 
+    // Allow up to 60 seconds of clock skew for future-dated issued-at time
+    if now + 60 < payload.iat {
+        return Err(MnemeError::RootSigInvalid);
+    }
+
     Ok(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_agent_card() {
+        let op = KeyPair::from_seed([3u8; 32]);
+        let card = generate_agent_card(&op, "http://localhost/attest").unwrap();
+        let payload = verify_agent_card(&card, Some(&op.public_key_bytes())).unwrap();
+        assert_eq!(payload.sub, "mneme-agent");
+        assert_eq!(payload.attestation_endpoint, "http://localhost/attest");
+    }
+
+    #[test]
+    fn test_wrong_sub_rejected() {
+        let op = KeyPair::from_seed([3u8; 32]);
+        let header = JwsHeader {
+            alg: "EdDSA".to_string(),
+            typ: "JWT".to_string(),
+        };
+        let header_json = serde_json::to_string(&header).unwrap();
+        let header_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_json.as_bytes());
+
+        let payload = AgentCardPayload {
+            iss: hex::encode(op.public_key_bytes()),
+            sub: "not-mneme-agent".to_string(),
+            attestation_endpoint: "http://localhost/attest".to_string(),
+            iat: 1000,
+            exp: 2000,
+        };
+        let payload_json = serde_json::to_string(&payload).unwrap();
+        let payload_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+
+        let signing_input = format!("{header_b64}.{payload_b64}");
+        let sig = op.sign(signing_input.as_bytes());
+        let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig);
+
+        let card = format!("{signing_input}.{sig_b64}");
+        assert!(matches!(
+            verify_agent_card(&card, None),
+            Err(MnemeError::RootSigInvalid)
+        ));
+    }
+
+    #[test]
+    fn test_exp_le_iat_rejected() {
+        let op = KeyPair::from_seed([3u8; 32]);
+        let header = JwsHeader {
+            alg: "EdDSA".to_string(),
+            typ: "JWT".to_string(),
+        };
+        let header_json = serde_json::to_string(&header).unwrap();
+        let header_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_json.as_bytes());
+
+        let payload = AgentCardPayload {
+            iss: hex::encode(op.public_key_bytes()),
+            sub: "mneme-agent".to_string(),
+            attestation_endpoint: "http://localhost/attest".to_string(),
+            iat: 2000,
+            exp: 1000,
+        };
+        let payload_json = serde_json::to_string(&payload).unwrap();
+        let payload_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+
+        let signing_input = format!("{header_b64}.{payload_b64}");
+        let sig = op.sign(signing_input.as_bytes());
+        let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig);
+
+        let card = format!("{signing_input}.{sig_b64}");
+        assert!(matches!(
+            verify_agent_card(&card, None),
+            Err(MnemeError::RootSigInvalid)
+        ));
+    }
+
+    #[test]
+    fn test_future_dated_rejected() {
+        let op = KeyPair::from_seed([3u8; 32]);
+        let header = JwsHeader {
+            alg: "EdDSA".to_string(),
+            typ: "JWT".to_string(),
+        };
+        let header_json = serde_json::to_string(&header).unwrap();
+        let header_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(header_json.as_bytes());
+
+        let payload = AgentCardPayload {
+            iss: hex::encode(op.public_key_bytes()),
+            sub: "mneme-agent".to_string(),
+            attestation_endpoint: "http://localhost/attest".to_string(),
+            iat: u32::MAX as u64,
+            exp: (u32::MAX as u64) + 1000,
+        };
+        let payload_json = serde_json::to_string(&payload).unwrap();
+        let payload_b64 =
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+
+        let signing_input = format!("{header_b64}.{payload_b64}");
+        let sig = op.sign(signing_input.as_bytes());
+        let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig);
+
+        let card = format!("{signing_input}.{sig_b64}");
+        assert!(matches!(
+            verify_agent_card(&card, None),
+            Err(MnemeError::RootSigInvalid)
+        ));
+    }
 }
