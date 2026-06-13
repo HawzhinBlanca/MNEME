@@ -160,6 +160,20 @@ publicly-auditable log where MNEME roots, deletion certs, and ROBRs are register
   receipts**; offline-verifiable inclusion + consistency (RFC 6962-style) proofs. **Proof:** register
   N statements → each inclusion receipt verifies; a forged/omitted entry fails the consistency proof;
   append-only violation (rollback) is detected (reuse the A-REPLAY discipline).
+  - **✅ LANDED (inclusion path).** `mtl` module: append-only `TransparencyLog` over
+    `(root_seq, root_preimage)` statements with an **RFC 6962** Merkle tree (distinct
+    leaf/node domains) and signed log heads `(size, merkle_root)`. `InclusionReceiptV1`
+    carries the statement + audit path; `verify` does envelope-sig + head-sig + RFC 6962
+    inclusion (`root_from_path`) and fails closed on mismatch. `mneme mtl` ingests the
+    store's current signed root into a persistent append-only log file and emits a
+    receipt; `mneme verify-mtl` checks it offline. **Proof:** unit (inclusion verifies
+    for **every index at sizes 1..=33**; wrong-statement-for-index rejected; every-byte-
+    flip; truncation/trailing; wrong-pinned-pk; appending changes the signed head root) +
+    e2e (log root → receipt → offline verify; **log grows across invocations, each
+    receipt verifies**; tamper fails closed exit 4). Honesty (`MTL_HONESTY`): single-
+    operator log — inclusion ≠ non-equivocation; cross-head **consistency proofs /
+    witness gossip are the MTL-2 extension** and are NOT yet implemented; proves logging,
+    not truth.
 - **MTL-2 `[CORE]` — A2A discovery seed.** A signed Agent Card (JWS) advertising the memory-attestation
   endpoint so agents discover each other's logs. **Proof:** card verifies; tampered card rejected.
 - **MTL-3 `[FRONTIER]` — eIDAS QTSP operation.** Standards/operations, not code — document the profile
