@@ -249,6 +249,79 @@ fn init_verify_recall_forget_journey() {
         .stdout(predicate::str::contains("forgot key"));
 }
 
+#[cfg(unix)]
+#[test]
+fn forget_emit_proof_rejects_symlink_output_without_overwriting_target() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let proof = dir.path().join("forget-proof.cbor");
+    let external = dir.path().join("external-target");
+    fs::write(&external, b"external").expect("external fixture");
+    std::os::unix::fs::symlink(&external, &proof).expect("proof symlink fixture");
+
+    mneme()
+        .args(["init", store.to_str().unwrap()])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "remember",
+            store.to_str().unwrap(),
+            "--namespace",
+            "user",
+            "--name",
+            "symlink-proof",
+            "--body",
+            "body",
+        ])
+        .assert()
+        .success();
+
+    mneme()
+        .args([
+            "forget",
+            store.to_str().unwrap(),
+            "--key",
+            "user/symlink-proof",
+            "--mode",
+            "shred",
+            "--emit-proof",
+            proof.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(2);
+
+    assert_eq!(
+        fs::read(&external).expect("external target"),
+        b"external",
+        "forget proof writer must not follow and overwrite output symlink targets"
+    );
+    assert!(
+        fs::symlink_metadata(&proof)
+            .expect("proof symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed proof write must leave the symlink entry untouched"
+    );
+    mneme()
+        .args([
+            "recall",
+            store.to_str().unwrap(),
+            "-q",
+            "symlink-proof",
+            "--key",
+            "symlink-proof",
+            "--namespace",
+            "user",
+            "--min-tier",
+            "working",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("body"));
+}
+
 #[test]
 fn cli_envelope_vault_writes_wrapped_object_keys() {
     let dir = tempdir().unwrap();

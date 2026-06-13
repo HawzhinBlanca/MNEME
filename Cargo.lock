@@ -1364,6 +1364,7 @@ dependencies = [
  "blake3",
  "clap",
  "hex",
+ "libc",
  "mneme-cap",
  "mneme-core",
  "mneme-crypto",

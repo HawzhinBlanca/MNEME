@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "operator_tools")]
 use serde_json::{Value, json};
 use std::fmt::Write as _;
-#[cfg(feature = "operator_tools")]
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -568,6 +567,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                     eprintln!("mneme: --emit-proof requires shred mode");
                     return Err(CliErrorKind::Usage);
                 }
+                validate_generated_output_path(&path)?;
                 let proven = mneme_store
                     .forget_with_proof(
                         ForgetTarget::LogicalKey(logical_key),
@@ -1267,7 +1267,7 @@ fn run_verify_peak_inclusion_proof(
 fn write_peak_state_json(path: &Path, state: &RootHistoryPeakState) -> Result<(), CliErrorKind> {
     let data =
         serde_json::to_vec_pretty(&peak_state_to_json(state)).map_err(|_| CliErrorKind::Usage)?;
-    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+    write_generated_output_file(path, &data)
 }
 
 #[cfg(feature = "operator_tools")]
@@ -1615,7 +1615,7 @@ fn write_peak_proof_bundle(
         proof: peak_consistency_proof_to_json(proof)?,
     };
     let data = serde_json::to_vec_pretty(&bundle).map_err(|_| CliErrorKind::Usage)?;
-    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+    write_generated_output_file(path, &data)
 }
 
 #[cfg(feature = "operator_tools")]
@@ -1637,7 +1637,7 @@ fn write_peak_inclusion_proof_bundle(
         proof: peak_inclusion_proof_to_json(proof),
     };
     let data = serde_json::to_vec_pretty(&bundle).map_err(|_| CliErrorKind::Usage)?;
-    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+    write_generated_output_file(path, &data)
 }
 
 #[cfg(feature = "operator_tools")]
@@ -1659,7 +1659,7 @@ fn write_peak_frontier_proof_bundle(
         proof: peak_frontier_proof_to_json(proof),
     };
     let data = serde_json::to_vec_pretty(&bundle).map_err(|_| CliErrorKind::Usage)?;
-    std::fs::write(path, data).map_err(|_| CliErrorKind::Usage)
+    write_generated_output_file(path, &data)
 }
 
 #[cfg(feature = "operator_tools")]
@@ -1788,7 +1788,71 @@ fn operator_seed_error_to_cli(err: MnemeError) -> CliErrorKind {
 
 fn write_forget_proof(path: &Path, proof: &ForgetProof) -> Result<(), CliErrorKind> {
     let bytes = encode_forget_proof(proof).map_err(CliErrorKind::Kernel)?;
-    std::fs::write(path, bytes).map_err(|_| CliErrorKind::Usage)
+    write_generated_output_file(path, &bytes)
+}
+
+fn validate_generated_output_path(path: &Path) -> Result<(), CliErrorKind> {
+    if let Some(metadata) = existing_generated_output_metadata(path)? {
+        reject_generated_output_alias(path, &metadata)?;
+    }
+    Ok(())
+}
+
+fn existing_generated_output_metadata(
+    path: &Path,
+) -> Result<Option<std::fs::Metadata>, CliErrorKind> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(CliErrorKind::Usage),
+    }
+}
+
+fn reject_generated_output_alias(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> Result<(), CliErrorKind> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        eprintln!(
+            "mneme: output path must reference a regular file, not a symlink: {}",
+            path.display()
+        );
+        return Err(CliErrorKind::Usage);
+    }
+    if !file_type.is_file() {
+        eprintln!(
+            "mneme: output path must reference a regular file: {}",
+            path.display()
+        );
+        return Err(CliErrorKind::Usage);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() != 1 {
+            eprintln!(
+                "mneme: output path must not be hard-linked: {}",
+                path.display()
+            );
+            return Err(CliErrorKind::Usage);
+        }
+    }
+    Ok(())
+}
+
+fn write_generated_output_file(path: &Path, data: &[u8]) -> Result<(), CliErrorKind> {
+    validate_generated_output_path(path)?;
+    let mut open = std::fs::OpenOptions::new();
+    open.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        open.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = open.open(path).map_err(|_| CliErrorKind::Usage)?;
+    file.write_all(data).map_err(|_| CliErrorKind::Usage)?;
+    Ok(())
 }
 
 fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], CliErrorKind> {
