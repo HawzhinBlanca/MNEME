@@ -1112,7 +1112,9 @@ fn ensure_peak_pin_outside_store(
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     if create_parent {
-        std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+        ensure_peak_state_parent_dir(parent)?;
+    } else {
+        reject_peak_state_parent_alias(parent)?;
     }
     if let Some(metadata) = existing_peak_pin_metadata(path)? {
         reject_existing_peak_pin_if_aliased(path, &metadata)?;
@@ -1128,6 +1130,40 @@ fn ensure_peak_pin_outside_store(
         return Err(CliErrorKind::Usage);
     }
     Ok(())
+}
+
+fn ensure_peak_state_parent_dir(parent: &Path) -> Result<(), CliErrorKind> {
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    reject_peak_state_parent_alias(parent)?;
+    std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+    reject_peak_state_parent_alias(parent)
+}
+
+fn reject_peak_state_parent_alias(parent: &Path) -> Result<(), CliErrorKind> {
+    match std::fs::symlink_metadata(parent) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                eprintln!(
+                    "mneme: --pin-peak-state parent must be a directory, not a symlink: {}",
+                    parent.display()
+                );
+                return Err(CliErrorKind::Usage);
+            }
+            if !file_type.is_dir() {
+                eprintln!(
+                    "mneme: --pin-peak-state parent must be a directory: {}",
+                    parent.display()
+                );
+                return Err(CliErrorKind::Usage);
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(CliErrorKind::Usage),
+    }
 }
 
 fn existing_peak_pin_metadata(path: &Path) -> Result<Option<std::fs::Metadata>, CliErrorKind> {
@@ -1284,23 +1320,40 @@ fn write_peak_state_json_atomic(
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
+    ensure_peak_state_parent_dir(parent)?;
     let file_name = path.file_name().ok_or(CliErrorKind::Usage)?;
     let (tmp_path, mut file) = create_peak_state_tmp_file(parent, file_name)?;
-    {
-        if file.write_all(&data).is_err() || file.sync_all().is_err() {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Err(CliErrorKind::Usage);
-        }
-    }
-    if std::fs::rename(&tmp_path, path).is_err() {
+    let result = (|| {
+        file.write_all(&data).map_err(|_| CliErrorKind::Usage)?;
+        file.sync_all().map_err(|_| CliErrorKind::Usage)?;
+        let metadata = file.metadata().map_err(|_| CliErrorKind::Usage)?;
+        reject_existing_peak_pin_if_aliased(&tmp_path, &metadata)?;
+        std::fs::rename(&tmp_path, path).map_err(|_| CliErrorKind::Usage)?;
+        sync_peak_state_parent_dir(parent)?;
+        Ok(())
+    })();
+    if result.is_err() {
         let _ = std::fs::remove_file(&tmp_path);
-        return Err(CliErrorKind::Usage);
     }
-    if let Ok(dir) = std::fs::File::open(parent) {
-        let _ = dir.sync_all();
+    result
+}
+
+#[cfg(feature = "operator_tools")]
+fn sync_peak_state_parent_dir(parent: &Path) -> Result<(), CliErrorKind> {
+    #[cfg(unix)]
+    {
+        if parent.as_os_str().is_empty() {
+            return Ok(());
+        }
+        reject_peak_state_parent_alias(parent)?;
+        let dir = std::fs::File::open(parent).map_err(|_| CliErrorKind::Usage)?;
+        dir.sync_all().map_err(|_| CliErrorKind::Usage)
     }
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "operator_tools")]
@@ -1322,12 +1375,19 @@ fn create_peak_state_tmp_file_from_nonces(
         tmp_name.push(file_name);
         tmp_name.push(format!(".{}.{}.tmp", std::process::id(), next_nonce()));
         let tmp_path = parent.join(tmp_name);
-        match std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&tmp_path)
+        let mut open = std::fs::OpenOptions::new();
+        open.create_new(true).write(true);
+        #[cfg(unix)]
         {
-            Ok(file) => return Ok((tmp_path, file)),
+            use std::os::unix::fs::OpenOptionsExt;
+            open.custom_flags(libc::O_NOFOLLOW);
+        }
+        match open.open(&tmp_path) {
+            Ok(file) => {
+                let metadata = file.metadata().map_err(|_| CliErrorKind::Usage)?;
+                reject_existing_peak_pin_if_aliased(&tmp_path, &metadata)?;
+                return Ok((tmp_path, file));
+            }
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(_) => return Err(CliErrorKind::Usage),
         }
@@ -1338,6 +1398,19 @@ fn create_peak_state_tmp_file_from_nonces(
 #[cfg(all(test, feature = "operator_tools", unix))]
 mod tests {
     use super::*;
+
+    fn sample_peak_state() -> RootHistoryPeakState {
+        RootHistoryPeakState {
+            version: 1,
+            sequence: 1,
+            head_preimage_hash: [1_u8; 32],
+            peaks: vec![RootHistoryPeak {
+                height: 0,
+                hash: [2_u8; 32],
+            }],
+            peak_bag_root: [3_u8; 32],
+        }
+    }
 
     #[test]
     fn peak_state_tmp_file_skips_preexisting_symlink_without_truncating_target() {
@@ -1367,6 +1440,53 @@ mod tests {
                 .file_type()
                 .is_symlink()
         );
+    }
+
+    #[test]
+    fn peak_state_atomic_write_rejects_symlinked_parent_without_writing_external_pin() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external_parent = dir.path().join("external");
+        let linked_parent = dir.path().join("linked");
+        std::fs::create_dir(&external_parent).expect("external parent fixture");
+        std::os::unix::fs::symlink(&external_parent, &linked_parent)
+            .expect("linked parent fixture");
+
+        let err =
+            write_peak_state_json_atomic(&linked_parent.join("pin.json"), &sample_peak_state())
+                .expect_err("symlinked pin parent must fail closed");
+
+        assert_eq!(err, CliErrorKind::Usage);
+        assert!(
+            std::fs::read_dir(&external_parent)
+                .expect("external parent read")
+                .next()
+                .is_none()
+        );
+        assert!(
+            std::fs::symlink_metadata(&linked_parent)
+                .expect("linked parent")
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn peak_pin_preflight_rejects_existing_pin_behind_symlinked_parent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = dir.path().join("store");
+        let external_parent = dir.path().join("external");
+        let linked_parent = dir.path().join("linked");
+        std::fs::create_dir(&store).expect("store fixture");
+        std::fs::create_dir(&external_parent).expect("external parent fixture");
+        write_peak_state_json_atomic(&external_parent.join("pin.json"), &sample_peak_state())
+            .expect("external pin fixture");
+        std::os::unix::fs::symlink(&external_parent, &linked_parent)
+            .expect("linked parent fixture");
+
+        let err = ensure_peak_pin_outside_store(&store, &linked_parent.join("pin.json"), false)
+            .expect_err("existing pin behind symlinked parent must fail closed");
+
+        assert_eq!(err, CliErrorKind::Usage);
     }
 }
 
