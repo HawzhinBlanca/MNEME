@@ -15,6 +15,7 @@ fn mneme() -> Command {
     cmd
 }
 
+#[cfg(not(feature = "operator_tools"))]
 #[test]
 fn default_help_hides_operator_tools() {
     mneme()

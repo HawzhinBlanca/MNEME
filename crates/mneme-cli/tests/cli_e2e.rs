@@ -165,6 +165,64 @@ fn certify_and_verify_cert_succeeds() {
         .success();
 }
 
+#[cfg(unix)]
+#[test]
+fn certify_rejects_symlink_output_without_overwriting_target() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let output = dir.path().join("cert.cbor");
+    let external = dir.path().join("external-target");
+    fs::write(&external, b"external").expect("external fixture");
+    std::os::unix::fs::symlink(&external, &output).expect("cert symlink fixture");
+    let seed = [0x03; 32];
+    let seed_hex = hex::encode(seed);
+    let operator = KeyPair::from_seed(seed);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).unwrap();
+    {
+        let mut s = Store::create(&store, operator.clone()).unwrap();
+        s.trust_mut().authorized_writers.push(cap.subject);
+        let draft = Draft {
+            namespace: "cert".into(),
+            logical_name: "semantic".into(),
+            kind: MemoryKind::Semantic,
+            body: b"body".to_vec(),
+            parent_ids: vec![],
+            session: [0xab; 16],
+            trust_tier: Some(TrustTier::Trusted),
+            embedding: Some(FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap()),
+            valid_time_ms: None,
+        };
+        s.remember(draft, &cap).unwrap();
+    }
+
+    mneme()
+        .args([
+            "certify",
+            store.to_str().unwrap(),
+            "--out",
+            output.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("not a symlink"));
+
+    assert_eq!(
+        fs::read(&external).expect("external target"),
+        b"external",
+        "cert writer must not follow and overwrite output symlink targets"
+    );
+    assert!(
+        fs::symlink_metadata(&output)
+            .expect("cert symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed cert write must leave the symlink entry untouched"
+    );
+}
+
 #[test]
 fn verify_cert_is_fail_closed() {
     let dir = tempdir().unwrap();

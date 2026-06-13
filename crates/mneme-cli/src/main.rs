@@ -4,6 +4,7 @@ mod attest;
 mod cert;
 #[cfg(feature = "operator_tools")]
 mod determinism;
+mod generated_output;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_cap::agent_cap;
@@ -26,6 +27,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "operator_tools")]
 use serde_json::{Value, json};
 use std::fmt::Write as _;
+#[cfg(feature = "operator_tools")]
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -673,6 +675,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
         } => {
             require_store_dir(&store)?;
             let comps = parse_i16_list(&components)?;
+            validate_generated_output_path(&out)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let trust = TrustConfig::new(operator.public_key_bytes());
             let mneme_store = open_store(&store, operator.clone(), cli.vault)?;
@@ -1792,67 +1795,20 @@ fn write_forget_proof(path: &Path, proof: &ForgetProof) -> Result<(), CliErrorKi
 }
 
 fn validate_generated_output_path(path: &Path) -> Result<(), CliErrorKind> {
-    if let Some(metadata) = existing_generated_output_metadata(path)? {
-        reject_generated_output_alias(path, &metadata)?;
-    }
-    Ok(())
-}
-
-fn existing_generated_output_metadata(
-    path: &Path,
-) -> Result<Option<std::fs::Metadata>, CliErrorKind> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(CliErrorKind::Usage),
-    }
-}
-
-fn reject_generated_output_alias(
-    path: &Path,
-    metadata: &std::fs::Metadata,
-) -> Result<(), CliErrorKind> {
-    let file_type = metadata.file_type();
-    if file_type.is_symlink() {
-        eprintln!(
-            "mneme: output path must reference a regular file, not a symlink: {}",
-            path.display()
-        );
-        return Err(CliErrorKind::Usage);
-    }
-    if !file_type.is_file() {
-        eprintln!(
-            "mneme: output path must reference a regular file: {}",
-            path.display()
-        );
-        return Err(CliErrorKind::Usage);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if metadata.nlink() != 1 {
-            eprintln!(
-                "mneme: output path must not be hard-linked: {}",
-                path.display()
-            );
-            return Err(CliErrorKind::Usage);
-        }
-    }
-    Ok(())
+    generated_output::validate_path(path).map_err(|err| generated_output_error_to_usage(path, err))
 }
 
 fn write_generated_output_file(path: &Path, data: &[u8]) -> Result<(), CliErrorKind> {
-    validate_generated_output_path(path)?;
-    let mut open = std::fs::OpenOptions::new();
-    open.create(true).write(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        open.custom_flags(libc::O_NOFOLLOW);
-    }
-    let mut file = open.open(path).map_err(|_| CliErrorKind::Usage)?;
-    file.write_all(data).map_err(|_| CliErrorKind::Usage)?;
-    Ok(())
+    generated_output::write_file(path, data)
+        .map_err(|err| generated_output_error_to_usage(path, err))
+}
+
+fn generated_output_error_to_usage(
+    path: &Path,
+    err: generated_output::GeneratedOutputError,
+) -> CliErrorKind {
+    eprintln!("mneme: {err}: {}", path.display());
+    CliErrorKind::Usage
 }
 
 fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], CliErrorKind> {

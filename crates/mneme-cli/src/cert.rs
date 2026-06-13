@@ -1,5 +1,6 @@
 //! `certify` / `verify-cert` — Cognition Certificate v1 (Phase I).
 
+use crate::generated_output;
 use mneme_cap::Capability;
 use mneme_core::{
     FixedPointEmbedding, MnemeError, Procedure, ProcedureAlgo, Query, RetrievalProofLevel,
@@ -39,7 +40,7 @@ pub fn run_certify(
         embedding: Some(embedding.clone()),
     };
     let bytes = store.issue_cognition_certificate_v1(&query, &proc, cap, level)?;
-    fs::write(out, &bytes).map_err(|e| MnemeError::IoFailed {
+    generated_output::write_file(out, &bytes).map_err(|e| MnemeError::IoFailed {
         path: out.display().to_string(),
         kind: e.to_string(),
     })?;
