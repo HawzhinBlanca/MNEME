@@ -466,6 +466,7 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
             if parent.as_os_str().is_empty() {
                 return Ok(());
             }
+            reject_vault_dir_alias(parent, "vault sync parent")?;
             let dir = File::open(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
             dir.sync_all()
                 .map_err(|e| io_error(parent.display().to_string(), e))?;
@@ -990,6 +991,33 @@ mod tests {
                 .file_type()
                 .is_symlink(),
             "failed append open must leave the symlinked parent for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_parent_dir_rejects_symlinked_parent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-sync-parent");
+        let parent = dir.path().join("linked-sync-parent");
+        fs::create_dir(&external).expect("external sync parent target");
+        std::os::unix::fs::symlink(&external, &parent).expect("sync parent symlink");
+
+        let err = match sync_parent_dir(&parent.join("secret.key")) {
+            Ok(()) => panic!("parent fsync should reject a symlinked parent"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "sync parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::symlink_metadata(&parent)
+                .expect("sync parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed parent sync must leave the symlinked parent for explicit repair"
         );
     }
 
