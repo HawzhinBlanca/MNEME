@@ -1144,6 +1144,90 @@ fn cold_open_rejects_broken_symlink_object_keys_journal() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn remember_rejects_symlinked_key_index_journal_without_appending_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+    let mut store = Store::create(dir.path(), operator).expect("create store");
+    let journal = dir.path().join("meta/key_index.journal");
+    let external = dir.path().join("external-key-index.journal");
+    fs::write(&external, b"external").expect("external journal fixture");
+    std::os::unix::fs::symlink(&external, &journal).expect("key-index journal symlink");
+
+    let err = store
+        .remember(
+            episodic_draft("symlink-key-index-journal", b"durable body"),
+            &cap,
+        )
+        .expect_err("symlinked key-index journal rejected");
+
+    assert!(matches!(err, MnemeError::IoFailed { .. }));
+    assert_eq!(
+        fs::read(&external).expect("external journal target"),
+        b"external",
+        "remember must not append through the symlink target"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn remember_rejects_hardlinked_object_keys_journal_without_appending_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+    let mut store = Store::create(dir.path(), operator).expect("create store");
+    let journal = dir.path().join("meta/object_keys.journal");
+    let external = dir.path().join("external-object-keys.journal");
+    fs::write(&external, b"external").expect("external journal fixture");
+    fs::hard_link(&external, &journal).expect("object-keys journal hard link");
+
+    let err = store
+        .remember(
+            episodic_draft("hardlinked-object-keys-journal", b"durable body"),
+            &cap,
+        )
+        .expect_err("hard-linked object-keys journal rejected");
+
+    assert!(matches!(err, MnemeError::IoFailed { .. }));
+    assert_eq!(
+        fs::read(&external).expect("external journal target"),
+        b"external",
+        "remember must not append through a hard-linked journal target"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn promote_rejects_symlinked_promotion_log_without_appending_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+    let mut store = Store::create(dir.path(), operator).expect("create store");
+    let (id, _) = store
+        .remember(
+            episodic_draft("symlink-promotion-log", b"durable body"),
+            &cap,
+        )
+        .expect("remember object");
+    let log = dir.path().join("meta/promotions.log");
+    let external = dir.path().join("external-promotions.log");
+    fs::write(&external, b"external").expect("external promotion log fixture");
+    std::os::unix::fs::symlink(&external, &log).expect("promotion log symlink");
+
+    let err = store
+        .promote(&id, TrustTier::Trusted, &cap)
+        .expect_err("symlinked promotion log rejected");
+
+    assert!(matches!(err, MnemeError::IoFailed { .. }));
+    assert_eq!(
+        fs::read(&external).expect("external promotion log target"),
+        b"external",
+        "promote must not append through the symlink target"
+    );
+}
+
 #[test]
 fn cold_open_rejects_live_key_index_without_object_key_mapping() {
     let dir = TempDir::new().expect("tempdir");

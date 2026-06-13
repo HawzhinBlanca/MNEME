@@ -8,7 +8,7 @@ use mneme_index::KeyIndex;
 use mneme_root::{CheckpointLog, StoredRoot};
 use mneme_smt::SparseMerkleTree;
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -132,11 +132,7 @@ pub struct PromotionEvent {
 pub fn append_promotion_event(path: &Path, event: &PromotionEvent) -> Result<(), MnemeError> {
     let log = path.join("meta/promotions.log");
     let line = serde_json::to_string(event).map_err(|_| layout_promotion_event_json_error())?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log)
-        .map_err(|e| io_err(&log, e))?;
+    let mut file = crate::atomic::open_append_single_link(&log)?;
     writeln!(file, "{line}").map_err(|e| io_err(&log, e))?;
     file.sync_all().map_err(|e| io_err(&log, e))?;
     Ok(())
@@ -625,14 +621,7 @@ fn append_key_index_journal_entry(
 /// crash-safe fsync discipline as the key-index journal.
 fn append_journal_line(path: &Path, name: &str, line: &str) -> Result<(), MnemeError> {
     let journal = path.join("meta").join(name);
-    if let Some(parent) = journal.parent() {
-        fs::create_dir_all(parent).map_err(|e| io_err(&journal, e))?;
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&journal)
-        .map_err(|e| io_err(&journal, e))?;
+    let mut file = crate::atomic::open_append_single_link(&journal)?;
     file.write_all(line.as_bytes())
         .map_err(|e| io_err(&journal, e))?;
     file.write_all(b"\n").map_err(|e| io_err(&journal, e))?;

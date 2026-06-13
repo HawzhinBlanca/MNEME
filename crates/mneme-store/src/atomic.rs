@@ -152,6 +152,89 @@ pub fn read_no_follow(path: &Path) -> Result<Vec<u8>, MnemeError> {
     }
 }
 
+pub(crate) fn open_append_single_link(path: &Path) -> Result<File, MnemeError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| io_err(path, e))?;
+        }
+    }
+    #[cfg(unix)]
+    {
+        let mut create = OpenOptions::new();
+        create
+            .create_new(true)
+            .append(true)
+            .custom_flags(libc::O_NOFOLLOW);
+        match create.open(path) {
+            Ok(file) => {
+                validate_open_append_file(path, &file)?;
+                return Ok(file);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(err) => return Err(io_err(path, err)),
+        }
+
+        validate_append_path(path)?;
+        let mut open = OpenOptions::new();
+        open.append(true).custom_flags(libc::O_NOFOLLOW);
+        let file = open.open(path).map_err(|e| io_err(path, e))?;
+        validate_open_append_file(path, &file)?;
+        Ok(file)
+    }
+    #[cfg(not(unix))]
+    {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| io_err(path, e))
+    }
+}
+
+#[cfg(unix)]
+fn validate_append_path(path: &Path) -> Result<fs::Metadata, MnemeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|e| io_err(path, e))?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "append target symlink".into(),
+        });
+    }
+    if !file_type.is_file() {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "append target non-regular".into(),
+        });
+    }
+    if metadata.nlink() != 1 {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "append target hard-linked".into(),
+        });
+    }
+    Ok(metadata)
+}
+
+#[cfg(unix)]
+fn validate_open_append_file(path: &Path, file: &File) -> Result<(), MnemeError> {
+    let path_metadata = validate_append_path(path)?;
+    let file_metadata = file.metadata().map_err(|e| io_err(path, e))?;
+    if !file_metadata.file_type().is_file() || file_metadata.nlink() != 1 {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "opened append target is not a regular single-link file".into(),
+        });
+    }
+    if path_metadata.dev() != file_metadata.dev() || path_metadata.ino() != file_metadata.ino() {
+        return Err(MnemeError::IoFailed {
+            path: path.display().to_string(),
+            kind: "append target changed during open".into(),
+        });
+    }
+    Ok(())
+}
+
 /// Fsync the parent directory so a preceding `rename` is durable across a crash.
 ///
 /// This is a **Unix** durability primitive: after `rename(2)`, the directory entry
