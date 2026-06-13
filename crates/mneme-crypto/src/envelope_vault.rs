@@ -15,9 +15,10 @@ use mneme_core::MnemeError;
 use crate::aead::{open, random_nonce, seal};
 use crate::types::{KEY_ID_LEN, KeyId, OBJECT_KEY_LEN, ObjectKey};
 use crate::vault::{
-    SecretFileMode, ensure_vault_root_dir, entry_exists, io_error, open_append_single_link,
-    random_key_id, random_object_key, read_single_link_file, sync_parent_dir,
-    validate_single_link_file, write_new_secret_file,
+    SecretFileMode, VaultDirIdentity, capture_vault_dir_identity, ensure_vault_root_dir,
+    entry_exists, io_error, open_append_single_link, random_key_id, random_object_key,
+    read_single_link_file, sync_parent_dir, validate_single_link_file, validate_vault_dir_identity,
+    write_new_secret_file,
 };
 
 const ENVELOPE_AAD: &[u8] = b"mneme-envelope-key-v1";
@@ -29,6 +30,7 @@ use crate::types::XCHACHA_NONCE_LEN;
 /// Master-key envelope vault at `store/keys/vault/`.
 pub struct EnvelopeKeyVault {
     root: PathBuf,
+    root_identity: VaultDirIdentity,
     master: [u8; 32],
     live: HashMap<KeyId, ObjectKey>,
     shredded: HashSet<KeyId>,
@@ -54,9 +56,12 @@ impl EnvelopeKeyVault {
         let store_root = store_root.as_ref();
         let root = store_root.join("keys").join("vault");
         ensure_vault_root_dir(store_root, &root)?;
+        let root_identity = capture_vault_dir_identity(&root, "vault")?;
         let (live, shredded) = load_envelope_dir(&root, &master)?;
+        validate_vault_dir_identity(&root, &root_identity, "vault")?;
         Ok(Self {
             root,
+            root_identity,
             master,
             live,
             shredded,
@@ -101,10 +106,15 @@ impl EnvelopeKeyVault {
         key.copy_from_slice(&opened);
         Ok(key)
     }
+
+    fn validate_root_dir(&self) -> Result<(), MnemeError> {
+        validate_vault_dir_identity(&self.root, &self.root_identity, "vault")
+    }
 }
 
 impl crate::vault::KeyVault for EnvelopeKeyVault {
     fn new_key(&mut self) -> Result<(ObjectKey, KeyId), MnemeError> {
+        self.validate_root_dir()?;
         loop {
             let key = random_object_key();
             let key_id = random_key_id();
@@ -119,6 +129,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
                 buf.push((key_id, key));
                 self.live.insert(key_id, key);
             } else {
+                self.validate_root_dir()?;
                 write_wrapped_key(&path, &self.wrap(&key)?)?;
                 self.live.insert(key_id, key);
             }
@@ -137,6 +148,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
     }
 
     fn shred(&mut self, key_id: &KeyId) -> Result<(), MnemeError> {
+        self.validate_root_dir()?;
         let path = self.key_path(key_id);
         let tombstone = self.tombstone_path(key_id);
         let known = self.live.contains_key(key_id) || self.shredded.contains(key_id);
@@ -146,6 +158,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
             return Err(MnemeError::KeyVaultMissing);
         }
         if path_exists {
+            self.validate_root_dir()?;
             validate_single_link_file(&path)?;
             fs::remove_file(&path).map_err(|e| io_error(path.display().to_string(), e))?;
             if crate::vault::durability_fsync_enabled() {
@@ -155,6 +168,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
         if tombstone_exists {
             validate_single_link_file(&tombstone)?;
         } else {
+            self.validate_root_dir()?;
             write_new_secret_file(&tombstone, b"", SecretFileMode::Default)?;
         }
         self.live.remove(key_id);
@@ -167,6 +181,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
     }
 
     fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
+        self.validate_root_dir()?;
         let tombstone = self.tombstone_path(key_id);
         if self.shredded.contains(key_id) {
             return Err(MnemeError::Forgotten);
@@ -187,6 +202,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
                 return Err(MnemeError::KeyVaultCorrupt);
             }
         } else {
+            self.validate_root_dir()?;
             write_wrapped_key(&path, &self.wrap(key)?)?;
         }
         self.live.insert(*key_id, *key);
@@ -208,6 +224,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
             self.batch = None;
             return Ok(());
         }
+        self.validate_root_dir()?;
         let journal = self.root.join("vault.journal");
         let mut file = open_append_single_link(&journal)?;
         let mut buf = Vec::with_capacity(buffered.len() * JOURNAL_RECORD_LEN);
@@ -263,6 +280,7 @@ fn load_envelope_dir(
 ) -> Result<(HashMap<KeyId, ObjectKey>, HashSet<KeyId>), MnemeError> {
     let vault = EnvelopeKeyVault {
         root: root.to_path_buf(),
+        root_identity: capture_vault_dir_identity(root, "vault")?,
         master: *master,
         live: HashMap::new(),
         shredded: HashSet::new(),

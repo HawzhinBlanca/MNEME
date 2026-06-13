@@ -338,6 +338,78 @@ fn envelope_vault_constructor_rejects_symlinked_keys_dir_without_writing_target(
 
 #[cfg(unix)]
 #[test]
+fn file_vault_new_key_rejects_swapped_symlinked_vault_dir_without_writing_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = FileKeyVault::new(dir.path()).expect("file vault");
+    let vault_dir = dir.path().join("keys").join("vault");
+    let external = dir.path().join("external-swapped-vault");
+    std::fs::remove_dir(&vault_dir).expect("remove empty vault dir");
+    std::fs::create_dir(&external).expect("external vault target");
+    std::os::unix::fs::symlink(&external, &vault_dir).expect("swapped vault dir symlink");
+
+    let err = match vault.new_key() {
+        Ok(_) => panic!("swapped symlinked vault dir should fail closed"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "post-open vault alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(&external)
+            .expect("external vault target readable")
+            .next()
+            .is_none(),
+        "FileKeyVault::new_key must not write through a post-open symlinked vault dir"
+    );
+    assert!(
+        std::fs::symlink_metadata(&vault_dir)
+            .expect("vault symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed new_key must leave the swapped vault symlink for explicit repair"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn envelope_vault_new_key_rejects_swapped_symlinked_vault_dir_without_writing_target() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = EnvelopeKeyVault::from_master(dir.path(), [0x6a; 32]).expect("envelope vault");
+    let vault_dir = dir.path().join("keys").join("vault");
+    let external = dir.path().join("external-swapped-envelope-vault");
+    std::fs::remove_dir(&vault_dir).expect("remove empty envelope vault dir");
+    std::fs::create_dir(&external).expect("external envelope vault target");
+    std::os::unix::fs::symlink(&external, &vault_dir).expect("swapped envelope vault dir symlink");
+
+    let err = match vault.new_key() {
+        Ok(_) => panic!("swapped symlinked envelope vault dir should fail closed"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "post-open envelope vault alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(&external)
+            .expect("external envelope vault target readable")
+            .next()
+            .is_none(),
+        "EnvelopeKeyVault::new_key must not write through a post-open symlinked vault dir"
+    );
+    assert!(
+        std::fs::symlink_metadata(&vault_dir)
+            .expect("envelope vault symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed new_key must leave the swapped envelope vault symlink for explicit repair"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn file_vault_batch_flush_rejects_symlinked_journal_and_keeps_batch_cancelable() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut vault = FileKeyVault::new(dir.path()).expect("file vault");

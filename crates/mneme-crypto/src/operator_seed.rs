@@ -9,8 +9,8 @@ use crate::aead::{open, random_nonce, seal};
 use crate::keys::KeyPair;
 use crate::types::{OBJECT_KEY_LEN, XCHACHA_NONCE_LEN, nonce_from_slice};
 use crate::vault::{
-    SecretFileMode, durability_fsync_enabled, entry_exists, io_error, read_single_link_file,
-    sync_parent_dir, write_new_secret_file,
+    SecretFileMode, durability_fsync_enabled, ensure_vault_keys_dir, entry_exists, io_error,
+    read_single_link_file, sync_parent_dir, write_new_secret_file,
 };
 
 const OPERATOR_SEED_AAD: &[u8] = b"mneme-operator-seed-v1";
@@ -56,6 +56,7 @@ fn load_or_create_sealed_operator(
     store: &Path,
     master: &[u8; OBJECT_KEY_LEN],
 ) -> Result<KeyPair, MnemeError> {
+    ensure_vault_keys_dir(store)?;
     let sealed_path = sealed_operator_seed_path(store);
     if entry_exists(&sealed_path)? {
         let seed = read_sealed_operator_seed(&sealed_path, master)?;
@@ -336,6 +337,40 @@ mod tests {
         assert!(
             !sealed_operator_seed_path(dir.path()).exists(),
             "failed migration must not create a sealed operator seed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn envelope_master_rejects_symlinked_keys_dir_before_sealed_seed_write() {
+        let dir = tempdir("sealed operator symlinked keys");
+        let external = dir.path().join("external-keys");
+        fs::create_dir(&external).expect("external keys target");
+        std::os::unix::fs::symlink(&external, dir.path().join("keys")).expect("keys dir symlink");
+        let master = "aa".repeat(32);
+
+        let err = match load_or_generate_operator_with_env(dir.path(), None, None, Some(&master)) {
+            Ok(_) => panic!("symlinked keys dir should fail closed before sealed seed write"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "operator seed parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::read_dir(&external)
+                .expect("external keys read")
+                .next()
+                .is_none(),
+            "sealed operator seed write must not follow symlinked keys dir"
+        );
+        assert!(
+            fs::symlink_metadata(dir.path().join("keys"))
+                .expect("keys symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed write must leave symlinked keys dir in place"
         );
     }
 

@@ -148,6 +148,7 @@ impl KeyVault for MemoryKeyVault {
 /// `.shred` tombstones are still written/fsynced to disk).
 pub struct FileKeyVault {
     root: PathBuf,
+    root_identity: VaultDirIdentity,
     live: HashMap<KeyId, ObjectKey>,
     shredded: HashSet<KeyId>,
     /// When `Some`, `new_key` buffers `(id, key)` records here instead of writing +
@@ -167,9 +168,12 @@ impl FileKeyVault {
         let store_root = store_root.as_ref();
         let root = store_root.join("keys").join("vault");
         ensure_vault_root_dir(store_root, &root)?;
+        let root_identity = capture_vault_dir_identity(&root, "vault")?;
         let (live, shredded) = load_vault_dir(&root)?;
+        validate_vault_dir_identity(&root, &root_identity, "vault")?;
         Ok(Self {
             root,
+            root_identity,
             live,
             shredded,
             batch: None,
@@ -183,10 +187,15 @@ impl FileKeyVault {
     fn tombstone_path(&self, key_id: &KeyId) -> PathBuf {
         self.root.join(format!("{}.shred", hex::encode(key_id)))
     }
+
+    fn validate_root_dir(&self) -> Result<(), MnemeError> {
+        validate_vault_dir_identity(&self.root, &self.root_identity, "vault")
+    }
 }
 
 impl KeyVault for FileKeyVault {
     fn new_key(&mut self) -> Result<(ObjectKey, KeyId), MnemeError> {
+        self.validate_root_dir()?;
         loop {
             let key = random_object_key();
             let key_id = random_key_id();
@@ -203,6 +212,7 @@ impl KeyVault for FileKeyVault {
                 buf.push((key_id, key));
                 self.live.insert(key_id, key);
             } else {
+                self.validate_root_dir()?;
                 write_key_file(&path, &key)?;
                 self.live.insert(key_id, key);
             }
@@ -221,6 +231,7 @@ impl KeyVault for FileKeyVault {
     }
 
     fn shred(&mut self, key_id: &KeyId) -> Result<(), MnemeError> {
+        self.validate_root_dir()?;
         let path = self.key_path(key_id);
         let tombstone = self.tombstone_path(key_id);
         let known = self.live.contains_key(key_id) || self.shredded.contains(key_id);
@@ -230,11 +241,13 @@ impl KeyVault for FileKeyVault {
             return Err(MnemeError::KeyVaultMissing);
         }
         if path_exists {
+            self.validate_root_dir()?;
             secure_delete(&path)?;
         }
         if tombstone_exists {
             validate_single_link_file(&tombstone)?;
         } else {
+            self.validate_root_dir()?;
             write_new_secret_file(&tombstone, b"", SecretFileMode::Default)?;
         }
         self.live.remove(key_id);
@@ -248,6 +261,7 @@ impl KeyVault for FileKeyVault {
 
     /// Import peer key material for objects accepted by anti-entropy merge.
     fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
+        self.validate_root_dir()?;
         let tombstone = self.tombstone_path(key_id);
         if self.shredded.contains(key_id) {
             return Err(MnemeError::Forgotten);
@@ -268,6 +282,7 @@ impl KeyVault for FileKeyVault {
                 return Err(MnemeError::KeyVaultCorrupt);
             }
         } else {
+            self.validate_root_dir()?;
             write_key_file(&path, key)?;
         }
         self.live.insert(*key_id, *key);
@@ -293,6 +308,7 @@ impl KeyVault for FileKeyVault {
             self.batch = None;
             return Ok(());
         }
+        self.validate_root_dir()?;
         let journal = self.root.join("vault.journal");
         let mut file = open_append_single_link(&journal)?;
         // Each record is fixed-width KEY_ID_LEN ‖ OBJECT_KEY_LEN so replay needs no
@@ -477,14 +493,70 @@ pub(crate) fn entry_exists(path: &Path) -> Result<bool, MnemeError> {
     }
 }
 
-pub(crate) fn ensure_vault_root_dir(store_root: &Path, root: &Path) -> Result<(), MnemeError> {
+pub(crate) fn ensure_vault_keys_dir(store_root: &Path) -> Result<(), MnemeError> {
     ensure_private_vault_dir(store_root, "vault store root")?;
-    let keys_dir = root.parent().ok_or_else(|| MnemeError::IoFailed {
-        path: root.display().to_string(),
-        kind: "vault root missing parent".into(),
-    })?;
-    ensure_private_vault_dir(keys_dir, "vault keys")?;
+    ensure_private_vault_dir(&store_root.join("keys"), "vault keys")
+}
+
+pub(crate) fn ensure_vault_root_dir(store_root: &Path, root: &Path) -> Result<(), MnemeError> {
+    ensure_vault_keys_dir(store_root)?;
     ensure_private_vault_dir(root, "vault")
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct VaultDirIdentity {
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+pub(crate) fn capture_vault_dir_identity(
+    dir: &Path,
+    label: &str,
+) -> Result<VaultDirIdentity, MnemeError> {
+    let metadata = private_vault_dir_metadata(dir, label)?;
+    Ok(VaultDirIdentity::from_metadata(&metadata))
+}
+
+pub(crate) fn validate_vault_dir_identity(
+    dir: &Path,
+    expected: &VaultDirIdentity,
+    label: &str,
+) -> Result<(), MnemeError> {
+    let metadata = private_vault_dir_metadata(dir, label)?;
+    expected.matches_metadata(dir, label, &metadata)
+}
+
+impl VaultDirIdentity {
+    fn from_metadata(metadata: &fs::Metadata) -> Self {
+        Self {
+            #[cfg(unix)]
+            dev: metadata.dev(),
+            #[cfg(unix)]
+            ino: metadata.ino(),
+        }
+    }
+
+    fn matches_metadata(
+        &self,
+        dir: &Path,
+        label: &str,
+        metadata: &fs::Metadata,
+    ) -> Result<(), MnemeError> {
+        #[cfg(unix)]
+        if self.dev != metadata.dev() || self.ino != metadata.ino() {
+            return Err(MnemeError::IoFailed {
+                path: dir.display().to_string(),
+                kind: format!("{label} directory changed"),
+            });
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (dir, label, metadata);
+        }
+        Ok(())
+    }
 }
 
 fn ensure_private_vault_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
@@ -495,25 +567,37 @@ fn ensure_private_vault_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
 
 fn reject_vault_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
     match fs::symlink_metadata(dir) {
-        Ok(metadata) => {
-            let file_type = metadata.file_type();
-            if file_type.is_symlink() {
-                return Err(MnemeError::IoFailed {
-                    path: dir.display().to_string(),
-                    kind: format!("{label} directory symlink"),
-                });
-            }
-            if !file_type.is_dir() {
-                return Err(MnemeError::IoFailed {
-                    path: dir.display().to_string(),
-                    kind: format!("{label} path non-directory"),
-                });
-            }
-            Ok(())
-        }
+        Ok(metadata) => validate_private_vault_metadata(dir, label, metadata).map(|_| ()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(io_error(dir.display().to_string(), err)),
     }
+}
+
+fn private_vault_dir_metadata(dir: &Path, label: &str) -> Result<fs::Metadata, MnemeError> {
+    let metadata =
+        fs::symlink_metadata(dir).map_err(|err| io_error(dir.display().to_string(), err))?;
+    validate_private_vault_metadata(dir, label, metadata)
+}
+
+fn validate_private_vault_metadata(
+    dir: &Path,
+    label: &str,
+    metadata: fs::Metadata,
+) -> Result<fs::Metadata, MnemeError> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} directory symlink"),
+        });
+    }
+    if !file_type.is_dir() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} path non-directory"),
+        });
+    }
+    Ok(metadata)
 }
 
 pub(crate) fn write_new_secret_file(
