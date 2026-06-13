@@ -467,6 +467,7 @@ pub(crate) fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
                 return Ok(());
             }
             reject_vault_dir_alias(parent, "vault sync parent")?;
+            reject_vault_parent_ancestor_alias(parent, "vault sync parent")?;
             let dir = File::open(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
             dir.sync_all()
                 .map_err(|e| io_error(parent.display().to_string(), e))?;
@@ -599,8 +600,10 @@ impl VaultDirIdentity {
 
 fn ensure_private_vault_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
     reject_vault_dir_alias(dir, label)?;
+    reject_vault_parent_ancestor_alias(dir, label)?;
     fs::create_dir_all(dir).map_err(|e| io_error(dir.display().to_string(), e))?;
-    reject_vault_dir_alias(dir, label)
+    reject_vault_dir_alias(dir, label)?;
+    reject_vault_parent_ancestor_alias(dir, label)
 }
 
 fn ensure_private_parent_dir(parent: &Path, label: &str) -> Result<(), MnemeError> {
@@ -608,6 +611,17 @@ fn ensure_private_parent_dir(parent: &Path, label: &str) -> Result<(), MnemeErro
         return Ok(());
     }
     ensure_private_vault_dir(parent, label)
+}
+
+fn reject_vault_parent_ancestor_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    // Limit the alias scan to the mutable vault-boundary suffix; scanning every
+    // absolute ancestor would reject platform aliases like macOS /var.
+    if let Some(ancestor) = dir.parent() {
+        if !ancestor.as_os_str().is_empty() {
+            reject_vault_dir_alias(ancestor, &format!("{label} ancestor"))?;
+        }
+    }
+    Ok(())
 }
 
 fn reject_vault_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
@@ -619,6 +633,7 @@ fn reject_vault_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
 }
 
 fn private_vault_dir_metadata(dir: &Path, label: &str) -> Result<fs::Metadata, MnemeError> {
+    reject_vault_parent_ancestor_alias(dir, label)?;
     let metadata =
         fs::symlink_metadata(dir).map_err(|err| io_error(dir.display().to_string(), err))?;
     validate_private_vault_metadata(dir, label, metadata)
@@ -962,6 +977,46 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn write_new_secret_file_rejects_symlinked_parent_ancestor_without_writing_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-parent-ancestor");
+        let linked_ancestor = dir.path().join("linked-parent-ancestor");
+        let parent = linked_ancestor.join("nested");
+        fs::create_dir(&external).expect("external parent ancestor target");
+        fs::create_dir(external.join("nested")).expect("external nested parent target");
+        std::os::unix::fs::symlink(&external, &linked_ancestor).expect("parent ancestor symlink");
+
+        let err = match write_new_secret_file(
+            &parent.join("secret.key"),
+            b"secret",
+            SecretFileMode::OwnerOnly,
+        ) {
+            Ok(()) => panic!("secret writer should reject a symlinked parent ancestor"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "secret parent ancestor alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::read_dir(external.join("nested"))
+                .expect("external nested parent read")
+                .next()
+                .is_none(),
+            "secret writer must not create temp or target files through a symlinked parent ancestor"
+        );
+        assert!(
+            fs::symlink_metadata(&linked_ancestor)
+                .expect("parent ancestor symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed secret write must leave the symlinked ancestor for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn open_append_single_link_rejects_symlinked_parent_without_writing_target() {
         let dir = tempfile::tempdir().expect("tempdir");
         let external = dir.path().join("external-append-parent");
@@ -996,6 +1051,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn open_append_single_link_rejects_symlinked_parent_ancestor_without_writing_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-append-parent-ancestor");
+        let linked_ancestor = dir.path().join("linked-append-parent-ancestor");
+        let parent = linked_ancestor.join("nested");
+        fs::create_dir(&external).expect("external append parent ancestor target");
+        fs::create_dir(external.join("nested")).expect("external nested append parent target");
+        std::os::unix::fs::symlink(&external, &linked_ancestor)
+            .expect("append parent ancestor symlink");
+
+        let err = match open_append_single_link(&parent.join("vault.journal")) {
+            Ok(_) => panic!("append writer should reject a symlinked parent ancestor"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "append parent ancestor alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::read_dir(external.join("nested"))
+                .expect("external nested append parent read")
+                .next()
+                .is_none(),
+            "append writer must not create a journal through a symlinked parent ancestor"
+        );
+        assert!(
+            fs::symlink_metadata(&linked_ancestor)
+                .expect("append parent ancestor symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed append open must leave the symlinked ancestor for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn sync_parent_dir_rejects_symlinked_parent() {
         let dir = tempfile::tempdir().expect("tempdir");
         let external = dir.path().join("external-sync-parent");
@@ -1018,6 +1110,36 @@ mod tests {
                 .file_type()
                 .is_symlink(),
             "failed parent sync must leave the symlinked parent for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_parent_dir_rejects_symlinked_parent_ancestor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-sync-parent-ancestor");
+        let linked_ancestor = dir.path().join("linked-sync-parent-ancestor");
+        let parent = linked_ancestor.join("nested");
+        fs::create_dir(&external).expect("external sync parent ancestor target");
+        fs::create_dir(external.join("nested")).expect("external nested sync parent target");
+        std::os::unix::fs::symlink(&external, &linked_ancestor)
+            .expect("sync parent ancestor symlink");
+
+        let err = match sync_parent_dir(&parent.join("secret.key")) {
+            Ok(()) => panic!("parent fsync should reject a symlinked parent ancestor"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "sync parent ancestor alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::symlink_metadata(&linked_ancestor)
+                .expect("sync parent ancestor symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed parent sync must leave the symlinked ancestor for explicit repair"
         );
     }
 
