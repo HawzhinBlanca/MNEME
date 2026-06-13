@@ -959,8 +959,17 @@ fn audit_pin_peak_state_creates_advances_and_rejects_rollback() {
     {
         let inside_pin = store.join("inside-valid-pin.json");
         let symlink_pin = dir.path().join("symlink-root-history-pin.json");
+        let tmp_symlink_target = store.join("tmp-symlink-target.json");
+        let old_tmp_symlink = pin.with_file_name(format!(
+            ".{}.{}.tmp",
+            pin.file_name().unwrap().to_string_lossy(),
+            std::process::id()
+        ));
         fs::copy(&pin, &inside_pin).expect("inside pin fixture");
+        fs::write(&tmp_symlink_target, b"do-not-truncate").expect("tmp symlink target");
         std::os::unix::fs::symlink(&inside_pin, &symlink_pin).expect("symlink pin fixture");
+        std::os::unix::fs::symlink(&tmp_symlink_target, &old_tmp_symlink)
+            .expect("old tmp symlink fixture");
 
         mneme()
             .args([
@@ -991,6 +1000,28 @@ fn audit_pin_peak_state_creates_advances_and_rejects_rollback() {
             .failure()
             .code(2)
             .stderr(predicate::str::contains("hard-linked"));
+
+        mneme()
+            .args([
+                "--operator-seed",
+                &seed,
+                "audit",
+                store.to_str().unwrap(),
+                "--pin-peak-state",
+                pin.to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+        assert_eq!(
+            fs::read(&tmp_symlink_target).expect("tmp symlink target"),
+            b"do-not-truncate"
+        );
+        assert!(
+            std::fs::symlink_metadata(&old_tmp_symlink)
+                .expect("old tmp symlink")
+                .file_type()
+                .is_symlink()
+        );
     }
 
     mneme()

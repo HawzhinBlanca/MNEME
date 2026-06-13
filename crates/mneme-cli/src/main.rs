@@ -1283,17 +1283,8 @@ fn write_peak_state_json_atomic(
         .unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent).map_err(|_| CliErrorKind::Usage)?;
     let file_name = path.file_name().ok_or(CliErrorKind::Usage)?;
-    let mut tmp_name = std::ffi::OsString::from(".");
-    tmp_name.push(file_name);
-    tmp_name.push(format!(".{}.tmp", std::process::id()));
-    let tmp_path = parent.join(tmp_name);
+    let (tmp_path, mut file) = create_peak_state_tmp_file(parent, file_name)?;
     {
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp_path)
-            .map_err(|_| CliErrorKind::Usage)?;
         if file.write_all(&data).is_err() || file.sync_all().is_err() {
             let _ = std::fs::remove_file(&tmp_path);
             return Err(CliErrorKind::Usage);
@@ -1307,6 +1298,73 @@ fn write_peak_state_json_atomic(
         let _ = dir.sync_all();
     }
     Ok(())
+}
+
+#[cfg(feature = "operator_tools")]
+fn create_peak_state_tmp_file(
+    parent: &Path,
+    file_name: &std::ffi::OsStr,
+) -> Result<(PathBuf, std::fs::File), CliErrorKind> {
+    create_peak_state_tmp_file_from_nonces(parent, file_name, rand::random::<u64>)
+}
+
+#[cfg(feature = "operator_tools")]
+fn create_peak_state_tmp_file_from_nonces(
+    parent: &Path,
+    file_name: &std::ffi::OsStr,
+    mut next_nonce: impl FnMut() -> u64,
+) -> Result<(PathBuf, std::fs::File), CliErrorKind> {
+    for _ in 0..16 {
+        let mut tmp_name = std::ffi::OsString::from(".");
+        tmp_name.push(file_name);
+        tmp_name.push(format!(".{}.{}.tmp", std::process::id(), next_nonce()));
+        let tmp_path = parent.join(tmp_name);
+        match std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => return Ok((tmp_path, file)),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err(CliErrorKind::Usage),
+        }
+    }
+    Err(CliErrorKind::Usage)
+}
+
+#[cfg(all(test, feature = "operator_tools", unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peak_state_tmp_file_skips_preexisting_symlink_without_truncating_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let parent = dir.path();
+        let file_name = std::ffi::OsStr::new("pin.json");
+        let victim = parent.join("victim.json");
+        std::fs::write(&victim, b"victim").expect("victim fixture");
+
+        let first_tmp = parent.join(format!(".pin.json.{}.{}.tmp", std::process::id(), 7_u64));
+        std::os::unix::fs::symlink(&victim, &first_tmp).expect("symlink tmp fixture");
+
+        let mut call_count = 0_u8;
+        let (second_tmp, file) = create_peak_state_tmp_file_from_nonces(parent, file_name, || {
+            call_count += 1;
+            if call_count == 1 { 7 } else { 8 }
+        })
+        .expect("second nonce should create a fresh tmp file");
+        drop(file);
+
+        assert_ne!(second_tmp, first_tmp);
+        assert!(second_tmp.exists());
+        assert_eq!(std::fs::read(&victim).expect("victim read"), b"victim");
+        assert!(
+            std::fs::symlink_metadata(&first_tmp)
+                .expect("first tmp symlink")
+                .file_type()
+                .is_symlink()
+        );
+    }
 }
 
 fn read_peak_state_json(path: &Path) -> Result<RootHistoryPeakState, CliErrorKind> {
