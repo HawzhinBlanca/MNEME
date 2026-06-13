@@ -103,6 +103,12 @@ case "$LANE" in
     bash scripts/ci/validation-contract-smoke.sh
     bash scripts/ci/vcp-integration-smoke.sh
     bash scripts/ci/vcp-c2-smoke.sh
+    # Optional, default-off `root_pace_log` feature (crash-safe hash-chained root
+    # pace-log; NOT an RFC6962 transparency log). The default `cargo test --workspace`
+    # cannot reach it (required-features), so gate it here: it must build clean and its
+    # crash-safe append test must pass.
+    cargo clippy -p mneme-store --features root_pace_log --tests -- -D warnings
+    cargo test -p mneme-store --features root_pace_log --test root_pace_log -- --nocapture
     ;;
 
   p3-local)

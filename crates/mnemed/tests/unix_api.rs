@@ -1329,6 +1329,10 @@ async fn unix_key_scoped_requests_reject_empty_logical_key() {
                 cap_b64: cap_b64.clone(),
                 namespace: "unix".into(),
                 name: " ".into(),
+                prompt: None,
+                weight_measurement_hex: None,
+                sampling_params: None,
+                output_token_commit_hex: None,
             },
         ),
         "key-scoped empty logical key recall request",
@@ -1344,6 +1348,7 @@ async fn unix_key_scoped_requests_reject_empty_logical_key() {
                 namespace: "".into(),
                 name: "note".into(),
                 mode: "shred".into(),
+                emit_proof: None,
             },
         ),
         "key-scoped empty logical key forget request",
@@ -1538,12 +1543,119 @@ async fn unix_forget_proof_returns_canonical_proof_bound_to_signed_root() {
                 cap_b64,
                 namespace: "unix".into(),
                 name: "proof-target".into(),
+                prompt: None,
+                weight_measurement_hex: None,
+                sampling_params: None,
+                output_token_commit_hex: None,
             },
         ),
         "forget-proof recall after request",
     )
     .await;
     assert_kernel_response_error_code(recall, "Forgotten", "forget-proof recall must fail closed");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn unix_recall_partial_robr_params_fail_closed() {
+    // Supplying some — but not all four — ROBR receipt inputs is ambiguous and must be
+    // rejected (before any recall work) rather than silently returning a recall with no
+    // receipt.
+    let dir = expect_unix_api_tempdir("robr-partial");
+    let sock = dir.path().join("robr-partial.sock");
+    let (state, operator, agent) = expect_unix_api_state_with_keys(dir.path(), "robr-partial");
+    let cap_b64 = expect_unix_agent_cap_b64(&operator, &agent, "robr-partial");
+    let server = spawn_unix(sock.clone(), state).await;
+
+    // Only the prompt is supplied → fail closed (no remember needed: the request-shape
+    // check runs before the recall).
+    let recall = expect_request_json_response(
+        request_json(
+            &sock,
+            &KernelRequest::RecallVerified {
+                cap_b64,
+                namespace: "unix".into(),
+                name: "robr-key".into(),
+                prompt: Some("only the prompt".into()),
+                weight_measurement_hex: None,
+                sampling_params: None,
+                output_token_commit_hex: None,
+            },
+        ),
+        "robr-partial recall request",
+    )
+    .await;
+    assert_schema_drift(recall, "partial ROBR params must fail closed");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn unix_recall_full_robr_params_emit_verifiable_receipt() {
+    use base64::Engine as _;
+    use mneme_account::robr::RobrReceiptV1;
+
+    let dir = expect_unix_api_tempdir("robr-full");
+    let sock = dir.path().join("robr-full.sock");
+    let (state, operator, agent) = expect_unix_api_state_with_keys(dir.path(), "robr-full");
+    let cap_b64 = expect_unix_agent_cap_b64(&operator, &agent, "robr-full");
+    // Trust the agent as a writer so the remembered entry verifies on recall.
+    authorize_unix_api_writer(&state, &agent, "robr-full");
+    let server = spawn_unix(sock.clone(), state).await;
+
+    let remember = expect_request_json_response(
+        request_json(
+            &sock,
+            &KernelRequest::Remember {
+                cap_b64: cap_b64.clone(),
+                namespace: "unix".into(),
+                name: "robr-key".into(),
+                body_b64: base64::engine::general_purpose::STANDARD.encode(b"robr body"),
+            },
+        ),
+        "robr-full remember request",
+    )
+    .await;
+    let _ = expect_kernel_response_payload(remember, "robr-full remember response");
+
+    let recall = expect_request_json_response(
+        request_json(
+            &sock,
+            &KernelRequest::RecallVerified {
+                cap_b64,
+                namespace: "unix".into(),
+                name: "robr-key".into(),
+                prompt: Some("what is in robr-key?".into()),
+                weight_measurement_hex: Some("11".repeat(32)),
+                sampling_params: Some("model=test;temp=0".into()),
+                output_token_commit_hex: Some("22".repeat(32)),
+            },
+        ),
+        "robr-full recall request",
+    )
+    .await;
+    let payload = expect_kernel_response_payload(recall, "robr-full recall response");
+    let receipt_b64 = expect_unix_json_str(&payload, "robr_receipt_b64", "robr-full receipt");
+    let wire = base64::engine::general_purpose::STANDARD
+        .decode(receipt_b64)
+        .expect("receipt base64 decodes");
+
+    // The minted receipt must verify offline under the store operator key (signature +
+    // envelope consistency), and its bound context must match the recall result.
+    let receipt = RobrReceiptV1::verify(&wire, Some(&operator.public_key_bytes()))
+        .expect("minted receipt verifies under the store operator key");
+    assert_eq!(receipt.output_token_commit, [0x22u8; 32]);
+    assert_eq!(receipt.weight_measurement, [0x11u8; 32]);
+    let count = payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .expect("recall count");
+    assert_eq!(
+        receipt.context_ids.len() as u64,
+        count,
+        "receipt context binds exactly the recalled entries"
+    );
 
     server.shutdown().await;
 }

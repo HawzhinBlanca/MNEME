@@ -1328,10 +1328,12 @@ dependencies = [
 name = "mneme-account"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "mneme-cap",
  "mneme-core",
  "mneme-crypto",
  "mneme-forget",
+ "mneme-pace",
  "mneme-smt",
 ]
 
@@ -1372,9 +1374,11 @@ name = "mneme-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "base64",
  "blake3",
  "clap",
  "hex",
+ "mneme-account",
  "mneme-cap",
  "mneme-core",
  "mneme-crypto",
@@ -1594,6 +1598,7 @@ dependencies = [
  "mneme-forget",
  "mneme-gate",
  "mneme-index",
+ "mneme-pace",
  "mneme-root",
  "mneme-smt",
  "mneme-verify",
@@ -1633,6 +1638,7 @@ dependencies = [
  "futures-util",
  "hex",
  "libc",
+ "mneme-account",
  "mneme-cap",
  "mneme-core",
  "mneme-crdt",

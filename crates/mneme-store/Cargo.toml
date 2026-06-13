@@ -19,6 +19,7 @@ mneme-index.workspace = true
 mneme-forget.workspace = true
 mneme-crdt.workspace = true
 mneme-account.workspace = true
+mneme-pace = { workspace = true, optional = true }
 mneme-context = { workspace = true, optional = true }
 mneme-gate = { workspace = true, optional = true }
 rand.workspace = true
@@ -37,6 +38,11 @@ default = []
 # which impose O(N) write latency and O(N x writes) disk at scale. The lean MCP
 # surface exposes no time/sequence recall, so the lean core does not pay this tax.
 bitemporal_recall = []
+# Optional hash-chained pace-log of committed roots (`meta/root-pace.log`). OFF by
+# default: it rewrites the whole CBOR log per commit (O(n)), which would regress the
+# lean O(1) write path. It is NOT an RFC6962 transparency log (no inclusion/consistency
+# proofs, single-operator) and the log is derived/rebuildable from the checkpoint log.
+root_pace_log = ["dep:mneme-pace"]
 context_gate = ["mneme-index/context_gate", "dep:mneme-context", "dep:mneme-gate"]
 phase_iii_bind = ["mneme-account/phase_iii_bind_action"]
 phase_iii_verify = ["mneme-account/phase_iii_verify"]
@@ -47,6 +53,7 @@ phase_iii_require_action = ["phase_iii_verify"]
 tempfile.workspace = true
 rand.workspace = true
 hex.workspace = true
+mneme-pace.workspace = true
 
 [[test]]
 name = "e2e"
@@ -86,3 +93,8 @@ required-features = ["phase_iii_prove_forget", "phase_iii_verify"]
 name = "phase_iii_policy"
 path = "tests/phase_iii_policy.rs"
 required-features = ["phase_iii_bind", "phase_iii_require_action"]
+
+[[test]]
+name = "root_pace_log"
+path = "tests/root_pace_log.rs"
+required-features = ["root_pace_log"]

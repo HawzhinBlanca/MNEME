@@ -15,6 +15,8 @@ mneme-index = { path = "../crates/mneme-index" }
 mneme-smt = { path = "../crates/mneme-smt" }
 mneme-crdt = { path = "../crates/mneme-crdt" }
 mneme-attest = { path = "../crates/mneme-attest" }
+mneme-account = { path = "../crates/mneme-account", features = ["phase_iii_verify"] }
+mneme-pace = { path = "../crates/mneme-pace" }
 
 [[bin]]
 name = "dcbor_parse"
@@ -85,3 +87,25 @@ path = "fuzz_targets/federation_cert_verify.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "robr_verify"
+path = "fuzz_targets/robr_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "forget_proof_verify"
+path = "fuzz_targets/forget_proof_verify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pace_log_verify"
+path = "fuzz_targets/pace_log_verify.rs"
+test = false
+doc = false
+bench = false
+

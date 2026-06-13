@@ -20,12 +20,14 @@ mneme-crypto.workspace = true
 mneme-cap = { workspace = true, optional = true }
 mneme-forget = { workspace = true, optional = true }
 mneme-smt = { workspace = true, optional = true }
+blake3.workspace = true
 
 [dev-dependencies]
 mneme-crypto.workspace = true
 mneme-cap.workspace = true
 mneme-forget.workspace = true
 mneme-smt.workspace = true
+mneme-pace.workspace = true
 
 [[test]]
 name = "verify_crypto"

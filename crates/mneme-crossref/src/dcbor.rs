@@ -403,6 +403,10 @@ impl CborValue {
             _ => None,
         }
     }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
 }
 
 impl DcborEncode for CborValue {

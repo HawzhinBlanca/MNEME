@@ -1,6 +1,7 @@
 //! `mneme` CLI — adoption-layer fail-closed gate (blueprint §14.2).
 
 mod attest;
+mod card;
 mod cert;
 mod determinism;
 mod fcc;
@@ -8,8 +9,8 @@ mod freivalds;
 mod mtl;
 mod pace;
 mod replay;
-mod robr;
 mod rpt;
+use mneme_account::robr;
 mod shapley;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -356,6 +357,23 @@ enum Commands {
         /// Seed for the deterministic demo stream
         #[arg(long = "seed", default_value_t = 1)]
         seed: u64,
+    },
+    /// Generate an A2A Agent Card (JWS-signed card advertising the memory attestation endpoint)
+    AgentCard {
+        store: PathBuf,
+        /// Memory attestation endpoint URL to advertise, e.g. "http://localhost:7845/v1/attest"
+        #[arg(long = "attestation-endpoint")]
+        attestation_endpoint: String,
+        /// Output path for the JWS card file
+        #[arg(long = "out", default_value = "agent-card.jws")]
+        out: PathBuf,
+    },
+    /// Verify an A2A Agent Card JWS file
+    VerifyCard {
+        card: PathBuf,
+        /// Optional operator public key hex (64 hex chars) to pin against
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
     },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
@@ -1211,6 +1229,45 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             if detected == unmarked {
                 return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
             }
+            Ok(())
+        }
+        Commands::AgentCard {
+            store,
+            attestation_endpoint,
+            out,
+        } => {
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            let card = card::generate_agent_card(&operator, &attestation_endpoint)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &card).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "agent card written: {} ({} bytes) operator_pk={} endpoint={}",
+                out.display(),
+                card.len(),
+                hex::encode(operator.public_key_bytes()),
+                attestation_endpoint
+            );
+            Ok(())
+        }
+        Commands::VerifyCard { card, operator_pk } => {
+            let card_str = std::fs::read_to_string(&card).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = card::verify_agent_card(card_str.trim(), pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            println!(
+                "verify-card ok: iss={} sub={} attestation_endpoint={}",
+                parsed.iss, parsed.sub, parsed.attestation_endpoint
+            );
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", card::AGENT_CARD_HONESTY);
             Ok(())
         }
         Commands::Init { path } => {

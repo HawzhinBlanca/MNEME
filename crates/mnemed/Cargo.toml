@@ -80,6 +80,7 @@ tracing-opentelemetry = "0.28"
 tempfile.workspace = true
 reqwest = { version = "0.12", features = ["json"] }
 tonic = { workspace = true, features = ["transport"] }
+mneme-account.workspace = true
 
 [build-dependencies]
 tonic-build = "0.13"

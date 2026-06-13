@@ -420,3 +420,52 @@ fn crossref_beacon_spot_check_manifest_pins_audit_beacon_fields() {
 fn crossref_cognition_cert_v1_byte_exact() {
     crossref_cognition_cert_byte_exact();
 }
+
+#[test]
+fn crossref_robr_receipt_byte_exact() {
+    use mneme_crossref::wire_robr;
+
+    let path = vectors_root().join("robr_vector_v1.bin");
+    let bytes = fs::read(&path).unwrap();
+    let parsed = wire_robr::verify_robr_receipt(&bytes, None).unwrap();
+    assert_eq!(parsed.root_seq, 42);
+    assert_eq!(parsed.sampling_params, "model=crossref-v1;temp=0");
+    assert_eq!(parsed.context_ids.len(), 1);
+    assert_eq!(parsed.context_ids[0], [0x11; 32]);
+}
+
+#[test]
+fn crossref_forget_proof_byte_exact() {
+    use mneme_crossref::wire_forget_proof;
+
+    let path = vectors_root().join("forget_proof_vector_v1.cbor");
+    let bytes = fs::read(&path).unwrap();
+    let parsed = wire_forget_proof::StoredForgetProof::decode(&bytes).unwrap();
+    assert_eq!(parsed.version, 3);
+    assert_eq!(parsed.target_commit, [0x55; 32]);
+    assert_eq!(parsed.shred_commit, [0x66; 32]);
+    assert_eq!(parsed.root_bound, [0x88; 32]);
+
+    let leaf_hash = mneme_crossref::domain::hash_smt_leaf(
+        &parsed.target_commit,
+        &mneme_crossref::smt::TOMBSTONE,
+    );
+    let current =
+        mneme_crossref::smt::fold_auth_path(leaf_hash, &parsed.target_commit, &parsed.absence_path)
+            .unwrap();
+    parsed.verify(&current).unwrap();
+}
+
+#[test]
+fn crossref_pace_log_byte_exact() {
+    use mneme_crossref::wire_pace;
+
+    let path = vectors_root().join("pace_log_vector_v1.cbor");
+    let bytes = fs::read(&path).unwrap();
+    let parsed = wire_pace::StoredPaceLog::decode(&bytes).unwrap();
+    assert_eq!(parsed.version, 1);
+    assert_eq!(parsed.calibration.iterations_per_tick, 10);
+    assert_eq!(parsed.segments.len(), 1);
+    assert_eq!(parsed.segments[0].label, Some("root-seq-42".to_string()));
+    parsed.verify().unwrap();
+}

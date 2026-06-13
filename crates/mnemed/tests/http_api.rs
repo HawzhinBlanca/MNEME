@@ -227,6 +227,90 @@ async fn remember_recall_forget_flow() {
 }
 
 #[tokio::test]
+async fn http_recall_robr_partial_rejected_and_full_verifies() {
+    use base64::Engine as _;
+    use mneme_account::robr::RobrReceiptV1;
+
+    let h = TestHarness::new().await;
+    let client = reqwest::Client::new();
+    let auth = h.agent_auth_header();
+
+    let remember = expect_http_response(
+        client
+            .post(format!("{}/v1/memory", h.http_base()))
+            .header("Authorization", &auth)
+            .json(&json!({
+                "namespace": "user",
+                "name": "robr",
+                "kind": "semantic",
+                "body": "secret-robr-body"
+            }))
+            .send(),
+        "HTTP remember (robr)",
+    )
+    .await;
+    assert_eq!(remember.status(), 200);
+
+    // A half-specified receipt request (only prompt) is rejected before recall runs.
+    let partial = expect_http_response(
+        client
+            .get(format!(
+                "{}/v1/memory/user/robr?min_tier=working&prompt=hi",
+                h.http_base()
+            ))
+            .header("Authorization", &auth)
+            .send(),
+        "HTTP recall partial robr",
+    )
+    .await;
+    assert_eq!(
+        partial.status(),
+        400,
+        "partial ROBR params must be rejected"
+    );
+
+    // All four inputs → a verifiable ROBR receipt is carried in the response.
+    let url = format!(
+        "{}/v1/memory/user/robr?min_tier=working&prompt=hi&weight_measurement_hex={}&sampling_params=test&output_token_commit_hex={}",
+        h.http_base(),
+        "11".repeat(32),
+        "22".repeat(32),
+    );
+    let full = expect_http_response(
+        client.get(url).header("Authorization", &auth).send(),
+        "HTTP recall full robr",
+    )
+    .await;
+    assert_eq!(full.status(), 200);
+    let body = expect_http_json(full, "HTTP recall full robr response").await;
+    let receipt_b64 = match body["robr_receipt_b64"].as_str() {
+        Some(s) => s,
+        None => panic!("HTTP recall response must carry robr_receipt_b64"),
+    };
+    let wire = match base64::engine::general_purpose::STANDARD.decode(receipt_b64) {
+        Ok(bytes) => bytes,
+        Err(err) => panic!("HTTP robr receipt base64 decode failed: {err:?}"),
+    };
+    // Verifies signature + envelope consistency against the embedded operator key.
+    let receipt = match RobrReceiptV1::verify(&wire, None) {
+        Ok(receipt) => receipt,
+        Err(err) => panic!("HTTP minted robr receipt failed to verify offline: {err:?}"),
+    };
+    assert_eq!(receipt.output_token_commit, [0x22u8; 32]);
+    assert_eq!(receipt.weight_measurement, [0x11u8; 32]);
+    assert_eq!(
+        receipt.context_ids.len() as u64,
+        body["entries"]
+            .as_array()
+            .map(|a| a.len() as u64)
+            .unwrap_or(0),
+        "receipt context binds exactly the recalled entries"
+    );
+
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn quarantine_entry_blocked_at_trusted_tier() {
     let h = TestHarness::new().await;
     let client = reqwest::Client::new();
