@@ -15,10 +15,10 @@ use mneme_core::MnemeError;
 use crate::aead::{open, random_nonce, seal};
 use crate::types::{KEY_ID_LEN, KeyId, OBJECT_KEY_LEN, ObjectKey};
 use crate::vault::{
-    SecretFileMode, VaultDirIdentity, capture_vault_dir_identity, ensure_vault_root_dir,
+    SecretFileMode, VaultLayoutIdentity, capture_vault_layout_identity, ensure_vault_root_dir,
     entry_exists, io_error, open_append_single_link, random_key_id, random_object_key,
-    read_single_link_file, sync_parent_dir, validate_single_link_file, validate_vault_dir_identity,
-    write_new_secret_file,
+    read_single_link_file, sync_parent_dir, validate_single_link_file,
+    validate_vault_layout_identity, write_new_secret_file,
 };
 
 const ENVELOPE_AAD: &[u8] = b"mneme-envelope-key-v1";
@@ -30,7 +30,7 @@ use crate::types::XCHACHA_NONCE_LEN;
 /// Master-key envelope vault at `store/keys/vault/`.
 pub struct EnvelopeKeyVault {
     root: PathBuf,
-    root_identity: VaultDirIdentity,
+    layout_identity: VaultLayoutIdentity,
     master: [u8; 32],
     live: HashMap<KeyId, ObjectKey>,
     shredded: HashSet<KeyId>,
@@ -56,12 +56,12 @@ impl EnvelopeKeyVault {
         let store_root = store_root.as_ref();
         let root = store_root.join("keys").join("vault");
         ensure_vault_root_dir(store_root, &root)?;
-        let root_identity = capture_vault_dir_identity(&root, "vault")?;
+        let layout_identity = capture_vault_layout_identity(store_root, &root)?;
         let (live, shredded) = load_envelope_dir(&root, &master)?;
-        validate_vault_dir_identity(&root, &root_identity, "vault")?;
+        validate_vault_layout_identity(&layout_identity)?;
         Ok(Self {
             root,
-            root_identity,
+            layout_identity,
             master,
             live,
             shredded,
@@ -88,27 +88,11 @@ impl EnvelopeKeyVault {
     }
 
     fn unwrap(&self, bytes: &[u8]) -> Result<ObjectKey, MnemeError> {
-        if bytes.len() != WRAPPED_KEY_LEN {
-            return Err(MnemeError::KeyVaultCorrupt);
-        }
-        let nonce = crate::types::nonce_from_slice(&bytes[..XCHACHA_NONCE_LEN])
-            .map_err(|_| MnemeError::KeyVaultCorrupt)?;
-        let opened = open(
-            &self.master,
-            &nonce,
-            &bytes[XCHACHA_NONCE_LEN..],
-            ENVELOPE_AAD,
-        )?;
-        if opened.len() != OBJECT_KEY_LEN {
-            return Err(MnemeError::KeyVaultCorrupt);
-        }
-        let mut key = [0u8; OBJECT_KEY_LEN];
-        key.copy_from_slice(&opened);
-        Ok(key)
+        unwrap_wrapped_key(&self.master, bytes)
     }
 
     fn validate_root_dir(&self) -> Result<(), MnemeError> {
-        validate_vault_dir_identity(&self.root, &self.root_identity, "vault")
+        validate_vault_layout_identity(&self.layout_identity)
     }
 }
 
@@ -274,18 +258,29 @@ fn read_wrapped_key(path: &Path) -> Result<Vec<u8>, MnemeError> {
     Ok(bytes)
 }
 
+fn unwrap_wrapped_key(master: &[u8; 32], bytes: &[u8]) -> Result<ObjectKey, MnemeError> {
+    if bytes.len() != WRAPPED_KEY_LEN {
+        return Err(MnemeError::KeyVaultCorrupt);
+    }
+    let nonce = crate::types::nonce_from_slice(&bytes[..XCHACHA_NONCE_LEN])
+        .map_err(|_| MnemeError::KeyVaultCorrupt)?;
+    let opened = open(master, &nonce, &bytes[XCHACHA_NONCE_LEN..], ENVELOPE_AAD)?;
+    object_key_from_opened_bytes(&opened)
+}
+
+fn object_key_from_opened_bytes(bytes: &[u8]) -> Result<ObjectKey, MnemeError> {
+    if bytes.len() != OBJECT_KEY_LEN {
+        return Err(MnemeError::KeyVaultCorrupt);
+    }
+    let mut key = [0u8; OBJECT_KEY_LEN];
+    key.copy_from_slice(bytes);
+    Ok(key)
+}
+
 fn load_envelope_dir(
     root: &Path,
     master: &[u8; 32],
 ) -> Result<(HashMap<KeyId, ObjectKey>, HashSet<KeyId>), MnemeError> {
-    let vault = EnvelopeKeyVault {
-        root: root.to_path_buf(),
-        root_identity: capture_vault_dir_identity(root, "vault")?,
-        master: *master,
-        live: HashMap::new(),
-        shredded: HashSet::new(),
-        batch: None,
-    };
     let mut live = HashMap::new();
     let mut shredded = HashSet::new();
     let rd = match fs::read_dir(root) {
@@ -307,7 +302,7 @@ fn load_envelope_dir(
             }
         } else if let Some(key_id) = crate::vault::hex::decode_key_id(name) {
             let wrapped = read_wrapped_key(&entry.path())?;
-            let key = vault.unwrap(&wrapped)?;
+            let key = unwrap_wrapped_key(master, &wrapped)?;
             live.insert(key_id, key);
         }
     }
@@ -320,7 +315,7 @@ fn load_envelope_dir(
             let mut key_id = [0u8; KEY_ID_LEN];
             key_id.copy_from_slice(&bytes[off..off + KEY_ID_LEN]);
             let wrapped = &bytes[off + KEY_ID_LEN..off + JOURNAL_RECORD_LEN];
-            let key = vault.unwrap(wrapped)?;
+            let key = unwrap_wrapped_key(master, wrapped)?;
             live.insert(key_id, key);
         }
     }

@@ -409,6 +409,83 @@ fn envelope_vault_new_key_rejects_swapped_symlinked_vault_dir_without_writing_ta
 }
 
 #[cfg(unix)]
+fn swap_keys_dir_to_symlink_back_to_original(store: &Path) -> PathBuf {
+    let keys = store.join("keys");
+    let moved_keys = store.join("moved-keys");
+    std::fs::rename(&keys, &moved_keys).expect("move original keys dir");
+    std::os::unix::fs::symlink(&moved_keys, &keys).expect("keys dir symlink to original");
+    moved_keys
+}
+
+#[cfg(unix)]
+#[test]
+fn file_vault_new_key_rejects_symlinked_keys_parent_even_when_vault_inode_matches() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = FileKeyVault::new(dir.path()).expect("file vault");
+    let moved_keys = swap_keys_dir_to_symlink_back_to_original(dir.path());
+
+    let err = match vault.new_key() {
+        Ok(_) => panic!("symlinked keys parent should fail closed even if vault dir is unchanged"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "keys parent alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(moved_keys.join("vault"))
+            .expect("moved vault target readable")
+            .next()
+            .is_none(),
+        "FileKeyVault::new_key must not write through a symlinked keys parent"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.path().join("keys"))
+            .expect("keys symlink metadata")
+            .file_type()
+            .is_symlink(),
+        "failed new_key must leave the symlinked keys parent for explicit repair"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn envelope_vault_new_key_rejects_symlinked_keys_parent_even_when_vault_inode_matches() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = EnvelopeKeyVault::from_master(dir.path(), [0x7a; 32]).expect("envelope vault");
+    let moved_keys = swap_keys_dir_to_symlink_back_to_original(dir.path());
+
+    let err = match vault.new_key() {
+        Ok(_) => {
+            panic!(
+                "symlinked envelope keys parent should fail closed even if vault dir is unchanged"
+            )
+        }
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("symlink"),
+        "envelope keys parent alias rejection should mention symlink, got {err}"
+    );
+    assert!(
+        std::fs::read_dir(moved_keys.join("vault"))
+            .expect("moved envelope vault target readable")
+            .next()
+            .is_none(),
+        "EnvelopeKeyVault::new_key must not write through a symlinked keys parent"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.path().join("keys"))
+            .expect("envelope keys symlink metadata")
+            .file_type()
+            .is_symlink(),
+        "failed new_key must leave the symlinked envelope keys parent for explicit repair"
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn file_vault_batch_flush_rejects_symlinked_journal_and_keeps_batch_cancelable() {
     let dir = tempfile::tempdir().expect("tempdir");

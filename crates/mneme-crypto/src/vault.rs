@@ -148,7 +148,7 @@ impl KeyVault for MemoryKeyVault {
 /// `.shred` tombstones are still written/fsynced to disk).
 pub struct FileKeyVault {
     root: PathBuf,
-    root_identity: VaultDirIdentity,
+    layout_identity: VaultLayoutIdentity,
     live: HashMap<KeyId, ObjectKey>,
     shredded: HashSet<KeyId>,
     /// When `Some`, `new_key` buffers `(id, key)` records here instead of writing +
@@ -168,12 +168,12 @@ impl FileKeyVault {
         let store_root = store_root.as_ref();
         let root = store_root.join("keys").join("vault");
         ensure_vault_root_dir(store_root, &root)?;
-        let root_identity = capture_vault_dir_identity(&root, "vault")?;
+        let layout_identity = capture_vault_layout_identity(store_root, &root)?;
         let (live, shredded) = load_vault_dir(&root)?;
-        validate_vault_dir_identity(&root, &root_identity, "vault")?;
+        validate_vault_layout_identity(&layout_identity)?;
         Ok(Self {
             root,
-            root_identity,
+            layout_identity,
             live,
             shredded,
             batch: None,
@@ -189,7 +189,7 @@ impl FileKeyVault {
     }
 
     fn validate_root_dir(&self) -> Result<(), MnemeError> {
-        validate_vault_dir_identity(&self.root, &self.root_identity, "vault")
+        validate_vault_layout_identity(&self.layout_identity)
     }
 }
 
@@ -509,6 +509,43 @@ pub(crate) struct VaultDirIdentity {
     dev: u64,
     #[cfg(unix)]
     ino: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VaultLayoutIdentity {
+    store_root: PathBuf,
+    keys_dir: PathBuf,
+    root: PathBuf,
+    store_root_identity: VaultDirIdentity,
+    keys_identity: VaultDirIdentity,
+    root_identity: VaultDirIdentity,
+}
+
+pub(crate) fn capture_vault_layout_identity(
+    store_root: &Path,
+    root: &Path,
+) -> Result<VaultLayoutIdentity, MnemeError> {
+    let keys_dir = store_root.join("keys");
+    Ok(VaultLayoutIdentity {
+        store_root: store_root.to_path_buf(),
+        keys_dir: keys_dir.clone(),
+        root: root.to_path_buf(),
+        store_root_identity: capture_vault_dir_identity(store_root, "vault store root")?,
+        keys_identity: capture_vault_dir_identity(&keys_dir, "vault keys")?,
+        root_identity: capture_vault_dir_identity(root, "vault")?,
+    })
+}
+
+pub(crate) fn validate_vault_layout_identity(
+    identity: &VaultLayoutIdentity,
+) -> Result<(), MnemeError> {
+    validate_vault_dir_identity(
+        &identity.store_root,
+        &identity.store_root_identity,
+        "vault store root",
+    )?;
+    validate_vault_dir_identity(&identity.keys_dir, &identity.keys_identity, "vault keys")?;
+    validate_vault_dir_identity(&identity.root, &identity.root_identity, "vault")
 }
 
 pub(crate) fn capture_vault_dir_identity(
