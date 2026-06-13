@@ -52,7 +52,7 @@ pub fn foundation_gate(
     timestamp: &str,
     operator_seed: Option<[u8; 32]>,
 ) -> Result<FoundationReport, MnemeError> {
-    fs::create_dir_all(out).map_err(|e| io_err(out, e))?;
+    ensure_foundation_output_dir(out)?;
     let report_path = out.join("foundation.report.json");
     generated_output::validate_path(&report_path).map_err(|e| io_err(&report_path, e))?;
     let operator_seed = operator_seed.unwrap_or(DEFAULT_FIXTURE_OPERATOR_SEED);
@@ -122,6 +122,38 @@ pub fn foundation_verify(
     Ok(result)
 }
 
+fn ensure_foundation_output_dir(out: &Path) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(out) {
+        Ok(metadata) => reject_foundation_output_dir_alias(out, &metadata),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(out).map_err(|e| io_err(out, e))?;
+            let metadata = fs::symlink_metadata(out).map_err(|e| io_err(out, e))?;
+            reject_foundation_output_dir_alias(out, &metadata)
+        }
+        Err(err) => Err(io_err(out, err)),
+    }
+}
+
+fn reject_foundation_output_dir_alias(
+    out: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), MnemeError> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: out.display().to_string(),
+            kind: "foundation output directory symlink".into(),
+        });
+    }
+    if !file_type.is_dir() {
+        return Err(MnemeError::IoFailed {
+            path: out.display().to_string(),
+            kind: "foundation output path non-directory".into(),
+        });
+    }
+    Ok(())
+}
+
 fn foundation_determinism_failure_to_mneme(failure: FoundationDeterminismFailure) -> MnemeError {
     match failure {
         FoundationDeterminismFailure::GateDigestMismatch
@@ -140,9 +172,7 @@ fn foundation_verify_digest_mismatch_error() -> MnemeError {
 }
 
 fn build_fixture_run(dir: &Path, operator_seed: [u8; 32]) -> Result<RunDigest, MnemeError> {
-    if dir.exists() {
-        fs::remove_dir_all(dir).map_err(|e| io_err(dir, e))?;
-    }
+    remove_existing_fixture_run_dir(dir)?;
     fs::create_dir_all(dir).map_err(|e| io_err(dir, e))?;
 
     mneme_crypto::enable_fixture_crypto(derive_fixture_seed(
@@ -152,6 +182,29 @@ fn build_fixture_run(dir: &Path, operator_seed: [u8; 32]) -> Result<RunDigest, M
     let result = build_fixture_run_inner(dir, operator_seed);
     mneme_crypto::disable_fixture_crypto();
     result
+}
+
+fn remove_existing_fixture_run_dir(dir: &Path) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(MnemeError::IoFailed {
+                    path: dir.display().to_string(),
+                    kind: "foundation fixture run directory symlink".into(),
+                });
+            }
+            if !file_type.is_dir() {
+                return Err(MnemeError::IoFailed {
+                    path: dir.display().to_string(),
+                    kind: "foundation fixture run path non-directory".into(),
+                });
+            }
+            fs::remove_dir_all(dir).map_err(|e| io_err(dir, e))
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(dir, err)),
+    }
 }
 
 fn build_fixture_run_inner(dir: &Path, operator_seed: [u8; 32]) -> Result<RunDigest, MnemeError> {

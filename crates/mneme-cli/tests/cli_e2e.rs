@@ -423,6 +423,83 @@ fn determinism_foundation_gate_rejects_symlink_report_without_overwriting_target
 
 #[cfg(unix)]
 #[test]
+fn determinism_foundation_gate_rejects_symlink_output_dir_without_deleting_target_runs() {
+    let dir = tempdir().unwrap();
+    let external = dir.path().join("external-foundation");
+    let external_run_a = external.join("run-a");
+    fs::create_dir_all(&external_run_a).expect("external run-a fixture");
+    let sentinel = external_run_a.join("sentinel");
+    fs::write(&sentinel, b"preserve").expect("external sentinel fixture");
+    let out = dir.path().join("foundation-link");
+    std::os::unix::fs::symlink(&external, &out).expect("foundation output dir symlink");
+
+    mneme()
+        .args([
+            "determinism",
+            "foundation-gate",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("symlink"));
+
+    assert_eq!(
+        fs::read(&sentinel).expect("external run-a sentinel"),
+        b"preserve",
+        "foundation-gate must not remove run directories through a symlinked --out"
+    );
+    assert!(
+        fs::symlink_metadata(&out)
+            .expect("output symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed foundation-gate must leave the output symlink entry untouched"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn determinism_foundation_gate_rejects_symlink_run_dir_without_deleting_target() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("foundation");
+    fs::create_dir(&out).expect("foundation output dir");
+    let external_run_a = dir.path().join("external-run-a");
+    fs::create_dir(&external_run_a).expect("external run-a fixture");
+    let sentinel = external_run_a.join("sentinel");
+    fs::write(&sentinel, b"preserve").expect("external sentinel fixture");
+    let run_a = out.join("run-a");
+    std::os::unix::fs::symlink(&external_run_a, &run_a).expect("run-a symlink fixture");
+
+    mneme()
+        .args([
+            "determinism",
+            "foundation-gate",
+            "--out",
+            out.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .code(5)
+        .stderr(predicate::str::contains("symlink"));
+
+    assert_eq!(
+        fs::read(&sentinel).expect("external run-a sentinel"),
+        b"preserve",
+        "foundation-gate must not remove fixture run directories through symlinks"
+    );
+    assert!(
+        fs::symlink_metadata(&run_a)
+            .expect("run-a symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed foundation-gate must leave the run-a symlink entry untouched"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn determinism_foundation_verify_rejects_symlink_output_without_overwriting_target() {
     let dir = tempdir().unwrap();
     let out = dir.path().join("foundation");
