@@ -56,6 +56,17 @@ proven cross-host bit-identical determinism.
   integration seam. **Proof:** honest receipt verifies; a 1-token-altered output fails closed;
   determinism test — two replays byte-identical (mirror foundation-gate ×2). State trust assumption:
   *"replay-verified: verifier re-ran the deterministic kernel; trusts the kernel determinism, not a TEE."*
+  - **✅ LANDED.** `robr::reference_kernel` (deterministic BLAKE3-XOF over the binding
+    envelope; envelope-sensitive, host-independent) + `replay_reproduces_output`.
+    `mneme robr --reference-kernel` mints a replay-verifiable receipt; `mneme verify-robr
+    --replay` re-executes and asserts bit-identical output, else fails closed (exit 4).
+    **Proof:** unit tests (kernel determinism + envelope-sensitivity, replay accepts
+    kernel output, replay rejects non-kernel output, replay fails when a bound input
+    changes) + e2e (`robr2_reference_kernel_receipt_replay_verifies`,
+    `robr2_replay_rejects_non_reference_kernel_output`). Honesty (`ROBR_REPLAY_HONESTY`):
+    re-executed not asserted; the reference kernel is a deterministic STAND-IN — binding
+    to a real model needs a batch-invariant inference backend (vLLM/SGLang seam) and
+    ROBR-4 TEE for weight attestation; never semantic truth.
 - **ROBR-3 `[CORE]` — Freivalds spot-check path.** For each logged per-layer matmul `C=A·B`, verify
   `A(Br)=Cr` for random `r` over `k` rounds (O(n²)/round, soundness err ≤ 2⁻ᵏ) instead of recompute.
   **Proof:** correct products accept; a single tampered product entry is caught with empirical rate

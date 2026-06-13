@@ -227,18 +227,29 @@ enum Commands {
         /// Canonical sampling params, e.g. "model=…;temp=0;top_p=1;seed=42"
         #[arg(long = "sampling")]
         sampling: String,
-        /// File holding the produced output tokens (committed to via BLAKE3)
+        /// File holding the produced output tokens (committed to via BLAKE3).
+        /// Required unless --reference-kernel is set.
         #[arg(long = "output-file")]
-        output_file: PathBuf,
+        output_file: Option<PathBuf>,
+        /// ROBR-2: generate the output with the deterministic reference kernel over the
+        /// binding envelope (instead of reading --output-file), producing a
+        /// replay-verifiable receipt (`verify-robr --replay`).
+        #[arg(long = "reference-kernel", default_value_t = false)]
+        reference_kernel: bool,
         #[arg(long = "out")]
         out: PathBuf,
     },
-    /// Offline verify a ROBR binding receipt (signature + envelope consistency)
+    /// Offline verify a ROBR binding receipt (signature + envelope consistency).
     VerifyRobr {
         cert: PathBuf,
         /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
+        /// ROBR-2: also re-execute the deterministic reference kernel over the committed
+        /// envelope and assert the output commitment matches bit-for-bit (proof of
+        /// faithful execution, not just binding).
+        #[arg(long = "replay", default_value_t = false)]
+        replay: bool,
     },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
@@ -627,6 +638,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             weight_measurement,
             sampling,
             output_file,
+            reference_kernel,
             out,
         } => {
             let key_names: Vec<String> = keys
@@ -638,8 +650,11 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 eprintln!("mneme: robr requires --keys with at least one key");
                 return Err(CliErrorKind::Usage);
             }
+            if output_file.is_none() && !reference_kernel {
+                eprintln!("mneme: robr requires --output-file (or --reference-kernel)");
+                return Err(CliErrorKind::Usage);
+            }
             let weight = parse_seed_hex(&weight_measurement)?;
-            let output = std::fs::read(&output_file).map_err(|_| CliErrorKind::Usage)?;
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
@@ -677,6 +692,15 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 &sampling,
                 &ctx_hash,
             );
+            // Output commitment: either the bytes the caller produced, or — in
+            // reference-kernel mode (ROBR-2) — the deterministic kernel's output over
+            // the envelope, which makes the receipt replay-verifiable.
+            let output = if reference_kernel {
+                robr::reference_kernel(&env)
+            } else {
+                std::fs::read(output_file.as_ref().expect("checked above"))
+                    .map_err(|_| CliErrorKind::Usage)?
+            };
             let receipt = robr::RobrReceiptV1 {
                 root_seq: root.sequence,
                 root_preimage: root.preimage_hash,
@@ -686,7 +710,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 context_ids: context.iter().map(|(id, _)| *id).collect(),
                 context_hash: ctx_hash,
                 envelope_hash: env,
-                output_token_commit: *blake3::hash(&output).as_bytes(),
+                output_token_commit: robr::commit_output(&output),
                 operator_pk: operator.public_key_bytes(),
                 sig: [0u8; 64],
             };
@@ -695,17 +719,22 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 .map_err(CliErrorKind::Kernel)?;
             std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
             println!(
-                "robr receipt written: {} ({} bytes) root_seq={} context_entries={} envelope={}",
+                "robr receipt written: {} ({} bytes) root_seq={} context_entries={} envelope={} reference_kernel={}",
                 out.display(),
                 wire.len(),
                 root.sequence,
                 context.len(),
-                hex::encode(env)
+                hex::encode(env),
+                reference_kernel
             );
             println!("honesty: {}", robr::ROBR_HONESTY);
             Ok(())
         }
-        Commands::VerifyRobr { cert, operator_pk } => {
+        Commands::VerifyRobr {
+            cert,
+            operator_pk,
+            replay,
+        } => {
             let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
             let pinned = match operator_pk {
                 Some(hex) => Some(parse_seed_hex(&hex)?),
@@ -721,6 +750,20 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 hex::encode(parsed.output_token_commit),
                 hex::encode(parsed.operator_pk)
             );
+            if replay {
+                // ROBR-2: re-execute the reference kernel and assert bit-identical output.
+                if robr::replay_reproduces_output(&parsed) {
+                    println!(
+                        "replay ok: reference kernel reproduced the committed output bit-for-bit"
+                    );
+                    println!("honesty: {}", robr::ROBR_REPLAY_HONESTY);
+                } else {
+                    eprintln!(
+                        "replay FAILED: reference kernel output does not match the committed output"
+                    );
+                    return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
+                }
+            }
             if pinned.is_none() {
                 println!(
                     "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
