@@ -3,8 +3,8 @@
 use base64::Engine;
 use mneme_cap::Capability;
 use mneme_core::{
-    Draft, Entry, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Query, Root,
-    TrustTier, encode_forget_proof,
+    Draft, Entry, FixedPointEmbedding, ForgetMode, ForgetTarget, LogicalKey, MemoryKind,
+    MnemeError, Query, Root, TrustTier, encode_forget_proof,
 };
 use mneme_store::Store;
 use std::sync::{Arc, Mutex};
@@ -79,6 +79,10 @@ impl MemoryHandlers {
     }
 
     /// `memory.remember` — always via tool-channel capability (quarantine tier).
+    ///
+    /// An optional `embedding` indexes the entry for semantic recall. When present the
+    /// entry is stored as `MemoryKind::Semantic` so it enters the HNSW semantic index;
+    /// without one it is a plain key-indexed entry (the prior behaviour).
     pub fn remember(
         &self,
         content: &[u8],
@@ -86,11 +90,19 @@ impl MemoryHandlers {
         namespace: &str,
         name: &str,
         session: [u8; 16],
+        embedding: Option<FixedPointEmbedding>,
     ) -> Result<RememberResult, MnemeError> {
         if name.trim().is_empty() {
             return Err(empty_logical_name_error());
         }
         let namespace = normalize_tool_namespace(namespace);
+        // A carried embedding only takes effect on the semantic path; force the kind so
+        // the entry is actually indexed for semantic recall rather than silently ignored.
+        let kind = if embedding.is_some() {
+            MemoryKind::Semantic
+        } else {
+            kind
+        };
         let draft = Draft {
             namespace,
             logical_name: name.to_string(),
@@ -99,7 +111,7 @@ impl MemoryHandlers {
             parent_ids: vec![],
             session,
             trust_tier: None,
-            embedding: None,
+            embedding,
             valid_time_ms: None,
         };
         let mut store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
@@ -115,22 +127,33 @@ impl MemoryHandlers {
     }
 
     /// `memory.recall` — **only** `recall_verified` (INV-5); never returns unverified bytes.
+    ///
+    /// With `embedding = None` this is exact logical-key recall (key-index procedure).
+    /// With an `embedding` it runs verified **semantic** recall over the HNSW index.
+    /// Per §3 the semantic receipt proves procedure-faithfulness over the committed
+    /// candidate set under the quantized metric — not true nearest neighbors.
     pub fn recall(
         &self,
         namespace: &str,
         name: &str,
         min_tier: TrustTier,
+        embedding: Option<FixedPointEmbedding>,
     ) -> Result<Vec<RecallEntry>, MnemeError> {
+        let semantic = embedding.is_some();
         let query = Query {
             logical_key: LogicalKey {
                 namespace: normalize_tool_namespace(namespace),
                 name: name.to_string(),
             },
             min_tier,
-            embedding: None,
+            embedding,
         };
         let store = self.store.lock().map_err(|_| MnemeError::CapDenied)?;
-        let entries = store.recall_verified_default(&query, &self.read_cap)?;
+        let entries = if semantic {
+            store.recall_verified_semantic_default(&query, &self.read_cap)?
+        } else {
+            store.recall_verified_default(&query, &self.read_cap)?
+        };
         Ok(entries.into_iter().map(RecallEntry::from_entry).collect())
     }
 
