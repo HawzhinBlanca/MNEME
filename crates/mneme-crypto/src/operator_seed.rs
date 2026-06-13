@@ -1,15 +1,17 @@
 //! Operator signing-seed custody shared by CLI, daemon, and MCP frontends.
 
 use mneme_core::MnemeError;
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 use zeroize::Zeroize;
 
 use crate::aead::{open, random_nonce, seal};
 use crate::keys::KeyPair;
 use crate::types::{OBJECT_KEY_LEN, XCHACHA_NONCE_LEN, nonce_from_slice};
-use crate::vault::{durability_fsync_enabled, io_error};
+use crate::vault::{
+    SecretFileMode, durability_fsync_enabled, entry_exists, io_error, read_single_link_file,
+    sync_parent_dir, write_new_secret_file,
+};
 
 const OPERATOR_SEED_AAD: &[u8] = b"mneme-operator-seed-v1";
 const OPERATOR_SEED_LEN: usize = 32;
@@ -55,13 +57,13 @@ fn load_or_create_sealed_operator(
     master: &[u8; OBJECT_KEY_LEN],
 ) -> Result<KeyPair, MnemeError> {
     let sealed_path = sealed_operator_seed_path(store);
-    if sealed_path.exists() {
+    if entry_exists(&sealed_path)? {
         let seed = read_sealed_operator_seed(&sealed_path, master)?;
         return Ok(keypair_from_seed(seed));
     }
 
     let legacy_path = legacy_operator_seed_path(store);
-    if legacy_path.exists() {
+    if entry_exists(&legacy_path)? {
         let seed = read_legacy_operator_seed(&legacy_path)?;
         write_sealed_operator_seed(&sealed_path, master, &seed)?;
         fs::remove_file(&legacy_path)
@@ -82,7 +84,7 @@ fn read_sealed_operator_seed(
     path: &Path,
     master: &[u8; OBJECT_KEY_LEN],
 ) -> Result<[u8; OPERATOR_SEED_LEN], MnemeError> {
-    let bytes = fs::read(path).map_err(|e| io_error(path.display().to_string(), e))?;
+    let bytes = read_single_link_file(path)?;
     if bytes.len() != WRAPPED_OPERATOR_SEED_LEN {
         return Err(MnemeError::KeyVaultCorrupt);
     }
@@ -111,53 +113,13 @@ fn write_sealed_operator_seed(
 }
 
 fn read_legacy_operator_seed(path: &Path) -> Result<[u8; OPERATOR_SEED_LEN], MnemeError> {
-    let hex = fs::read_to_string(path).map_err(|e| io_error(path.display().to_string(), e))?;
+    let bytes = read_single_link_file(path)?;
+    let hex = std::str::from_utf8(&bytes).map_err(|_| MnemeError::CapMalformed)?;
     parse_operator_seed_hex(hex.trim())
 }
 
 fn write_operator_seed_file(path: &Path, bytes: &[u8]) -> Result<(), MnemeError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
-    }
-    let tmp = path.with_extension("tmp");
-    {
-        let mut file = File::create(&tmp).map_err(|e| io_error(path.display().to_string(), e))?;
-        file.write_all(bytes)
-            .map_err(|e| io_error(path.display().to_string(), e))?;
-        if durability_fsync_enabled() {
-            file.sync_all()
-                .map_err(|e| io_error(path.display().to_string(), e))?;
-        }
-    }
-    fs::rename(&tmp, path).map_err(|e| io_error(path.display().to_string(), e))?;
-    sync_parent_dir(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| io_error(path.display().to_string(), e))?;
-    }
-    Ok(())
-}
-
-fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
-    #[cfg(unix)]
-    {
-        if let Some(parent) = path.parent() {
-            if parent.as_os_str().is_empty() {
-                return Ok(());
-            }
-            let dir = File::open(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
-            dir.sync_all()
-                .map_err(|e| io_error(parent.display().to_string(), e))?;
-        }
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    write_new_secret_file(path, bytes, SecretFileMode::OwnerOnly)
 }
 
 fn keypair_from_seed_hex(hex: &str) -> Result<KeyPair, MnemeError> {
@@ -312,6 +274,69 @@ mod tests {
                 Err(err) => err,
             };
         assert_eq!(err, MnemeError::ObjectTampered);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_sealed_operator_seed_fails_closed_without_following_target() {
+        let dir = tempdir("sealed operator symlink");
+        let master = "88".repeat(32);
+        let _ = load_or_generate_operator_with_env(dir.path(), None, None, Some(&master))
+            .expect("create sealed operator");
+        let sealed = sealed_operator_seed_path(dir.path());
+        let external = dir.path().join("external-sealed-seed");
+        fs::rename(&sealed, &external).expect("move sealed seed fixture");
+        std::os::unix::fs::symlink(&external, &sealed).expect("sealed seed symlink");
+
+        let err = match load_or_generate_operator_with_env(dir.path(), None, None, Some(&master)) {
+            Ok(_) => panic!("symlinked sealed operator seed should fail closed"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("FilesystemLoop") || err.to_string().contains("symlink"));
+        assert!(
+            fs::symlink_metadata(&sealed)
+                .expect("sealed symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed read must not replace the sealed seed symlink"
+        );
+        assert!(external.exists(), "external target must not be destroyed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_legacy_operator_seed_is_not_migrated_or_removed() {
+        let dir = tempdir("legacy operator symlink");
+        let master = "99".repeat(32);
+        let legacy = legacy_operator_seed_path(dir.path());
+        let external = dir.path().join("external-legacy-seed");
+        let seed = "11".repeat(32);
+        fs::write(&external, &seed).expect("external legacy seed");
+        std::os::unix::fs::symlink(&external, &legacy).expect("legacy seed symlink");
+
+        let err = match load_or_generate_operator_with_env(dir.path(), None, None, Some(&master)) {
+            Ok(_) => panic!("symlinked legacy operator seed should fail closed"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("FilesystemLoop") || err.to_string().contains("symlink"));
+        assert!(
+            fs::symlink_metadata(&legacy)
+                .expect("legacy symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed migration must not remove the legacy seed symlink"
+        );
+        assert_eq!(
+            fs::read_to_string(&external).expect("external legacy seed read"),
+            seed,
+            "failed migration must not modify the external seed target"
+        );
+        assert!(
+            !sealed_operator_seed_path(dir.path()).exists(),
+            "failed migration must not create a sealed operator seed"
+        );
     }
 
     #[test]

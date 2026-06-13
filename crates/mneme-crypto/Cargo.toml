@@ -12,6 +12,7 @@ rand.workspace = true
 blake3.workspace = true
 hex.workspace = true
 zeroize.workspace = true
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -1,9 +1,11 @@
 use mneme_core::MnemeError;
 use mneme_crypto::{
-    EnvelopeKeyVault, KeyPair, KeyVault, MemoryKeyVault, PAYLOAD_ALG_XCHACHA20_POLY1305, open,
-    open_payload, public_key_from_bytes, seal, seal_payload, shred_payload_key, sign_message,
-    verify_signature, verify_signature_bytes,
+    EnvelopeKeyVault, FileKeyVault, KeyPair, KeyVault, MemoryKeyVault,
+    PAYLOAD_ALG_XCHACHA20_POLY1305, open, open_payload, public_key_from_bytes, seal, seal_payload,
+    shred_payload_key, sign_message, verify_signature, verify_signature_bytes,
 };
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 
 const TEST_AAD: &[u8] = b"mneme-payload-v1";
 
@@ -153,7 +155,6 @@ fn file_vault_persists_and_shreds_keys() {
 
 #[test]
 fn vault_batch_journal_roundtrips_durably_without_per_key_files() {
-    use mneme_crypto::FileKeyVault;
     let dir = tempfile::tempdir().expect("tempdir");
     let mut ids = Vec::new();
     {
@@ -192,6 +193,145 @@ fn vault_batch_journal_roundtrips_durably_without_per_key_files() {
     }
 }
 
+#[cfg(unix)]
+fn vault_journal_path(store: &Path) -> PathBuf {
+    store.join("keys").join("vault").join("vault.journal")
+}
+
+#[cfg(unix)]
+fn vault_key_path(store: &Path, key_id: &[u8; 16]) -> PathBuf {
+    store.join("keys").join("vault").join(hex::encode(key_id))
+}
+
+#[cfg(unix)]
+fn expect_file_vault_open_err(store: &Path, context: &str) -> MnemeError {
+    match FileKeyVault::new(store) {
+        Ok(_) => panic!("{context}: file vault open unexpectedly succeeded"),
+        Err(err) => err,
+    }
+}
+
+#[cfg(unix)]
+fn expect_envelope_vault_open_err(store: &Path, master: [u8; 32], context: &str) -> MnemeError {
+    match EnvelopeKeyVault::from_master(store, master) {
+        Ok(_) => panic!("{context}: envelope vault open unexpectedly succeeded"),
+        Err(err) => err,
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn file_vault_batch_flush_rejects_symlinked_journal_and_keeps_batch_cancelable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = FileKeyVault::new(dir.path()).expect("file vault");
+    let journal = vault_journal_path(dir.path());
+    let external = dir.path().join("external.journal");
+    std::fs::write(&external, b"external").expect("external fixture");
+    std::os::unix::fs::symlink(&external, &journal).expect("journal symlink fixture");
+
+    vault.begin_batch().expect("begin batch");
+    let (_, key_id) = vault.new_key().expect("new key");
+    let err = vault
+        .flush_batch()
+        .expect_err("symlinked journal must fail closed");
+
+    assert!(err.to_string().contains("vault file symlink"));
+    assert_eq!(
+        std::fs::read(&external).expect("external journal read"),
+        b"external",
+        "flush_batch must not append through a symlinked journal"
+    );
+    vault.cancel_batch();
+    assert_eq!(vault.get(&key_id), Err(MnemeError::KeyVaultMissing));
+}
+
+#[cfg(unix)]
+#[test]
+fn envelope_vault_batch_flush_rejects_hardlinked_journal_and_keeps_batch_cancelable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let master = [0x4d; 32];
+    let mut vault = EnvelopeKeyVault::from_master(dir.path(), master).expect("envelope vault");
+    let journal = vault_journal_path(dir.path());
+    let external = dir.path().join("external-envelope.journal");
+    std::fs::write(&external, b"external").expect("external fixture");
+    std::fs::hard_link(&external, &journal).expect("journal hardlink fixture");
+
+    vault.begin_batch().expect("begin batch");
+    let (_, key_id) = vault.new_key().expect("new key");
+    let err = vault
+        .flush_batch()
+        .expect_err("hard-linked journal must fail closed");
+
+    assert!(err.to_string().contains("vault file hard-linked"));
+    assert_eq!(
+        std::fs::read(&external).expect("external journal read"),
+        b"external",
+        "flush_batch must not append through a hard-linked journal"
+    );
+    vault.cancel_batch();
+    assert_eq!(vault.get(&key_id), Err(MnemeError::KeyVaultMissing));
+}
+
+#[cfg(unix)]
+#[test]
+fn file_vault_reopen_rejects_symlinked_key_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = FileKeyVault::new(dir.path()).expect("file vault");
+    let (_, key_id) = vault.new_key().expect("new key");
+    drop(vault);
+    let key_path = vault_key_path(dir.path(), &key_id);
+    let external = dir.path().join("external-key");
+    std::fs::rename(&key_path, &external).expect("move key fixture");
+    std::os::unix::fs::symlink(&external, &key_path).expect("key symlink fixture");
+
+    let err = expect_file_vault_open_err(dir.path(), "symlinked key file");
+
+    assert!(err.to_string().contains("FilesystemLoop") || err.to_string().contains("symlink"));
+}
+
+#[cfg(unix)]
+#[test]
+fn envelope_vault_reopen_rejects_hardlinked_key_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let master = [0x8e; 32];
+    let mut vault = EnvelopeKeyVault::from_master(dir.path(), master).expect("envelope vault");
+    let (_, key_id) = vault.new_key().expect("new key");
+    drop(vault);
+    let key_path = vault_key_path(dir.path(), &key_id);
+    let external = dir.path().join("external-wrapped-key");
+    std::fs::hard_link(&key_path, &external).expect("key hardlink fixture");
+
+    let err = expect_envelope_vault_open_err(dir.path(), master, "hard-linked envelope key file");
+
+    assert!(err.to_string().contains("vault file hard-linked"));
+}
+
+#[cfg(unix)]
+#[test]
+fn file_vault_creates_key_files_and_journal_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut vault = FileKeyVault::new(dir.path()).expect("file vault");
+    let (_, key_id) = vault.new_key().expect("new key");
+    let key_mode = std::fs::metadata(vault_key_path(dir.path(), &key_id))
+        .expect("key metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(key_mode, 0o600, "plaintext key file must be owner-only");
+
+    vault.begin_batch().expect("begin batch");
+    let _ = vault.new_key().expect("batched key");
+    vault.flush_batch().expect("flush batch");
+    let journal_mode = std::fs::metadata(vault_journal_path(dir.path()))
+        .expect("journal metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(journal_mode, 0o600, "vault journal must be owner-only");
+}
+
 /// Drive a fixed sequence of [`KeyVault`] operations and record every observable
 /// outcome as a string. Used to assert FileKeyVault and MemoryKeyVault are
 /// behaviourally identical (B6 pluggability parity): same keys retrievable, same
@@ -226,6 +366,12 @@ fn run_vault_parity_scenario(vault: &mut dyn KeyVault) -> Vec<String> {
     // Re-import is idempotent (no error, value unchanged).
     log.push(format!("reimport_a={:?}", vault.import_key(&id_a, &key_a)));
     log.push(format!("get_a_again={:?}", vault.get(&id_a)));
+    let conflicting_key_a = [0x44u8; 32];
+    log.push(format!(
+        "reimport_a_conflict={:?}",
+        vault.import_key(&id_a, &conflicting_key_a)
+    ));
+    log.push(format!("get_a_after_conflict={:?}", vault.get(&id_a)));
 
     // Shred A; B stays live.
     log.push(format!("import_b={:?}", vault.import_key(&id_b, &key_b)));

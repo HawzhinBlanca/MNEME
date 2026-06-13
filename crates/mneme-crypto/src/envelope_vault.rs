@@ -6,7 +6,7 @@
 //! disk are `nonce24 ‖ AEAD(master, object_key)` — never plaintext keys.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,11 @@ use mneme_core::MnemeError;
 
 use crate::aead::{open, random_nonce, seal};
 use crate::types::{KEY_ID_LEN, KeyId, OBJECT_KEY_LEN, ObjectKey};
-use crate::vault::{io_error, random_key_id, random_object_key};
+use crate::vault::{
+    SecretFileMode, entry_exists, io_error, open_append_single_link, random_key_id,
+    random_object_key, read_single_link_file, sync_parent_dir, validate_single_link_file,
+    write_new_secret_file,
+};
 
 const ENVELOPE_AAD: &[u8] = b"mneme-envelope-key-v1";
 const WRAPPED_KEY_LEN: usize = XCHACHA_NONCE_LEN + OBJECT_KEY_LEN + 16;
@@ -107,7 +111,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
                 continue;
             }
             let path = self.key_path(&key_id);
-            if path.exists() || self.tombstone_path(&key_id).exists() {
+            if entry_exists(&path)? || entry_exists(&self.tombstone_path(&key_id))? {
                 continue;
             }
             if let Some(buf) = self.batch.as_mut() {
@@ -135,23 +139,22 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
         let path = self.key_path(key_id);
         let tombstone = self.tombstone_path(key_id);
         let known = self.live.contains_key(key_id) || self.shredded.contains(key_id);
-        if !known && !path.exists() && !tombstone.exists() {
+        let path_exists = entry_exists(&path)?;
+        let tombstone_exists = entry_exists(&tombstone)?;
+        if !known && !path_exists && !tombstone_exists {
             return Err(MnemeError::KeyVaultMissing);
         }
-        if path.exists() {
+        if path_exists {
+            validate_single_link_file(&path)?;
             fs::remove_file(&path).map_err(|e| io_error(path.display().to_string(), e))?;
             if crate::vault::durability_fsync_enabled() {
                 sync_parent_dir(&path)?;
             }
         }
-        if !tombstone.exists() {
-            let file = File::create(&tombstone)
-                .map_err(|e| io_error(tombstone.display().to_string(), e))?;
-            if crate::vault::durability_fsync_enabled() {
-                file.sync_all()
-                    .map_err(|e| io_error(tombstone.display().to_string(), e))?;
-                sync_parent_dir(&tombstone)?;
-            }
+        if tombstone_exists {
+            validate_single_link_file(&tombstone)?;
+        } else {
+            write_new_secret_file(&tombstone, b"", SecretFileMode::Default)?;
         }
         self.live.remove(key_id);
         self.shredded.insert(*key_id);
@@ -163,11 +166,26 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
     }
 
     fn import_key(&mut self, key_id: &KeyId, key: &ObjectKey) -> Result<(), MnemeError> {
-        if self.shredded.contains(key_id) || self.tombstone_path(key_id).exists() {
+        let tombstone = self.tombstone_path(key_id);
+        if self.shredded.contains(key_id) {
             return Err(MnemeError::Forgotten);
         }
+        if entry_exists(&tombstone)? {
+            validate_single_link_file(&tombstone)?;
+            return Err(MnemeError::Forgotten);
+        }
+        if let Some(existing) = self.live.get(key_id) {
+            if existing != key {
+                return Err(MnemeError::KeyVaultCorrupt);
+            }
+        }
         let path = self.key_path(key_id);
-        if !path.exists() {
+        if entry_exists(&path)? {
+            let existing = self.unwrap(&read_wrapped_key(&path)?)?;
+            if existing != *key {
+                return Err(MnemeError::KeyVaultCorrupt);
+            }
+        } else {
             write_wrapped_key(&path, &self.wrap(key)?)?;
         }
         self.live.insert(*key_id, *key);
@@ -182,20 +200,17 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
     }
 
     fn flush_batch(&mut self) -> Result<(), MnemeError> {
-        let Some(buffered) = self.batch.take() else {
+        let Some(buffered) = self.batch.as_ref() else {
             return Ok(());
         };
         if buffered.is_empty() {
+            self.batch = None;
             return Ok(());
         }
         let journal = self.root.join("vault.journal");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&journal)
-            .map_err(|e| io_error(journal.display().to_string(), e))?;
+        let mut file = open_append_single_link(&journal)?;
         let mut buf = Vec::with_capacity(buffered.len() * JOURNAL_RECORD_LEN);
-        for (id, key) in &buffered {
+        for (id, key) in buffered {
             let wrapped = self.wrap(key)?;
             buf.extend_from_slice(id);
             buf.extend_from_slice(&wrapped);
@@ -206,6 +221,7 @@ impl crate::vault::KeyVault for EnvelopeKeyVault {
             file.sync_all()
                 .map_err(|e| io_error(journal.display().to_string(), e))?;
         }
+        self.batch = None;
         Ok(())
     }
 
@@ -229,46 +245,11 @@ fn parse_master_hex(hex: &str) -> Result<[u8; 32], MnemeError> {
 }
 
 fn write_wrapped_key(path: &Path, wrapped: &[u8]) -> Result<(), MnemeError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
-    }
-    let tmp = path.with_extension("tmp");
-    {
-        let mut f = File::create(&tmp).map_err(|e| io_error(path.display().to_string(), e))?;
-        f.write_all(wrapped)
-            .map_err(|e| io_error(path.display().to_string(), e))?;
-        if crate::vault::durability_fsync_enabled() {
-            f.sync_all()
-                .map_err(|e| io_error(path.display().to_string(), e))?;
-        }
-    }
-    fs::rename(&tmp, path).map_err(|e| io_error(path.display().to_string(), e))?;
-    sync_parent_dir(path)?;
-    Ok(())
-}
-
-fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
-    #[cfg(unix)]
-    {
-        if let Some(parent) = path.parent() {
-            if parent.as_os_str().is_empty() {
-                return Ok(());
-            }
-            let dir = File::open(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
-            dir.sync_all()
-                .map_err(|e| io_error(parent.display().to_string(), e))?;
-        }
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-        Ok(())
-    }
+    write_new_secret_file(path, wrapped, SecretFileMode::OwnerOnly)
 }
 
 fn read_wrapped_key(path: &Path) -> Result<Vec<u8>, MnemeError> {
-    let bytes = fs::read(path).map_err(|e| io_error(path.display().to_string(), e))?;
+    let bytes = read_single_link_file(path)?;
     if bytes.len() != WRAPPED_KEY_LEN {
         return Err(MnemeError::KeyVaultCorrupt);
     }
@@ -302,6 +283,7 @@ fn load_envelope_dir(
         }
         if let Some(stem) = name.strip_suffix(".shred") {
             if let Some(key_id) = crate::vault::hex::decode_key_id(stem) {
+                validate_single_link_file(&entry.path())?;
                 shredded.insert(key_id);
             }
         } else if let Some(key_id) = crate::vault::hex::decode_key_id(name) {
@@ -311,8 +293,8 @@ fn load_envelope_dir(
         }
     }
     let journal = root.join("vault.journal");
-    if journal.exists() {
-        let bytes = fs::read(&journal).map_err(|e| io_error(journal.display().to_string(), e))?;
+    if entry_exists(&journal)? {
+        let bytes = read_single_link_file(&journal)?;
         let full = bytes.len() / JOURNAL_RECORD_LEN;
         for i in 0..full {
             let off = i * JOURNAL_RECORD_LEN;
