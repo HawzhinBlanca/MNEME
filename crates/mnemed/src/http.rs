@@ -214,6 +214,23 @@ async fn recall(
     check_rate_limit(&state, &cap)?;
     verify_cap(&state, &cap)?;
     let min_tier = parse_optional_tier(params.min_tier.as_deref())?;
+    // Validate the request shape before doing recall work: an ambiguous half-specified
+    // receipt request (some, but not all four, ROBR inputs) is rejected fail-closed.
+    let robr_present = [
+        params.prompt.is_some(),
+        params.weight_measurement_hex.is_some(),
+        params.sampling_params.is_some(),
+        params.output_token_commit_hex.is_some(),
+    ]
+    .into_iter()
+    .filter(|&p| p)
+    .count();
+    if robr_present != 0 && robr_present != 4 {
+        return Err(ApiError::bad_request(
+            "ROBR receipt requires all of prompt, weight_measurement_hex, \
+             sampling_params, output_token_commit_hex (or none)",
+        ));
+    }
     let store = state
         .store
         .lock()

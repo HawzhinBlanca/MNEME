@@ -178,6 +178,9 @@ enum UnixKernelFailure {
     SyncFrameBase64Decode,
     SyncFrameDecode(MnemeError),
     StoreUnavailable(&'static str),
+    /// A recall supplied some — but not all — of the four ROBR receipt inputs.
+    /// Fail closed: an ambiguous half-specified receipt request is rejected.
+    IncompleteRobrParams,
 }
 
 pub struct UnixServer {
@@ -728,7 +731,8 @@ fn unix_kernel_failure_to_mneme(failure: UnixKernelFailure) -> MnemeError {
     match failure {
         UnixKernelFailure::InvalidLogicalKey
         | UnixKernelFailure::BodyBase64Decode
-        | UnixKernelFailure::SyncFrameBase64Decode => MnemeError::SchemaDrift,
+        | UnixKernelFailure::SyncFrameBase64Decode
+        | UnixKernelFailure::IncompleteRobrParams => MnemeError::SchemaDrift,
         UnixKernelFailure::SyncFrameDecode(err) => err,
         UnixKernelFailure::StoreUnavailable(context) => MnemeError::IoFailed {
             path: format!("unix kernel {context} store"),
@@ -828,6 +832,22 @@ struct RobrRecallParams {
     output_token_commit_hex: Option<String>,
 }
 
+impl RobrRecallParams {
+    /// Number of the four receipt inputs that were supplied. A receipt is minted only
+    /// when all four are present; a partial set (1–3) is a fail-closed rejection.
+    fn present_count(&self) -> usize {
+        [
+            self.prompt.is_some(),
+            self.weight_measurement_hex.is_some(),
+            self.sampling_params.is_some(),
+            self.output_token_commit_hex.is_some(),
+        ]
+        .into_iter()
+        .filter(|&p| p)
+        .count()
+    }
+}
+
 fn recall(
     state: &AppState,
     cap_b64: &str,
@@ -837,6 +857,14 @@ fn recall(
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
+    // Validate the request shape before doing recall work: an ambiguous half-specified
+    // receipt request (some, but not all four, ROBR inputs) is rejected fail-closed.
+    let present = robr.present_count();
+    if present != 0 && present != 4 {
+        return Err(unix_kernel_failure_to_mneme(
+            UnixKernelFailure::IncompleteRobrParams,
+        ));
+    }
     let store = lock_unix_store(state, "recall")?;
     let query = Query {
         logical_key: LogicalKey { namespace, name },

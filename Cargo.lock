@@ -1638,6 +1638,7 @@ dependencies = [
  "futures-util",
  "hex",
  "libc",
+ "mneme-account",
  "mneme-cap",
  "mneme-core",
  "mneme-crdt",
