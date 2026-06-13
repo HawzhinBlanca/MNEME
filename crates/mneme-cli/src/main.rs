@@ -3,6 +3,7 @@
 mod attest;
 mod cert;
 mod determinism;
+mod freivalds;
 mod pace;
 mod replay;
 mod robr;
@@ -250,6 +251,23 @@ enum Commands {
         /// faithful execution, not just binding).
         #[arg(long = "replay", default_value_t = false)]
         replay: bool,
+    },
+    /// ROBR-3: Freivalds spot-check demo — build a deterministic integer matmul
+    /// `C = A·B`, optionally tamper one entry, and verify `C == A·B` in O(n²) with
+    /// Fiat–Shamir 0/1 challenges (false-accept ≤ 2^-rounds). Exits non-zero on reject.
+    RobrFreivalds {
+        /// Square dimension for the demo matrices (A,B,C are dim×dim)
+        #[arg(long = "dim", default_value_t = 8)]
+        dim: usize,
+        /// Number of Freivalds rounds (false-accept ≤ 2^-rounds)
+        #[arg(long = "rounds", default_value_t = freivalds::DEFAULT_FREIVALDS_ROUNDS)]
+        rounds: usize,
+        /// Seed for the deterministic demo matrices
+        #[arg(long = "seed", default_value_t = 1)]
+        seed: u64,
+        /// Tamper one entry of C (the check must then reject)
+        #[arg(long = "tamper", default_value_t = false)]
+        tamper: bool,
     },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
@@ -770,6 +788,58 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 );
             }
             println!("honesty: {}", robr::ROBR_HONESTY);
+            Ok(())
+        }
+        Commands::RobrFreivalds {
+            dim,
+            rounds,
+            seed,
+            tamper,
+        } => {
+            if dim == 0 {
+                eprintln!("mneme: robr-freivalds requires --dim >= 1");
+                return Err(CliErrorKind::Usage);
+            }
+            // Deterministic demo matrices (xorshift seeded), honest product C = A·B.
+            let mut st = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut next = || {
+                let mut x = st;
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                st = x;
+                x
+            };
+            let mk = |g: &mut dyn FnMut() -> u64, len: usize| -> Vec<i32> {
+                (0..len).map(|_| (g() % 41) as i32 - 20).collect()
+            };
+            let a = mk(&mut next, dim * dim);
+            let b = mk(&mut next, dim * dim);
+            let mut c = freivalds::reference_product(&a, &b, dim, dim, dim);
+            if tamper {
+                let idx = (next() as usize) % c.len();
+                c[idx] = c[idx].wrapping_add(1);
+            }
+            let claim = freivalds::MatMulClaim {
+                m: dim,
+                k: dim,
+                n: dim,
+                a,
+                b,
+                c,
+            };
+            let accepted =
+                freivalds::freivalds_verify(&claim, rounds).map_err(CliErrorKind::Kernel)?;
+            println!(
+                "robr-freivalds: dim={dim} rounds={rounds} tamper={tamper} accepted={accepted}"
+            );
+            println!(
+                "honesty: probabilistic spot-check (false-accept <= 2^-{rounds}) that a logged matmul equals A·B; not a proof, not semantic truth, and the logged matrices are a deterministic stand-in until a real inference backend is wired (ROBR-2/4)"
+            );
+            // Honest demo MUST behave: untampered accepts, tampered rejects.
+            if accepted == tamper {
+                return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
+            }
             Ok(())
         }
         Commands::Init { path } => {

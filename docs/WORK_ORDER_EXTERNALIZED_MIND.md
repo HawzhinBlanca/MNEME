@@ -72,6 +72,16 @@ proven cross-host bit-identical determinism.
   **Proof:** correct products accept; a single tampered product entry is caught with empirical rate
   ≥ 1−2⁻ᵏ over N trials (report the measured detection rate); FP/quantization handling stated
   (fixed-point or interval-Freivalds — name which).
+  - **✅ LANDED.** `freivalds` module: `MatMulClaim` + `freivalds_verify` checks
+    `A·(B·r) == C·r` over Fiat–Shamir 0/1 challenge vectors bound by commitment to
+    `(shape, A, B, C)`, **exact integer (i128) arithmetic — fixed-point, no FP** (so it
+    is deterministic and host-independent), false-accept ≤ 2⁻ʳᵒᵘⁿᵈˢ (default 64).
+    `mneme robr-freivalds [--tamper]` demo. **Proof:** unit tests (50 honest products all
+    accept; **100 single-entry tampers all caught** at 64 rounds; challenge binds to the
+    matrices + is deterministic; malformed shape fails closed; all-wrong product
+    rejected) + e2e (`robr3_freivalds_demo_accepts_honest_and_detects_tamper`). Honesty:
+    probabilistic spot-check, not a proof; logged matrices are a deterministic stand-in
+    until a real inference backend (ROBR-2/4).
 - **ROBR-4 `[FRONTIER]` — TEE attestation envelope.** Add `weight_measurement` provenance + an
   `AcceptedReportPolicy` (vendor, pinned root, measurement allowlist, nonce/freshness) as an
   off-by-default field; parse a real Nitro/SGX-DCAP report. **Proof:** a sample real report verifies
