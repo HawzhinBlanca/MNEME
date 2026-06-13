@@ -148,7 +148,7 @@ pub fn init_store(path: &Path) -> Result<(), MnemeError> {
     fs::create_dir_all(path.join("meta")).map_err(|e| io_err(path, e))?;
     fs::create_dir_all(path.join("meta/redactions")).map_err(|e| io_err(path, e))?;
     let key_index = path.join("meta/key_index.json");
-    if !key_index.exists() {
+    if !crate::atomic::entry_exists(&key_index)? {
         let data = serde_json::to_string_pretty(&KeyIndexSidecar::default())
             .map_err(|_| layout_initial_key_index_sidecar_json_error())?;
         crate::atomic::atomic_write(&key_index, data.as_bytes())?;
@@ -291,10 +291,10 @@ pub fn load_key_index_at_seq(path: &Path, seq: u64) -> Result<KeyIndex, MnemeErr
         .join("meta/snapshots")
         .join(seq.to_string())
         .join("key_index.json");
-    if !snap.exists() {
+    if !crate::atomic::entry_exists(&snap)? {
         return Err(MnemeError::HistoricalRecallInvalid);
     }
-    let data = fs::read(&snap).map_err(|e| io_err(&snap, e))?;
+    let data = read_store_file(&snap)?;
     let sidecar: KeyIndexSidecar = serde_json::from_slice(&data)
         .map_err(|_| layout_historical_key_index_snapshot_json_error())?;
     let (_, key_index) = apply_sidecar(&sidecar)?;
@@ -425,8 +425,8 @@ fn layout_remove_loaded_key_object(
 fn load_object_keys(path: &Path) -> Result<HashMap<[u8; 32], LogicalKey>, MnemeError> {
     let mut out = HashMap::new();
     let p = path.join("meta/object_keys.json");
-    if p.exists() {
-        let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
+    if crate::atomic::entry_exists(&p)? {
+        let data = read_store_string(&p)?;
         let sidecar: ObjectKeysSidecar =
             parse_layout_json(&data, LayoutParseFailure::ObjectKeysSidecarJson)?;
         for (id_hex, entry) in sidecar.entries {
@@ -441,8 +441,8 @@ fn load_object_keys(path: &Path) -> Result<HashMap<[u8; 32], LogicalKey>, MnemeE
         }
     }
     let journal = path.join("meta/object_keys.journal");
-    if journal.exists() {
-        let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+    if crate::atomic::entry_exists(&journal)? {
+        let data = read_store_string(&journal)?;
         for line in data.lines() {
             if layout_journal_line_is_blank(line) {
                 continue;
@@ -468,7 +468,7 @@ pub fn load_state(path: &Path) -> Result<LoadedState, MnemeError> {
     let mut objects = HashMap::new();
 
     let objects_dir = path.join("objects");
-    if objects_dir.exists() {
+    if crate::atomic::entry_exists(&objects_dir)? {
         walk_objects(&objects_dir, &objects_dir, &mut objects)?;
     }
 
@@ -551,8 +551,8 @@ pub fn persist_embeddings_remove(path: &Path, id: &[u8; 32]) -> Result<(), Mneme
 fn load_embeddings(path: &Path) -> Result<HashMap<[u8; 32], FixedPointEmbedding>, MnemeError> {
     let mut out = HashMap::new();
     let p = path.join("meta/embeddings.json");
-    if p.exists() {
-        let data = fs::read_to_string(&p).map_err(|e| io_err(&p, e))?;
+    if crate::atomic::entry_exists(&p)? {
+        let data = read_store_string(&p)?;
         let sidecar: EmbeddingSidecar =
             parse_layout_json(&data, LayoutParseFailure::EmbeddingSidecarJson)?;
         for (id_hex, entry) in sidecar.entries {
@@ -563,8 +563,8 @@ fn load_embeddings(path: &Path) -> Result<HashMap<[u8; 32], FixedPointEmbedding>
         }
     }
     let journal = path.join("meta/embeddings.journal");
-    if journal.exists() {
-        let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+    if crate::atomic::entry_exists(&journal)? {
+        let data = read_store_string(&journal)?;
         for line in data.lines() {
             if layout_journal_line_is_blank(line) {
                 continue;
@@ -603,8 +603,8 @@ pub fn shred_object_file(path: &Path, id: &[u8; 32], len: usize) -> Result<(), M
 
 fn load_key_index(path: &Path) -> Result<KeyIndexSidecar, MnemeError> {
     let index_path = path.join("meta/key_index.json");
-    let mut sidecar = if index_path.exists() {
-        let data = fs::read_to_string(&index_path).map_err(|e| io_err(&index_path, e))?;
+    let mut sidecar = if crate::atomic::entry_exists(&index_path)? {
+        let data = read_store_string(&index_path)?;
         serde_json::from_str(&data).map_err(|_| layout_key_index_sidecar_json_error())?
     } else {
         KeyIndexSidecar::default()
@@ -648,7 +648,7 @@ fn append_journal_line(path: &Path, name: &str, line: &str) -> Result<(), MnemeE
 /// snapshot write and this removal is safe (stale upserts re-apply the same state).
 fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
     let journal = path.join("meta").join(name);
-    if journal.exists() {
+    if crate::atomic::entry_exists(&journal)? {
         fs::remove_file(&journal).map_err(|e| io_err(&journal, e))?;
         if durability_fsync_enabled() {
             sync_parent_dir(&journal)?;
@@ -659,10 +659,10 @@ fn truncate_journal(path: &Path, name: &str) -> Result<(), MnemeError> {
 
 fn apply_key_index_journal(path: &Path, sidecar: &mut KeyIndexSidecar) -> Result<(), MnemeError> {
     let journal = path.join("meta/key_index.journal");
-    if !journal.exists() {
+    if !crate::atomic::entry_exists(&journal)? {
         return Ok(());
     }
-    let data = fs::read_to_string(&journal).map_err(|e| io_err(&journal, e))?;
+    let data = read_store_string(&journal)?;
     for line in data.lines() {
         if layout_journal_line_is_blank(line) {
             continue;
@@ -711,22 +711,55 @@ fn apply_sidecar(sidecar: &KeyIndexSidecar) -> Result<LoadedKeyIndex, MnemeError
     Ok((key_to_object, KeyIndex::from_tree(smt)))
 }
 
+fn read_store_file(path: &Path) -> Result<Vec<u8>, MnemeError> {
+    crate::atomic::read_no_follow(path)
+}
+
+fn read_store_string(path: &Path) -> Result<String, MnemeError> {
+    let bytes = read_store_file(path)?;
+    String::from_utf8(bytes).map_err(|e| MnemeError::IoFailed {
+        path: path.display().to_string(),
+        kind: e.to_string(),
+    })
+}
+
 fn walk_objects(
     objects_dir: &Path,
     dir: &Path,
     out: &mut HashMap<[u8; 32], Vec<u8>>,
 ) -> Result<(), MnemeError> {
-    if !dir.is_dir() {
+    let dir_metadata = fs::symlink_metadata(dir).map_err(|e| io_err(dir, e))?;
+    let dir_type = dir_metadata.file_type();
+    if dir_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: "object directory symlink".into(),
+        });
+    }
+    if !dir_type.is_dir() {
         return Ok(());
     }
     for entry in fs::read_dir(dir).map_err(|e| io_err(dir, e))? {
         let entry = entry.map_err(|e| io_err(dir, e))?;
         let p = entry.path();
-        if p.is_dir() {
+        let file_type = entry.file_type().map_err(|e| io_err(&p, e))?;
+        if file_type.is_symlink() {
+            return Err(MnemeError::IoFailed {
+                path: p.display().to_string(),
+                kind: "object path symlink".into(),
+            });
+        }
+        if file_type.is_dir() {
             walk_objects(objects_dir, &p, out)?;
         } else if p.extension().is_some_and(|e| e == "cbor") {
+            if !file_type.is_file() {
+                return Err(MnemeError::IoFailed {
+                    path: p.display().to_string(),
+                    kind: "object path non-regular".into(),
+                });
+            }
             let claimed_id = decode_content_addressed_object_path(objects_dir, &p)?;
-            let bytes = fs::read(&p).map_err(|e| io_err(&p, e))?;
+            let bytes = read_store_file(&p)?;
             if hash_obj(&bytes) != claimed_id {
                 return Err(MnemeError::ObjectTampered);
             }

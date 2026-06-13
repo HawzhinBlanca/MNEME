@@ -133,6 +133,18 @@ fn assert_open_error_without_panic(
     }
 }
 
+fn assert_open_io_failed_without_panic(store_dir: &Path, operator: KeyPair, context: &str) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Store::open(store_dir, operator)
+    }));
+    assert!(result.is_ok(), "cold-open panicked on {context}");
+    match result.expect("panic checked") {
+        Err(MnemeError::IoFailed { .. }) => {}
+        Err(err) => panic!("expected IoFailed for {context}, got {err:?}"),
+        Ok(_) => panic!("cold-open accepted {context}"),
+    }
+}
+
 fn read_object_key_journal_entries(store_dir: &Path) -> Vec<serde_json::Value> {
     let journal = store_dir.join("meta/object_keys.journal");
     fs::read_to_string(&journal)
@@ -1077,6 +1089,61 @@ fn cold_open_applies_key_index_journal_tombstone_after_stale_snapshot_for_same_k
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn cold_open_rejects_symlinked_key_index_snapshot_without_following_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+
+    let mut store = Store::create(dir.path(), operator.clone()).expect("create store");
+    store
+        .remember(
+            episodic_draft("symlink-key-index-snapshot", b"durable body"),
+            &cap,
+        )
+        .expect("remember object");
+    let key_index = dir.path().join("meta/key_index.json");
+    let external_key_index = dir.path().join("external-key-index.json");
+    fs::copy(&key_index, &external_key_index).expect("external key-index copy");
+    drop(store);
+
+    fs::remove_file(&key_index).expect("remove real key-index snapshot");
+    std::os::unix::fs::symlink(&external_key_index, &key_index)
+        .expect("key-index snapshot symlink");
+
+    assert_open_io_failed_without_panic(dir.path(), operator, "symlinked key_index.json");
+}
+
+#[cfg(unix)]
+#[test]
+fn cold_open_rejects_broken_symlink_object_keys_journal() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+
+    let mut store = Store::create(dir.path(), operator.clone()).expect("create store");
+    store
+        .remember(
+            episodic_draft("broken-object-keys-journal", b"durable body"),
+            &cap,
+        )
+        .expect("remember object");
+    let journal = dir.path().join("meta/object_keys.journal");
+    let missing = dir.path().join("missing-object-keys.journal");
+    drop(store);
+
+    fs::remove_file(&journal).expect("remove real object-keys journal");
+    std::os::unix::fs::symlink(&missing, &journal).expect("broken object-keys journal symlink");
+    assert!(!journal.exists(), "fixture should be a dangling symlink");
+
+    assert_open_io_failed_without_panic(dir.path(), operator, "broken symlink object_keys.journal");
+    assert!(
+        !missing.exists(),
+        "cold-open must not materialize the dangling journal target"
+    );
+}
+
 #[test]
 fn cold_open_rejects_live_key_index_without_object_key_mapping() {
     let dir = TempDir::new().expect("tempdir");
@@ -1201,6 +1268,28 @@ fn cold_open_rejects_object_blob_bytes_not_matching_filename() {
         Err(err) => panic!("expected ObjectTampered, got {err:?}"),
         Ok(_) => panic!("cold-open accepted object bytes that do not match the filename id"),
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn cold_open_rejects_symlinked_object_blob_without_following_target() {
+    let dir = TempDir::new().expect("tempdir");
+    let operator = KeyPair::generate();
+    let cap = write_capability(&operator);
+
+    let mut store = Store::create(dir.path(), operator.clone()).expect("create store");
+    store
+        .remember(episodic_draft("symlink-object-blob", b"durable body"), &cap)
+        .expect("remember object");
+    let object_blob = only_object_blob_path(dir.path());
+    let external_blob = dir.path().join("external-object.cbor");
+    fs::copy(&object_blob, &external_blob).expect("external object copy");
+    drop(store);
+
+    fs::remove_file(&object_blob).expect("remove real object blob");
+    std::os::unix::fs::symlink(&external_blob, &object_blob).expect("object blob symlink");
+
+    assert_open_io_failed_without_panic(dir.path(), operator, "symlinked object blob");
 }
 
 #[test]

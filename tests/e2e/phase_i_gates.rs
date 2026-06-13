@@ -1,5 +1,7 @@
 use super::helpers::{agent_store, semantic_draft_with_embedding, theme_key};
 use mneme_cap::agent_cap;
+#[cfg(all(unix, feature = "bitemporal_recall"))]
+use mneme_core::MnemeError;
 #[cfg(feature = "bitemporal_recall")]
 use mneme_core::{AsOf, Draft, MemoryKind};
 use mneme_core::{FixedPointEmbedding, ProvenanceFilter, Query, TrustTier};
@@ -66,6 +68,42 @@ fn e2e_recall_verified_at_historical_root_uses_snapshot() {
 
     let current = store.recall_verified(&query, &proc, &cap).unwrap();
     assert_eq!(current[0].plaintext, b"new");
+}
+
+#[cfg(all(unix, feature = "bitemporal_recall"))]
+#[test]
+fn e2e_recall_verified_at_rejects_symlinked_historical_snapshot() {
+    let (mut store, cap, dir) = agent_store();
+    let old = semantic_draft_with_embedding("phase", "snapshot-symlink", b"old", {
+        FixedPointEmbedding::new(2, 0, vec![1, 2]).unwrap()
+    });
+    let (_old_id, old_root) = store.remember(old, &cap).unwrap();
+    let new = semantic_draft_with_embedding("phase", "snapshot-symlink", b"new", {
+        FixedPointEmbedding::new(2, 0, vec![3, 4]).unwrap()
+    });
+    store.remember(new, &cap).unwrap();
+
+    let snapshot = dir
+        .path()
+        .join("meta/snapshots")
+        .join(old_root.sequence.to_string())
+        .join("key_index.json");
+    let external_snapshot = dir.path().join("external-historical-key-index.json");
+    std::fs::copy(&snapshot, &external_snapshot).expect("external snapshot copy");
+    std::fs::remove_file(&snapshot).expect("remove real snapshot");
+    std::os::unix::fs::symlink(&external_snapshot, &snapshot).expect("snapshot symlink");
+
+    let query = Query {
+        logical_key: theme_key("phase", "snapshot-symlink"),
+        min_tier: TrustTier::Working,
+        embedding: None,
+    };
+    let proc = default_key_procedure();
+    let err = store
+        .recall_verified_at(&query, &proc, &cap, AsOf::RootSeq(old_root.sequence))
+        .expect_err("symlinked historical snapshot must fail closed");
+
+    assert!(matches!(err, MnemeError::IoFailed { .. }));
 }
 
 #[test]

@@ -115,12 +115,19 @@ pub fn create_new(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
 }
 
 fn reject_existing_entry(path: &Path) -> Result<(), MnemeError> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Err(MnemeError::IoFailed {
+    if entry_exists(path)? {
+        return Err(MnemeError::IoFailed {
             path: path.display().to_string(),
             kind: "exists".into(),
-        }),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn entry_exists(path: &Path) -> Result<bool, MnemeError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(io_err(path, err)),
     }
 }
