@@ -602,6 +602,13 @@ fn ensure_private_vault_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
     reject_vault_dir_alias(dir, label)
 }
 
+fn ensure_private_parent_dir(parent: &Path, label: &str) -> Result<(), MnemeError> {
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    ensure_private_vault_dir(parent, label)
+}
+
 fn reject_vault_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
     match fs::symlink_metadata(dir) {
         Ok(metadata) => validate_private_vault_metadata(dir, label, metadata).map(|_| ()),
@@ -643,9 +650,7 @@ pub(crate) fn write_new_secret_file(
     mode: SecretFileMode,
 ) -> Result<(), MnemeError> {
     if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
-        }
+        ensure_private_parent_dir(parent, "vault file parent")?;
     }
     if entry_exists(path)? {
         return Err(MnemeError::IoFailed {
@@ -747,9 +752,7 @@ pub(crate) fn read_single_link_file(path: &Path) -> Result<Vec<u8>, MnemeError> 
 
 pub(crate) fn open_append_single_link(path: &Path) -> Result<File, MnemeError> {
     if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| io_error(parent.display().to_string(), e))?;
-        }
+        ensure_private_parent_dir(parent, "vault append parent")?;
     }
     #[cfg(unix)]
     {
@@ -910,10 +913,84 @@ pub(crate) mod hex {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     fn production_source(source: &str) -> &str {
         source
             .split_once("#[cfg(test)]")
             .map_or(source, |(production, _tests)| production)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_new_secret_file_rejects_symlinked_parent_without_writing_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-parent");
+        let parent = dir.path().join("linked-parent");
+        fs::create_dir(&external).expect("external parent target");
+        std::os::unix::fs::symlink(&external, &parent).expect("parent symlink");
+
+        let err = match write_new_secret_file(
+            &parent.join("secret.key"),
+            b"secret",
+            SecretFileMode::OwnerOnly,
+        ) {
+            Ok(()) => panic!("secret writer should reject a symlinked parent"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "secret parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::read_dir(&external)
+                .expect("external parent read")
+                .next()
+                .is_none(),
+            "secret writer must not create temp or target files through a symlinked parent"
+        );
+        assert!(
+            fs::symlink_metadata(&parent)
+                .expect("parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed secret write must leave the symlinked parent for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_append_single_link_rejects_symlinked_parent_without_writing_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-append-parent");
+        let parent = dir.path().join("linked-append-parent");
+        fs::create_dir(&external).expect("external append parent target");
+        std::os::unix::fs::symlink(&external, &parent).expect("append parent symlink");
+
+        let err = match open_append_single_link(&parent.join("vault.journal")) {
+            Ok(_) => panic!("append writer should reject a symlinked parent"),
+            Err(err) => err,
+        };
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "append parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            fs::read_dir(&external)
+                .expect("external append parent read")
+                .next()
+                .is_none(),
+            "append writer must not create a journal through a symlinked parent"
+        );
+        assert!(
+            fs::symlink_metadata(&parent)
+                .expect("append parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed append open must leave the symlinked parent for explicit repair"
+        );
     }
 
     #[test]
