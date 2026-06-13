@@ -148,6 +148,18 @@ access), NOT fail-closed crypto — keep it in a clearly-labeled `experimental` 
   downstream corpus/model trained on the watermarked text. **Proof:** demonstrate p < 1e-3 at a stated
   contamination level on a toy downstream model; state the query-access + quality-cost assumptions and
   that this is detection-with-p-value, not a hard proof.
+  - **✅ LANDED (RPT-1 + a synthetic RPT-2 detector).** `rpt` module: per-record green-list
+    keyed to the DAG-node id (`is_green`, deterministic, ~γ fraction) + a `detect` harness
+    that reports a z-score and one-sided p-value (erfc approx). `mneme rpt-probe
+    [--unmarked]` demo. **Proof:** unit (green-list deterministic + ~γ; watermarked stream
+    → z>8, p<1e-12; unmarked → near-null, not significant; **A-marked stream is null under
+    B's key** — per-record; empty/bad-γ fails closed) + e2e (watermarked detected /
+    unmarked not / honesty caveat printed). The CLI demo shows z≈34.6, p≈3e-263 for a fully
+    watermarked stream. Honesty (`RPT_HONESTY`): EXPERIMENTAL, statistical not crypto —
+    detects a violation with a p-value, NEVER proves non-use, signal only for partners that
+    TRAIN (not RAG), needs query access. **Real-model contamination harness is the deferred
+    research half** (this ships the keying + detector + synthetic validation, not a trained
+    toy model).
 
 ## Capability 5 — MTL: Memory Transparency Log  *(product → infrastructure)*
 Giants: Certificate Transparency + IETF SCITT (COSE signed statements + append-only log + inclusion

@@ -9,6 +9,7 @@ mod mtl;
 mod pace;
 mod replay;
 mod robr;
+mod rpt;
 mod shapley;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -329,6 +330,32 @@ enum Commands {
         /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
+    },
+    /// RPT (EXPERIMENTAL, statistical): probe a synthetic token stream for a record's
+    /// radioactive watermark and report a z-score + one-sided p-value. Demonstrates the
+    /// detector; NOT a proof and never proves non-use.
+    RptProbe {
+        /// Record DAG-node id (64 hex chars); default all-0x11
+        #[arg(
+            long = "node",
+            default_value = "1111111111111111111111111111111111111111111111111111111111111111"
+        )]
+        node: String,
+        /// Vocabulary size
+        #[arg(long = "vocab", default_value_t = 50_000)]
+        vocab: u32,
+        /// Number of tokens in the probed stream
+        #[arg(long = "tokens", default_value_t = 400)]
+        tokens: usize,
+        /// Target green-list fraction
+        #[arg(long = "gamma", default_value_t = 0.25)]
+        gamma: f64,
+        /// Probe an UNMARKED (random) stream instead of a watermarked one
+        #[arg(long = "unmarked", default_value_t = false)]
+        unmarked: bool,
+        /// Seed for the deterministic demo stream
+        #[arg(long = "seed", default_value_t = 1)]
+        seed: u64,
     },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
@@ -1124,6 +1151,66 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 );
             }
             println!("honesty: {}", mtl::MTL_HONESTY);
+            Ok(())
+        }
+        Commands::RptProbe {
+            node,
+            vocab,
+            tokens,
+            gamma,
+            unmarked,
+            seed,
+        } => {
+            if vocab == 0 || tokens == 0 {
+                eprintln!("mneme: rpt-probe requires --vocab >= 1 and --tokens >= 1");
+                return Err(CliErrorKind::Usage);
+            }
+            let node_id = parse_seed_hex(&node)?;
+            // Build a deterministic demo stream: either drawn from the record's green
+            // list (as a trained-on model would be biased) or uniform random (unmarked).
+            let mut st = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut next = || {
+                let mut x = st;
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                st = x;
+                x
+            };
+            let stream: Vec<u32> = if unmarked {
+                (0..tokens)
+                    .map(|_| (next() % u64::from(vocab)) as u32)
+                    .collect()
+            } else {
+                let greens: Vec<u32> = (0..vocab)
+                    .filter(|&t| rpt::is_green(&node_id, t, gamma))
+                    .collect();
+                if greens.is_empty() {
+                    eprintln!("mneme: green list empty (raise --gamma or --vocab)");
+                    return Err(CliErrorKind::Usage);
+                }
+                (0..tokens)
+                    .map(|_| greens[(next() as usize) % greens.len()])
+                    .collect()
+            };
+            let r = rpt::detect(&node_id, &stream, gamma).map_err(CliErrorKind::Kernel)?;
+            // Significance threshold for the demo verdict (~p < 3e-5).
+            let detected = r.z_score >= 4.0;
+            println!(
+                "rpt-probe: stream={} total={} green={} gamma={:.3} z_score={:.3} p_value={:.3e} detected={}",
+                if unmarked { "unmarked" } else { "watermarked" },
+                r.total,
+                r.green,
+                r.gamma,
+                r.z_score,
+                r.p_value,
+                detected
+            );
+            println!("honesty: {}", rpt::RPT_HONESTY);
+            // Demo MUST behave: watermarked detected, unmarked not.
+            if detected == unmarked {
+                return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
+            }
             Ok(())
         }
         Commands::Init { path } => {
