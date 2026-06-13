@@ -73,13 +73,19 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
 
 /// Create-new checkpoint entry; fails closed if the sequence file already exists.
 pub fn create_new(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
-    if path.exists() {
-        return Err(MnemeError::IoFailed {
+    reject_existing_entry(path)?;
+    atomic_write(path, data)
+}
+
+fn reject_existing_entry(path: &Path) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(MnemeError::IoFailed {
             path: path.display().to_string(),
             kind: "exists".into(),
-        });
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(path, err)),
     }
-    atomic_write(path, data)
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> MnemeError {
@@ -146,6 +152,30 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("temporary path collisions exhausted")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_new_rejects_broken_symlink_entry() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("new-entry");
+        let missing = dir.path().join("missing-target");
+        std::os::unix::fs::symlink(&missing, &target).expect("broken symlink fixture");
+        assert!(!target.exists(), "fixture should be a dangling symlink");
+
+        let err = create_new(&target, b"new").expect_err("broken symlink counts as existing");
+
+        assert!(matches!(err, MnemeError::IoFailed { kind, .. } if kind == "exists"));
+        assert!(
+            std::fs::symlink_metadata(&target)
+                .expect("target symlink remains")
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            !missing.exists(),
+            "create_new must not follow or materialize the symlink target"
         );
     }
 }
