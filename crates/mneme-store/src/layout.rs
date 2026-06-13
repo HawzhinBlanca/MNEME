@@ -139,10 +139,11 @@ pub fn append_promotion_event(path: &Path, event: &PromotionEvent) -> Result<(),
 }
 
 pub fn init_store(path: &Path) -> Result<(), MnemeError> {
-    fs::create_dir_all(path.join("objects")).map_err(|e| io_err(path, e))?;
-    fs::create_dir_all(path.join("roots")).map_err(|e| io_err(path, e))?;
-    fs::create_dir_all(path.join("meta")).map_err(|e| io_err(path, e))?;
-    fs::create_dir_all(path.join("meta/redactions")).map_err(|e| io_err(path, e))?;
+    reject_store_layout_aliases(path)?;
+    ensure_private_store_dir(&path.join("objects"), "objects")?;
+    ensure_private_store_dir(&path.join("roots"), "roots")?;
+    ensure_private_store_dir(&path.join("meta"), "meta")?;
+    ensure_private_store_dir(&path.join("meta/redactions"), "meta/redactions")?;
     let key_index = path.join("meta/key_index.json");
     if !crate::atomic::entry_exists(&key_index)? {
         let data = serde_json::to_string_pretty(&KeyIndexSidecar::default())
@@ -150,6 +151,49 @@ pub fn init_store(path: &Path) -> Result<(), MnemeError> {
         crate::atomic::atomic_write(&key_index, data.as_bytes())?;
     }
     Ok(())
+}
+
+pub fn reject_store_layout_aliases(path: &Path) -> Result<(), MnemeError> {
+    for (relative, label) in [
+        ("objects", "objects"),
+        ("roots", "roots"),
+        ("meta", "meta"),
+        ("meta/redactions", "meta/redactions"),
+        ("keys", "keys"),
+        ("keys/vault", "keys/vault"),
+    ] {
+        reject_store_dir_alias(&path.join(relative), label)?;
+    }
+    Ok(())
+}
+
+fn ensure_private_store_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    reject_store_dir_alias(dir, label)?;
+    fs::create_dir_all(dir).map_err(|e| io_err(dir, e))?;
+    reject_store_dir_alias(dir, label)
+}
+
+fn reject_store_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(MnemeError::IoFailed {
+                    path: dir.display().to_string(),
+                    kind: format!("{label} directory symlink"),
+                });
+            }
+            if !file_type.is_dir() {
+                return Err(MnemeError::IoFailed {
+                    path: dir.display().to_string(),
+                    kind: format!("{label} path non-directory"),
+                });
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(dir, err)),
+    }
 }
 
 pub fn begin_transaction(path: &Path) -> Result<(), MnemeError> {

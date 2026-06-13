@@ -1773,7 +1773,7 @@ fn load_or_generate_operator(
     store: &Path,
     seed_hex: Option<&str>,
 ) -> Result<KeyPair, CliErrorKind> {
-    mneme_store::reject_store_root_alias(store).map_err(CliErrorKind::Kernel)?;
+    mneme_store::reject_store_path_aliases(store).map_err(CliErrorKind::Kernel)?;
     mneme_crypto::load_or_generate_operator(store, seed_hex).map_err(operator_seed_error_to_cli)
 }
 

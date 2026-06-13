@@ -36,7 +36,7 @@ fn open_runtime_with_operator_seed(
     store_path: &Path,
     seed_hex: Option<&str>,
 ) -> Result<McpRuntime, mneme_core::MnemeError> {
-    mneme_store::reject_store_root_alias(store_path)?;
+    mneme_store::reject_store_path_aliases(store_path)?;
     let operator = load_or_generate_operator(store_path, seed_hex)?;
     let tool_writer = derive_tool_writer_keypair(&operator);
     let store = open_or_create_store(store_path, operator.clone())?;

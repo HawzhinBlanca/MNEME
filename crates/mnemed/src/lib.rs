@@ -138,7 +138,7 @@ fn boot_daemon_state_with_operator_seed(
     store_path: &Path,
     seed_hex: Option<&str>,
 ) -> Result<(AppState, KeyPair, KeyPair), MnemeError> {
-    mneme_store::reject_store_root_alias(store_path)?;
+    mneme_store::reject_store_path_aliases(store_path)?;
     let operator = load_or_generate_operator(store_path, seed_hex)?;
     let store = if store_head_entry_exists_no_follow(store_path)? {
         Store::open(store_path, operator.clone())?

@@ -175,6 +175,49 @@ fn store_create_rejects_symlink_store_root_without_writing_target() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn store_create_rejects_symlink_roots_dir_before_vault_or_root_writes() {
+    let dir = TempDir::new().expect("tempdir");
+    let store_dir = dir.path().join("store");
+    fs::create_dir(&store_dir).expect("store dir");
+    let external_roots = dir.path().join("external-roots");
+    fs::create_dir(&external_roots).expect("external roots target");
+    std::os::unix::fs::symlink(&external_roots, store_dir.join("roots"))
+        .expect("roots dir symlink");
+    let operator = KeyPair::from_seed([0x32; 32]);
+
+    match Store::create(&store_dir, operator) {
+        Err(MnemeError::IoFailed { kind, .. }) => {
+            assert!(
+                kind.contains("symlink"),
+                "store layout alias rejection should mention symlink, got {kind}"
+            );
+        }
+        Err(err) => panic!("expected IoFailed for symlinked roots dir, got {err:?}"),
+        Ok(_) => panic!("Store::create accepted a symlinked roots directory"),
+    }
+
+    assert!(
+        !store_dir.join("keys").exists(),
+        "Store::create must reject layout aliases before creating key-vault custody files"
+    );
+    assert!(
+        fs::read_dir(&external_roots)
+            .expect("external roots target readable")
+            .next()
+            .is_none(),
+        "Store::create must not write signed roots through a pre-aliased roots directory"
+    );
+    assert!(
+        fs::symlink_metadata(store_dir.join("roots"))
+            .expect("roots symlink should remain")
+            .file_type()
+            .is_symlink(),
+        "failed Store::create must leave the roots symlink entry for explicit operator repair"
+    );
+}
+
 fn read_object_key_journal_entries(store_dir: &Path) -> Vec<serde_json::Value> {
     let journal = store_dir.join("meta/object_keys.journal");
     fs::read_to_string(&journal)

@@ -151,9 +151,17 @@ pub fn reject_store_root_alias(path: &Path) -> Result<(), MnemeError> {
     atomic::reject_store_root_alias(path)
 }
 
+/// Reject aliases at the mutable store boundary before custody, lock, or layout
+/// writes. The root and known private layout directories must be ordinary
+/// directories or absent, never symlinks or files.
+pub fn reject_store_path_aliases(path: &Path) -> Result<(), MnemeError> {
+    reject_store_root_alias(path)?;
+    layout::reject_store_layout_aliases(path)
+}
+
 impl Store {
     pub fn create(path: &Path, operator: KeyPair) -> Result<Self, MnemeError> {
-        reject_store_root_alias(path)?;
+        reject_store_path_aliases(path)?;
         let vault = Box::new(FileKeyVault::new(path)?);
         Self::create_with_vault(path, operator, vault)
     }
@@ -166,7 +174,7 @@ impl Store {
         operator: KeyPair,
         vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
-        reject_store_root_alias(path)?;
+        reject_store_path_aliases(path)?;
         layout::init_store(path)?;
         atomic::audit_durability_at_open(path)?;
         let _store_lock = atomic::open_store_lock(path)?;
@@ -212,7 +220,7 @@ impl Store {
         operator: KeyPair,
         pinned_root: Option<[u8; 32]>,
     ) -> Result<Self, MnemeError> {
-        reject_store_root_alias(path)?;
+        reject_store_path_aliases(path)?;
         let vault = Box::new(FileKeyVault::new(path)?);
         Self::open_pinned_with_vault(path, operator, pinned_root, vault)
     }
@@ -233,7 +241,7 @@ impl Store {
         pinned_root: Option<[u8; 32]>,
         vault: Box<dyn KeyVault + Send>,
     ) -> Result<Self, MnemeError> {
-        reject_store_root_alias(path)?;
+        reject_store_path_aliases(path)?;
         layout::check_incomplete(path)?;
         atomic::audit_durability_at_open(path)?;
         let _store_lock = atomic::open_store_lock(path)?;
