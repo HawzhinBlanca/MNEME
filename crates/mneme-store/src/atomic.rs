@@ -37,7 +37,7 @@ pub fn atomic_write_deferred(path: &Path, data: &[u8]) -> Result<(), MnemeError>
 
 fn atomic_write_inner(path: &Path, data: &[u8], sync_dir: bool) -> Result<(), MnemeError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| io_err(path, e))?;
+        ensure_atomic_parent_dir(parent, "atomic write parent")?;
     }
     let (tmp, mut f) = create_atomic_tmp_file(path)?;
     {
@@ -101,7 +101,7 @@ pub fn flush_parent_dirs(
             }
             let key = parent.to_path_buf();
             if seen.insert(key.clone()) {
-                sync_parent_dir(&key)?;
+                sync_dir(&key, "atomic sync parent")?;
             }
         }
     }
@@ -177,9 +177,7 @@ pub fn read_no_follow(path: &Path) -> Result<Vec<u8>, MnemeError> {
 
 pub(crate) fn open_append_single_link(path: &Path) -> Result<File, MnemeError> {
     if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| io_err(path, e))?;
-        }
+        ensure_atomic_parent_dir(parent, "append parent")?;
     }
     #[cfg(unix)]
     {
@@ -277,8 +275,7 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
             if parent.as_os_str().is_empty() {
                 return Ok(());
             }
-            let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
-            dir.sync_all().map_err(|e| io_err(parent, e))?;
+            sync_dir(parent, "atomic sync parent")?;
         }
         Ok(())
     }
@@ -287,6 +284,57 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
         let _ = path;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn sync_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    reject_atomic_dir_alias(dir, label)?;
+    let dir_file = File::open(dir).map_err(|e| io_err(dir, e))?;
+    dir_file.sync_all().map_err(|e| io_err(dir, e))
+}
+
+#[cfg(not(unix))]
+fn sync_dir(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    let _ = (dir, label);
+    Ok(())
+}
+
+fn ensure_atomic_parent_dir(parent: &Path, label: &str) -> Result<(), MnemeError> {
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    reject_atomic_dir_alias(parent, label)?;
+    fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+    reject_atomic_dir_alias(parent, label)
+}
+
+fn reject_atomic_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => validate_atomic_dir_metadata(dir, label, metadata).map(|_| ()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(dir, err)),
+    }
+}
+
+fn validate_atomic_dir_metadata(
+    dir: &Path,
+    label: &str,
+    metadata: fs::Metadata,
+) -> Result<fs::Metadata, MnemeError> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} directory symlink"),
+        });
+    }
+    if !file_type.is_dir() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} path non-directory"),
+        });
+    }
+    Ok(metadata)
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> MnemeError {
@@ -531,6 +579,63 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("temporary path collisions exhausted")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_rejects_symlinked_parent_without_writing_external_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-parent");
+        let parent = dir.path().join("linked-parent");
+        std::fs::create_dir(&external).expect("external parent target");
+        std::os::unix::fs::symlink(&external, &parent).expect("parent symlink");
+
+        let err = atomic_write(&parent.join("HEAD"), b"root")
+            .expect_err("atomic write should reject a symlinked parent");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            std::fs::read_dir(&external)
+                .expect("external parent read")
+                .next()
+                .is_none(),
+            "atomic write must not create temp or target files through a symlinked parent"
+        );
+        assert!(
+            std::fs::symlink_metadata(&parent)
+                .expect("parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed atomic write must leave the symlinked parent for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn flush_parent_dirs_rejects_symlinked_parent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-sync-parent");
+        let parent = dir.path().join("linked-sync-parent");
+        std::fs::create_dir(&external).expect("external sync parent target");
+        std::os::unix::fs::symlink(&external, &parent).expect("sync parent symlink");
+
+        let err = flush_parent_dirs([parent.join("HEAD")])
+            .expect_err("parent flush should reject a symlinked parent");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "sync parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            std::fs::symlink_metadata(&parent)
+                .expect("sync parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed parent flush must leave the symlinked parent for explicit repair"
         );
     }
 

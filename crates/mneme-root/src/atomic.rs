@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), MnemeError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| io_err(path, e))?;
+        ensure_atomic_parent_dir(parent, "root atomic parent")?;
     }
     let (tmp, mut f) = create_atomic_tmp_file(path)?;
     {
@@ -59,6 +59,7 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
             if parent.as_os_str().is_empty() {
                 return Ok(());
             }
+            reject_atomic_dir_alias(parent, "root sync parent")?;
             let dir = File::open(parent).map_err(|e| io_err(parent, e))?;
             dir.sync_all().map_err(|e| io_err(parent, e))?;
         }
@@ -69,6 +70,44 @@ fn sync_parent_dir(path: &Path) -> Result<(), MnemeError> {
         let _ = path;
         Ok(())
     }
+}
+
+fn ensure_atomic_parent_dir(parent: &Path, label: &str) -> Result<(), MnemeError> {
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    reject_atomic_dir_alias(parent, label)?;
+    fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
+    reject_atomic_dir_alias(parent, label)
+}
+
+fn reject_atomic_dir_alias(dir: &Path, label: &str) -> Result<(), MnemeError> {
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) => validate_atomic_dir_metadata(dir, label, metadata).map(|_| ()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(io_err(dir, err)),
+    }
+}
+
+fn validate_atomic_dir_metadata(
+    dir: &Path,
+    label: &str,
+    metadata: fs::Metadata,
+) -> Result<fs::Metadata, MnemeError> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} directory symlink"),
+        });
+    }
+    if !file_type.is_dir() {
+        return Err(MnemeError::IoFailed {
+            path: dir.display().to_string(),
+            kind: format!("{label} path non-directory"),
+        });
+    }
+    Ok(metadata)
 }
 
 /// Read a root-owned file without following symlinks on Unix.
@@ -179,6 +218,63 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("temporary path collisions exhausted")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_rejects_symlinked_parent_without_writing_external_target() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-roots");
+        let parent = dir.path().join("linked-roots");
+        std::fs::create_dir(&external).expect("external roots target");
+        std::os::unix::fs::symlink(&external, &parent).expect("roots parent symlink");
+
+        let err = atomic_write(&parent.join("HEAD"), b"root")
+            .expect_err("root atomic write should reject a symlinked parent");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            std::fs::read_dir(&external)
+                .expect("external roots read")
+                .next()
+                .is_none(),
+            "root atomic write must not create temp or target files through a symlinked parent"
+        );
+        assert!(
+            std::fs::symlink_metadata(&parent)
+                .expect("parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed root atomic write must leave the symlinked parent for explicit repair"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_parent_dir_rejects_symlinked_parent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external = dir.path().join("external-sync-roots");
+        let parent = dir.path().join("linked-sync-roots");
+        std::fs::create_dir(&external).expect("external sync roots target");
+        std::os::unix::fs::symlink(&external, &parent).expect("sync parent symlink");
+
+        let err = sync_parent_dir(&parent.join("HEAD"))
+            .expect_err("root parent fsync should reject a symlinked parent");
+
+        assert!(
+            err.to_string().contains("symlink"),
+            "sync parent alias rejection should mention symlink, got {err}"
+        );
+        assert!(
+            std::fs::symlink_metadata(&parent)
+                .expect("sync parent symlink metadata")
+                .file_type()
+                .is_symlink(),
+            "failed parent sync must leave the symlinked parent for explicit repair"
         );
     }
 
