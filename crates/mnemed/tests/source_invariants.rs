@@ -4213,10 +4213,9 @@ fn store_kernel_schema_failures_are_classified_not_schema_drift_collapsed() {
         "content-addressed object loading should use the canonical object path parser"
     );
 
-    let load_error_sites = source_between_markers(
+    let load_error_sites = source_top_level_item_after_marker(
         verify_store,
         "fn load_previous_root(",
-        "fn io_err(",
         "verify_store load_previous_root",
     );
     assert!(

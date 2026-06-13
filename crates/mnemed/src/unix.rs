@@ -299,6 +299,9 @@ impl BoundUnixServer {
 }
 
 pub(crate) fn prepare_socket_path(path: &Path) -> Result<(), std::io::Error> {
+    if let Some(parent) = socket_path_parent(path) {
+        ensure_socket_parent_dir(parent)?;
+    }
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if !metadata.file_type().is_socket() {
@@ -315,10 +318,47 @@ pub(crate) fn prepare_socket_path(path: &Path) -> Result<(), std::io::Error> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     Ok(())
+}
+
+fn socket_path_parent(path: &Path) -> Option<&Path> {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+}
+
+fn ensure_socket_parent_dir(parent: &Path) -> Result<(), std::io::Error> {
+    reject_socket_parent_alias(parent)?;
+    std::fs::create_dir_all(parent)?;
+    reject_socket_parent_alias(parent)
+}
+
+fn reject_socket_parent_alias(parent: &Path) -> Result<(), std::io::Error> {
+    match std::fs::symlink_metadata(parent) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Unix kernel socket parent must be a directory, not a symlink: {}",
+                        parent.display()
+                    ),
+                ));
+            }
+            if !file_type.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Unix kernel socket parent must be a directory: {}",
+                        parent.display()
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
 }
 
 fn remove_socket_path(path: &Path) -> Result<(), std::io::Error> {
@@ -953,6 +993,34 @@ mod tests {
                 panic!("{context}: Unix kernel response UTF-8 decode failed: {err}")
             })
             .to_owned()
+    }
+
+    #[test]
+    fn prepare_socket_path_rejects_symlinked_parent_without_removing_external_socket() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let external_parent = dir.path().join("external");
+        let linked_parent = dir.path().join("linked");
+        std::fs::create_dir(&external_parent).expect("external parent fixture");
+        let external_socket = external_parent.join("kernel.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&external_socket)
+            .expect("external socket fixture");
+        std::os::unix::fs::symlink(&external_parent, &linked_parent)
+            .expect("socket parent symlink fixture");
+
+        let err = prepare_socket_path(&linked_parent.join("kernel.sock"))
+            .expect_err("symlinked socket parent must fail closed");
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(
+            external_socket.exists(),
+            "socket preparation must not remove an external socket through a symlinked parent"
+        );
+        assert!(
+            std::fs::symlink_metadata(&linked_parent)
+                .expect("linked parent metadata")
+                .file_type()
+                .is_symlink()
+        );
     }
 
     #[tokio::test]
