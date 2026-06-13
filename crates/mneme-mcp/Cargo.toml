@@ -32,6 +32,7 @@ phase_iii_bind = [
 
 [dev-dependencies]
 tempfile.workspace = true
+mneme-account.workspace = true
 
 [[test]]
 name = "phase_iii_mcp"

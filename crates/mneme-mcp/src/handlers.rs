@@ -49,6 +49,15 @@ pub fn normalize_tool_namespace(namespace: &str) -> String {
 }
 
 /// MCP memory tool backend: tool-channel writes, verified reads only.
+/// Optional ROBR-1 binding-receipt inputs for a recall. All four are required together;
+/// the tool layer rejects a partial set fail-closed.
+pub struct RobrInputs {
+    pub prompt: String,
+    pub weight_measurement: [u8; 32],
+    pub sampling_params: String,
+    pub output_token_commit: [u8; 32],
+}
+
 pub struct MemoryHandlers {
     store: Arc<Mutex<Store>>,
     /// Tool channel (§13.4): quarantine default, no Promote.
@@ -139,6 +148,24 @@ impl MemoryHandlers {
         min_tier: TrustTier,
         embedding: Option<FixedPointEmbedding>,
     ) -> Result<Vec<RecallEntry>, MnemeError> {
+        Ok(self
+            .recall_with_robr(namespace, name, min_tier, embedding, None)?
+            .0)
+    }
+
+    /// Recall and, when `robr` is supplied, also mint a ROBR-1 binding receipt over the
+    /// verified context (the recalled entries) under the current signed root. Returns the
+    /// entries plus the base64-encoded receipt wire. ROBR-1 binds the output commitment to
+    /// these exact inputs; it does NOT prove the model produced the output or any semantic
+    /// truth — authenticated != true.
+    pub fn recall_with_robr(
+        &self,
+        namespace: &str,
+        name: &str,
+        min_tier: TrustTier,
+        embedding: Option<FixedPointEmbedding>,
+        robr: Option<RobrInputs>,
+    ) -> Result<(Vec<RecallEntry>, Option<String>), MnemeError> {
         let semantic = embedding.is_some();
         let query = Query {
             logical_key: LogicalKey {
@@ -154,7 +181,25 @@ impl MemoryHandlers {
         } else {
             store.recall_verified_default(&query, &self.read_cap)?
         };
-        Ok(entries.into_iter().map(RecallEntry::from_entry).collect())
+        let robr_receipt_b64 = match robr {
+            Some(r) => {
+                let context: Vec<([u8; 32], Vec<u8>)> = entries
+                    .iter()
+                    .map(|e| (e.id.0, e.plaintext.clone()))
+                    .collect();
+                let wire = store.create_robr_receipt(
+                    &r.prompt,
+                    r.weight_measurement,
+                    r.sampling_params,
+                    &context,
+                    r.output_token_commit,
+                )?;
+                Some(base64::engine::general_purpose::STANDARD.encode(wire))
+            }
+            None => None,
+        };
+        let mapped = entries.into_iter().map(RecallEntry::from_entry).collect();
+        Ok((mapped, robr_receipt_b64))
     }
 
     /// `memory.forget` — shred + tombstone.
