@@ -171,9 +171,17 @@ publicly-auditable log where MNEME roots, deletion certs, and ROBRs are register
     flip; truncation/trailing; wrong-pinned-pk; appending changes the signed head root) +
     e2e (log root → receipt → offline verify; **log grows across invocations, each
     receipt verifies**; tamper fails closed exit 4). Honesty (`MTL_HONESTY`): single-
-    operator log — inclusion ≠ non-equivocation; cross-head **consistency proofs /
-    witness gossip are the MTL-2 extension** and are NOT yet implemented; proves logging,
-    not truth.
+    operator log; proves logging, not truth.
+  - **✅ CONSISTENCY LANDED** (the deferred half of MTL-1's spec). `mtl` module adds RFC
+    6962 §2.1.2 consistency proofs: `consistency_proof` (SUBPROOF) + `verify_consistency`
+    (canonical CT verifier) + signed `ConsistencyReceiptV1`. `mneme mtl-consistency`
+    proves the size-m head is an **append-only** prefix of the current head; `mneme
+    verify-mtl-consistency` checks it offline. **Proof:** EXHAUSTIVE unit test — honest
+    consistency verifies for **all m ≤ n ≤ 24**; wrong first/second root, tampered proof,
+    wrong-length proof, and a **non-append-only fork all rejected**; receipt byte-flip +
+    wrong-pinned-pk fail closed + e2e (grow log across invocations → prove 1→3 extension →
+    verify; tamper fails closed exit 4). This closes the equivocation gap: an operator
+    cannot rewrite logged history without a detectable consistency-proof failure.
 - **MTL-2 `[CORE]` — A2A discovery seed.** A signed Agent Card (JWS) advertising the memory-attestation
   endpoint so agents discover each other's logs. **Proof:** card verifies; tampered card rejected.
 - **MTL-3 `[FRONTIER]` — eIDAS QTSP operation.** Standards/operations, not code — document the profile

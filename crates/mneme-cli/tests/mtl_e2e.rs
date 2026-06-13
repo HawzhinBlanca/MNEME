@@ -93,6 +93,67 @@ fn mtl_log_grows_across_invocations_and_each_receipt_verifies() {
 }
 
 #[test]
+fn mtl_consistency_proves_append_only_extension() {
+    let dir = tempdir().expect("tempdir");
+    let store = dir.path().join("store");
+    let store_s = store.to_str().expect("path");
+    let log = dir.path().join("t.log");
+    let log_s = log.to_str().expect("path");
+    let crcpt = dir.path().join("consistency.bin");
+    let crcpt_s = crcpt.to_str().expect("path");
+
+    mneme().args(["init", store_s]).assert().success();
+    // Grow the log to size 3 across invocations.
+    for (i, name) in ["a", "b", "c"].iter().enumerate() {
+        remember(store_s, name, "v");
+        let rcpt = dir.path().join(format!("r{i}.bin"));
+        mneme()
+            .args([
+                "mtl",
+                store_s,
+                "--log",
+                log_s,
+                "--out",
+                rcpt.to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+    }
+    // Prove the size-1 head is an append-only prefix of the current (size-3) head.
+    mneme()
+        .args([
+            "mtl-consistency",
+            store_s,
+            "--log",
+            log_s,
+            "--first",
+            "1",
+            "--out",
+            crcpt_s,
+        ])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("first_size=1"))
+        .stdout(predicates::str::contains("second_size=3"));
+    mneme()
+        .args(["verify-mtl-consistency", crcpt_s])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("append-only proven"));
+
+    // Tamper → fails closed.
+    let mut bytes = std::fs::read(&crcpt).expect("bytes");
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0x01;
+    std::fs::write(&crcpt, &bytes).expect("write");
+    mneme()
+        .args(["verify-mtl-consistency", crcpt_s])
+        .assert()
+        .failure()
+        .code(4);
+}
+
+#[test]
 fn tampered_mtl_receipt_fails_closed() {
     let dir = tempdir().expect("tempdir");
     let store = dir.path().join("store");

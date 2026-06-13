@@ -308,6 +308,28 @@ enum Commands {
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
     },
+    /// MTL-2: emit an append-only consistency proof between an earlier log size and the
+    /// current log, proving the operator did not rewrite history (non-equivocation).
+    MtlConsistency {
+        /// Store directory (for the operator signing key)
+        store: PathBuf,
+        /// Append-only log file produced by `mneme mtl`
+        #[arg(long = "log")]
+        log: PathBuf,
+        /// Earlier log size to prove the current log extends
+        #[arg(long = "first")]
+        first: usize,
+        /// Output path for the consistency receipt
+        #[arg(long = "out")]
+        out: PathBuf,
+    },
+    /// Offline verify an MTL consistency receipt (signatures + RFC6962 consistency)
+    VerifyMtlConsistency {
+        receipt: PathBuf,
+        /// Optional pinned operator public key (64 hex chars)
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
     /// Initialize a new store at PATH
     Init { path: PathBuf },
     /// Determinism foundation gate (§17.7)
@@ -1028,6 +1050,72 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 parsed.leaf_index,
                 parsed.statement.root_seq,
                 hex::encode(parsed.merkle_root),
+                hex::encode(parsed.operator_pk)
+            );
+            if pinned.is_none() {
+                println!(
+                    "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
+                );
+            }
+            println!("honesty: {}", mtl::MTL_HONESTY);
+            Ok(())
+        }
+        Commands::MtlConsistency {
+            store,
+            log,
+            first,
+            out,
+        } => {
+            require_store_dir(&store)?;
+            let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+            if !log.exists() {
+                eprintln!("mneme: mtl-consistency requires an existing --log");
+                return Err(CliErrorKind::Usage);
+            }
+            let body = std::fs::read_to_string(&log).map_err(|_| CliErrorKind::Usage)?;
+            let mut statements: Vec<mtl::LogStatement> = Vec::new();
+            for line in body.lines().filter(|l| !l.trim().is_empty()) {
+                let (seq_s, hex_s) = line.split_once(':').ok_or(CliErrorKind::Usage)?;
+                let root_seq: u64 = seq_s.trim().parse().map_err(|_| CliErrorKind::Usage)?;
+                let root_preimage = parse_seed_hex(hex_s.trim())?;
+                statements.push(mtl::LogStatement {
+                    root_seq,
+                    root_preimage,
+                });
+            }
+            let size = statements.len();
+            let tlog = mtl::TransparencyLog::from_statements(statements);
+            let wire = tlog
+                .consistency_receipt(first, &operator)
+                .map_err(CliErrorKind::Kernel)?;
+            std::fs::write(&out, &wire).map_err(|_| CliErrorKind::Usage)?;
+            println!(
+                "mtl consistency receipt written: {} ({} bytes) first_size={} second_size={}",
+                out.display(),
+                wire.len(),
+                first,
+                size
+            );
+            println!("honesty: {}", mtl::MTL_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyMtlConsistency {
+            receipt,
+            operator_pk,
+        } => {
+            let wire = std::fs::read(&receipt).map_err(|_| CliErrorKind::Usage)?;
+            let pinned = match operator_pk {
+                Some(hex) => Some(parse_seed_hex(&hex)?),
+                None => None,
+            };
+            let parsed = mtl::ConsistencyReceiptV1::verify(&wire, pinned.as_ref())
+                .map_err(CliErrorKind::VerifyFailed)?;
+            println!(
+                "verify-mtl-consistency ok: append-only proven first_size={} -> second_size={} first_root={} second_root={} operator_pk={}",
+                parsed.first_size,
+                parsed.second_size,
+                hex::encode(parsed.first_root),
+                hex::encode(parsed.second_root),
                 hex::encode(parsed.operator_pk)
             );
             if pinned.is_none() {
