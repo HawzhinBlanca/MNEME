@@ -39,6 +39,17 @@ ensure_corpus() {
   if [[ ! -d "$dir" ]]; then
     mkdir -p "$dir"
   fi
+  # Seed wire-parser targets with their committed valid vectors so the fuzzer mutates
+  # from a structurally-valid input rather than only the \x00 fallback.
+  local vector=""
+  case "$target" in
+    robr_verify) vector="proof/vectors/robr_vector_v1.bin" ;;
+    forget_proof_verify) vector="proof/vectors/forget_proof_vector_v1.cbor" ;;
+    pace_log_verify) vector="proof/vectors/pace_log_vector_v1.cbor" ;;
+  esac
+  if [[ -n "$vector" && -f "$ROOT/$vector" ]]; then
+    cp "$ROOT/$vector" "$dir/seed_vector_v1"
+  fi
   if [[ -z "$(find "$dir" -type f 2>/dev/null | head -n 1)" ]]; then
     echo "fuzz-meaningful: seeding empty corpus for $target" >&2
     printf '\x00' >"$dir/seed_minimal"

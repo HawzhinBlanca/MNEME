@@ -1523,6 +1523,7 @@ dependencies = [
  "base64",
  "blake3",
  "hex",
+ "mneme-account",
  "mneme-cap",
  "mneme-core",
  "mneme-crypto",

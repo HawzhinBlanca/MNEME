@@ -60,6 +60,53 @@ fn recall_uses_recall_verified_roundtrip() {
 }
 
 #[test]
+fn recall_with_robr_emits_verifiable_receipt() {
+    use mneme_account::robr::RobrReceiptV1;
+    use mneme_mcp::handlers::RobrInputs;
+
+    let dir = tempdir().unwrap();
+    let rt = test_runtime(dir.path());
+    rt.handlers
+        .remember(
+            b"secret robr body",
+            MemoryKind::Semantic,
+            "tools/mcp",
+            "robr",
+            [0x09; 16],
+            None,
+        )
+        .unwrap();
+
+    // No ROBR inputs → entries only, no receipt.
+    let (entries, none_receipt) = rt
+        .handlers
+        .recall_with_robr("tools/mcp", "robr", TrustTier::Quarantine, None, None)
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(none_receipt.is_none());
+
+    // Full ROBR inputs → a receipt that verifies offline and binds the recalled context.
+    let robr = RobrInputs {
+        prompt: "what is robr?".to_string(),
+        weight_measurement: [0x11; 32],
+        sampling_params: "model=test;temp=0".to_string(),
+        output_token_commit: [0x22; 32],
+    };
+    let (entries, receipt_b64) = rt
+        .handlers
+        .recall_with_robr("tools/mcp", "robr", TrustTier::Quarantine, None, Some(robr))
+        .unwrap();
+    assert_eq!(entries.len(), 1);
+    let wire = base64::engine::general_purpose::STANDARD
+        .decode(receipt_b64.expect("receipt present when robr inputs supplied"))
+        .expect("receipt base64 decodes");
+    let receipt = RobrReceiptV1::verify(&wire, None).expect("minted receipt verifies offline");
+    assert_eq!(receipt.output_token_commit, [0x22u8; 32]);
+    assert_eq!(receipt.weight_measurement, [0x11u8; 32]);
+    assert_eq!(receipt.context_ids.len(), 1);
+}
+
+#[test]
 fn quarantine_blocked_from_trusted_recall_ainj_mitigation() {
     let dir = tempdir().unwrap();
     let rt = test_runtime(dir.path());

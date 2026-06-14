@@ -1,6 +1,6 @@
 //! Minimal MCP JSON-RPC 2.0 over stdio (tools/list + tools/call + initialize).
 
-use crate::handlers::{self, MemoryHandlers};
+use crate::handlers::{self, MemoryHandlers, RobrInputs};
 use crate::honesty::{
     AINJ_MITIGATION, FORGET_DESCRIPTION, FORGET_PROOF_DESCRIPTION, HONESTY_FOOTER,
     RECALL_DESCRIPTION, REMEMBER_DESCRIPTION, protocol_error_message, tool_error_message,
@@ -177,7 +177,11 @@ pub fn tool_definitions() -> Vec<Value> {
                     "embedding": { "type": "array", "items": { "type": "number" }, "description": "Optional query vector; when present, runs verified semantic (HNSW) recall instead of exact-key lookup. Procedure-faithful over the committed candidate set under the quantized metric — NOT true nearest neighbors (§3)." },
                     "embedding_scale": { "type": "integer", "description": "Fixed-point scale (default -8); must match the scale used at remember time." },
                     "min_tier": { "type": "string", "enum": ["quarantine", "working", "trusted", "identity"] },
-                    "namespace": { "type": "string" }
+                    "namespace": { "type": "string" },
+                    "robr_prompt": { "type": "string", "description": "ROBR-1: prompt presented to the model. Supply all four robr_* fields together to receive a signed Recall-to-Output Binding Receipt that binds the output commitment to this root, prompt, weights, sampling and the verified context. Binding only — NOT proof the model produced the output, nor semantic truth (§3)." },
+                    "robr_weight_measurement_hex": { "type": "string", "description": "ROBR-1: operator-asserted model weight measurement, 64 hex chars (32 bytes)." },
+                    "robr_sampling_params": { "type": "string", "description": "ROBR-1: canonical sampling params, e.g. \"model=…;temp=0;top_p=1;seed=42\"." },
+                    "robr_output_token_commit_hex": { "type": "string", "description": "ROBR-1: BLAKE3 commitment over the produced output tokens, 64 hex chars (32 bytes)." }
                 },
                 "required": ["min_tier"]
             }
@@ -257,12 +261,16 @@ fn call_tool(handlers: &MemoryHandlers, name: &str, args: &Value) -> Result<Valu
             } else {
                 recall_key_arg(args)?
             };
-            let entries = handlers
-                .recall(namespace, &key, min_tier, embedding)
+            let robr = robr_inputs_arg(args)?;
+            let (entries, robr_receipt_b64) = handlers
+                .recall_with_robr(namespace, &key, min_tier, embedding, robr)
                 .map_err(tool_error_message)?;
-            Ok(tool_result_json(
-                json!({ "entries": entries, "key": key, "semantic": semantic }),
-            ))
+            Ok(tool_result_json(json!({
+                "entries": entries,
+                "key": key,
+                "semantic": semantic,
+                "robr_receipt_b64": robr_receipt_b64,
+            })))
         }
         "memory.forget" => {
             let namespace = arg_str(args, "namespace")?;
@@ -361,6 +369,41 @@ fn recall_key_arg(args: &Value) -> Result<String, String> {
     Err(protocol_error_message(
         "missing argument: key (exact logical key name; semantic search is not supported)",
     ))
+}
+
+fn parse_hex32_arg(args: &Value, key: &str) -> Result<[u8; 32], String> {
+    let s = arg_str(args, key)?;
+    let mut out = [0u8; 32];
+    hex::decode_to_slice(s.trim(), &mut out)
+        .map_err(|_| protocol_error_message(format!("`{key}` must be 64 hex chars (32 bytes)")))?;
+    Ok(out)
+}
+
+/// All-or-none ROBR-1 inputs on a recall. Returns `None` when no `robr_*` field is given,
+/// `Some` when all four are present, and a fail-closed error for an ambiguous partial set.
+fn robr_inputs_arg(args: &Value) -> Result<Option<RobrInputs>, String> {
+    let keys = [
+        "robr_prompt",
+        "robr_weight_measurement_hex",
+        "robr_sampling_params",
+        "robr_output_token_commit_hex",
+    ];
+    let present = keys.iter().filter(|k| args.get(**k).is_some()).count();
+    if present == 0 {
+        return Ok(None);
+    }
+    if present != keys.len() {
+        return Err(protocol_error_message(
+            "ROBR receipt requires all of robr_prompt, robr_weight_measurement_hex, \
+             robr_sampling_params, robr_output_token_commit_hex (or none)",
+        ));
+    }
+    Ok(Some(RobrInputs {
+        prompt: arg_str(args, "robr_prompt")?.to_string(),
+        weight_measurement: parse_hex32_arg(args, "robr_weight_measurement_hex")?,
+        sampling_params: arg_str(args, "robr_sampling_params")?.to_string(),
+        output_token_commit: parse_hex32_arg(args, "robr_output_token_commit_hex")?,
+    }))
 }
 
 fn tool_result_json(value: Value) -> Value {
