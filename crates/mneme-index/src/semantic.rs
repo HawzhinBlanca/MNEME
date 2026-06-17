@@ -256,6 +256,18 @@ impl SemanticIndex {
         root_bound: [u8; 32],
         level: mneme_core::RetrievalProofLevel,
     ) -> Result<SemanticRecallReceipt, IndexError> {
+        self.recall_receipt_zkann_ext(proc, query, root_bound, level, false)
+    }
+
+    /// Build receipt with zkANN-1 attachment, allowing optional constant-size complete-kNN proof.
+    pub fn recall_receipt_zkann_ext(
+        &self,
+        proc: &Procedure,
+        query: &FixedPointEmbedding,
+        root_bound: [u8; 32],
+        level: mneme_core::RetrievalProofLevel,
+        constant_size: bool,
+    ) -> Result<SemanticRecallReceipt, IndexError> {
         use crate::receipt::ZkannAttachment;
         let (visited_order, vo) = match level {
             mneme_core::RetrievalProofLevel::ProcedureFaithfulTopK => {
@@ -274,6 +286,7 @@ impl SemanticIndex {
                     root_bound,
                     proc,
                     query,
+                    constant_size,
                 );
             }
         };

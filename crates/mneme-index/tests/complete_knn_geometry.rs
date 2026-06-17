@@ -41,7 +41,7 @@ fn thousand_random_queries_match_brute_force() {
         .map(|i| vec![(i as f64) * 0.7, (i as f64).sin(), (i as f64).cos()])
         .collect();
     let tree = BallTree::build(pts.clone());
-    let mut seed: u64 = 0xC0FFEE_BABE_0001;
+    let mut seed: u64 = 0x00C0_FFEE_BABE_0001;
     for _ in 0..1000 {
         seed = seed
             .wrapping_mul(6364136223846793005)
@@ -54,7 +54,7 @@ fn thousand_random_queries_match_brute_force() {
                 ((seed >> 33) as f64 / u32::MAX as f64) * 20.0 - 10.0 + d as f64 * 0.01
             })
             .collect();
-        let k = 1 + ((seed >> 40) as usize) % pts.len().min(5).max(1);
+        let k = 1 + ((seed >> 40) as usize) % pts.len().clamp(1, 5);
         let bf = brute_force_knn(&pts, &q, k);
         let pr = knn_with_pruning(&tree, &q, k);
         assert_eq!(bf, pr, "seed={seed} k={k} q={q:?}");

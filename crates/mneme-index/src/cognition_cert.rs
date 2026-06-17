@@ -8,6 +8,7 @@ use crate::beacon_spot_check::{
     AuditBeacon, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, verify_beacon_spot_check,
 };
 use crate::byzantine_inference::{InferenceConsistency, verify_byzantine_inference};
+use crate::complete_knn::CompleteKnnProof;
 #[cfg(feature = "context_gate")]
 use crate::context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
 use crate::receipt::SemanticRecallReceipt;
@@ -492,7 +493,16 @@ pub fn verify_cognition_certificate_v1(
     trust: &TrustConfig,
     proc: &Procedure,
 ) -> Result<Root, MnemeError> {
-    verify_cognition_certificate_v1_with_spot_check(bytes, trust, proc, None)
+    verify_cognition_certificate_v1_with_spot_check_ext(bytes, trust, proc, None, None)
+}
+
+pub fn verify_cognition_certificate_v1_ext(
+    bytes: &[u8],
+    trust: &TrustConfig,
+    proc: &Procedure,
+    proof_override: Option<&CompleteKnnProof>,
+) -> Result<Root, MnemeError> {
+    verify_cognition_certificate_v1_with_spot_check_ext(bytes, trust, proc, None, proof_override)
 }
 
 /// Certificate v1 verification with optional embedding-backed beacon spot-check context.
@@ -501,6 +511,17 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
     trust: &TrustConfig,
     proc: &Procedure,
     spot_check: Option<&SpotCheckContext<'_>>,
+) -> Result<Root, MnemeError> {
+    verify_cognition_certificate_v1_with_spot_check_ext(bytes, trust, proc, spot_check, None)
+}
+
+/// Certificate v1 verification with optional embedding-backed beacon spot-check context and proof override.
+pub fn verify_cognition_certificate_v1_with_spot_check_ext(
+    bytes: &[u8],
+    trust: &TrustConfig,
+    proc: &Procedure,
+    spot_check: Option<&SpotCheckContext<'_>>,
+    proof_override: Option<&CompleteKnnProof>,
 ) -> Result<Root, MnemeError> {
     let wire: CognitionCertWire = from_bytes_strict(bytes)
         .map_err(|_| cognition_cert_error(CognitionCertFailure::V1WireDecode))?;
@@ -541,7 +562,7 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
         _ => {}
     }
     if wire.level == RetrievalProofLevel::CompleteTopK {
-        verify_complete_topk_certificate(&wire.receipt)?;
+        verify_complete_topk_certificate_ext(&wire.receipt, proof_override)?;
         return Ok(root);
     }
     let committed_leaf_count = wire.receipt.verification_object.candidates.len();
@@ -564,7 +585,15 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
     Ok(root)
 }
 
+#[allow(dead_code)]
 fn verify_complete_topk_certificate(receipt: &SemanticRecallReceipt) -> Result<(), MnemeError> {
+    verify_complete_topk_certificate_ext(receipt, None)
+}
+
+fn verify_complete_topk_certificate_ext(
+    receipt: &SemanticRecallReceipt,
+    proof_override: Option<&CompleteKnnProof>,
+) -> Result<(), MnemeError> {
     let zkann = receipt
         .zkann
         .as_ref()
@@ -584,7 +613,11 @@ fn verify_complete_topk_certificate(receipt: &SemanticRecallReceipt) -> Result<(
             CognitionCertFailure::CompleteKnnBindingMismatch,
         ));
     }
-    att.verify_offline()
+    if let Some(proof) = proof_override {
+        att.verify_offline_with_proof(proof)
+    } else {
+        att.verify_offline()
+    }
 }
 
 /// Offline verification for the Phase II draft certificate.

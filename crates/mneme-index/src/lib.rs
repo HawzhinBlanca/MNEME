@@ -62,7 +62,8 @@ pub use complete_knn::{
     prove_complete_knn, squared_euclidean, verify_complete_knn, verify_complete_knn_cost_bounded,
 };
 pub use complete_knn_cert::{
-    CompleteKnnCertAttachment, decode_complete_knn_attachment, encode_complete_knn_attachment,
+    CompleteKnnCertAttachment, decode_complete_knn_attachment, decode_proof_bytes_direct,
+    encode_complete_knn_attachment, hash_proof,
 };
 pub use error::IndexError;
 pub use key_index::KeyIndex;
@@ -115,7 +116,7 @@ pub use cognition_cert::{
     assemble_cognition_certificate_v1_with_beacon,
     assemble_cognition_certificate_v1_with_extensions, fuzz_cognition_cert_wire,
     parse_cognition_certificate, verify_cognition_certificate_v1,
-    verify_cognition_certificate_v1_with_spot_check,
+    verify_cognition_certificate_v1_ext, verify_cognition_certificate_v1_with_spot_check,
 };
 #[cfg(feature = "context_gate")]
 pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
