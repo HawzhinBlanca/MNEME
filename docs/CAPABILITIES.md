@@ -19,7 +19,9 @@ this table keeps them distinct on purpose.
 |---|---|---|
 | `recall` / MCP `memory.recall` (key) | the returned entry is the committed value at this logical key under the signed root (fail-closed receipt) | anything about content truth |
 | MCP `memory.recall` (with `embedding`) | procedure-faithful semantic recall over the committed candidate set under the **quantized** metric | true nearest neighbors; quantized top-k may differ from real-valued |
-| `fcc` / `verify-fcc` | tiered forgetting closure over a real `ForgetProof`: **T1** wrapping-key destroyed (ciphertext unrecoverable), **T2** + proof-of-absence bound to the signed root; tier re-derived at verify (overclaim rejected) | that a downstream **model** which consumed the data has unlearned it (FCC-3/T3 frontier). Substrate deletion ≠ model unlearning |
+| `fcc` / `verify-fcc` | tiered forgetting closure over a real `ForgetProof`: **T1** wrapping-key destroyed (ciphertext unrecoverable), **T2** + proof-of-absence bound to the signed root, **T3** + carried `(ε, δ)` DP-influence parameters (requires crypto-shred; non-finite/negative params and tier overclaims rejected at verify) | that a downstream **model** which consumed the data has unlearned it. The `(ε, δ)` are operator-asserted bounds, not a proof the model was DP-trained. Substrate deletion ≠ model unlearning |
+| `certify-unlearning` | the FCC cert's carried small-model retrain-checkpoint hash + Spartan proof bytes match the operator-supplied values (re-checked offline) | unlearning of a frontier-scale model: per `UNLEARNING_HONESTY` this is a **scale-limited research scaffold** (small reference model, <100M params); exact unlearning of large LLMs via retrain/Newton-step is computationally prohibitive |
+| `certify --constant-size` / `verify-cert --proof-file` | the certificate carries only a **constant-size** envelope (BLAKE3 hash of the complete-kNN proof + the HNSW Merkle root); verify re-binds the out-of-band proof file by hash, then runs full completeness verification | a **succinct** argument: the proof itself is unchanged and travels out-of-band, so verification cost is still O(proof). It is hash-binding, **not** a KZG/SNARK constant-size *proof* |
 
 ## ROBR — Recall-to-Output Binding (behavioral receipts)
 
@@ -63,8 +65,12 @@ this table keeps them distinct on purpose.
 
 Frontier items deliberately **not** shipped (documented in
 [WORK_ORDER_EXTERNALIZED_MIND.md](WORK_ORDER_EXTERNALIZED_MIND.md)): ROBR-2 real-model
-replay (batch-invariant backend) → ROBR-4 TEE attestation, FCC-2/3 DP-influence /
-certified unlearning, TTRP KZG constant-size proofs, MTL-3 cross-head **witness gossip**
-for non-equivocation (the A2A Agent-Card discovery seed is shipped; multi-operator
-gossip is not), RPT real-model contamination harness. Each is blocked on hardware or
-research, and each is labeled with its trust assumption rather than faked.
+replay (batch-invariant backend) → ROBR-4 TEE attestation, FCC-3 certified unlearning
+**at frontier scale** (the shipped `certify-unlearning` is a small-reference-model
+scaffold; the `(ε, δ)` T3 tier carries operator-asserted bounds, not a DP-training
+proof), a true **KZG/SNARK succinct** retrieval proof (the shipped `--constant-size`
+is a constant-size *certificate* that hash-binds an out-of-band proof, not a succinct
+*proof*), MTL-3 cross-head **witness gossip** for non-equivocation (the A2A Agent-Card
+discovery seed is shipped; multi-operator gossip is not), RPT real-model contamination
+harness. Each is blocked on hardware or research, and each is labeled with its trust
+assumption rather than faked.
