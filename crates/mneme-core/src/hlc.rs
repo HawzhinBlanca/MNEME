@@ -163,4 +163,114 @@ mod tests {
         assert_eq!(local.wall_ms, 150);
         assert_eq!(local.counter, 4);
     }
+
+    /// INV-HLC-1: tick_local must be monotonically non-decreasing even when
+    /// the wall clock jumps backward (e.g. NTP slew, VM clock warp).
+    #[test]
+    fn hlc_tick_local_skew_backward_never_decreases() {
+        let node = NodeId([0xCC; 16]);
+        let mut hlc = Hlc::zero(node);
+        hlc.tick_local(1_000);
+        let after_first = hlc;
+        // Simulate a backward skew of 500 ms.
+        hlc.tick_local(500);
+        // The HLC must NOT have gone backward (hlc >= after_first).
+        assert!(
+            !hlc.is_before(&after_first),
+            "HLC must not decrease under backward wall-clock skew: got {:?} < {:?}",
+            hlc,
+            after_first
+        );
+        assert_eq!(hlc.wall_ms, 1_000, "wall_ms must not drop below last seen");
+        // Counter must have advanced (same wall_ms bucket).
+        assert_eq!(hlc.counter, after_first.counter + 1);
+    }
+
+    /// INV-HLC-2: repeated tick_local calls produce a strictly increasing sequence
+    /// when the wall clock is non-decreasing.
+    #[test]
+    fn hlc_tick_local_monotonic_increasing_sequence() {
+        let node = NodeId([0xDD; 16]);
+        let mut hlc = Hlc::zero(node);
+        let mut prev = hlc;
+        for ms in [100u64, 100, 100, 200, 200, 300] {
+            hlc.tick_local(ms);
+            assert!(
+                prev.is_before(&hlc) || prev == hlc,
+                "HLC must be non-decreasing across tick_local calls"
+            );
+            assert!(
+                prev.is_before(&hlc),
+                "each tick must strictly advance the HLC"
+            );
+            prev = hlc;
+        }
+    }
+
+    /// INV-HLC-3: merge_remote with a lagging remote (remote.wall < local.wall)
+    /// must not decrease local. Counter still advances by 1.
+    #[test]
+    fn hlc_merge_remote_lagging_peer_advances_counter() {
+        let node_a = NodeId([0xEE; 16]);
+        let node_b = NodeId([0xFF; 16]);
+        let mut local = Hlc {
+            wall_ms: 500,
+            counter: 7,
+            node_id: node_a,
+        };
+        let before = local;
+        let lagging = Hlc {
+            wall_ms: 100, // far behind
+            counter: 999,
+            node_id: node_b,
+        };
+        local.merge_remote(&lagging);
+        assert_eq!(local.wall_ms, 500, "wall must stay at local max");
+        assert_eq!(local.counter, 8, "counter must increment by 1");
+        assert!(before.is_before(&local), "merge must advance the HLC");
+    }
+
+    /// INV-HLC-4: merge_remote equal-wall path must take max(counter) + 1.
+    #[test]
+    fn hlc_merge_remote_equal_wall_takes_max_counter_plus_one() {
+        let node_a = NodeId([0x11; 16]);
+        let node_b = NodeId([0x22; 16]);
+        // Local counter > remote counter.
+        let mut local = Hlc {
+            wall_ms: 300,
+            counter: 10,
+            node_id: node_a,
+        };
+        let remote = Hlc {
+            wall_ms: 300,
+            counter: 5,
+            node_id: node_b,
+        };
+        local.merge_remote(&remote);
+        assert_eq!(local.counter, 11, "equal-wall: must take max(10,5)+1 = 11");
+
+        // Remote counter > local counter.
+        let mut local2 = Hlc {
+            wall_ms: 300,
+            counter: 3,
+            node_id: node_a,
+        };
+        local2.merge_remote(&remote);
+        assert_eq!(local2.counter, 6, "equal-wall: must take max(3,5)+1 = 6");
+    }
+
+    /// INV-HLC-5: `is_before` is total-order transitive.
+    #[test]
+    fn hlc_is_before_transitive() {
+        let node = NodeId([0x33; 16]);
+        let mut a = Hlc::zero(node);
+        a.tick_local(100);
+        let mut b = a;
+        b.tick_local(100);
+        let mut c = b;
+        c.tick_local(200);
+        assert!(a.is_before(&b), "a < b");
+        assert!(b.is_before(&c), "b < c");
+        assert!(a.is_before(&c), "a < c (transitivity)");
+    }
 }

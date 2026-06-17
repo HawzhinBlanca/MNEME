@@ -52,7 +52,8 @@ use std::path::{Path, PathBuf};
 
 /// Upper bound on distinct (key, tier) results held by the session recall cache.
 /// Bounded so a long sweep of unique queries cannot grow it without limit; once
-/// full the slot set is reset rather than evicted one-by-one (deterministic).
+/// full, the **single oldest** entry is evicted (LRU-order) rather than flushing
+/// the entire cache — preserving all warm slots on burst access.
 const RECALL_CACHE_CAP: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,10 +69,17 @@ enum StoreLocalSchemaFailure {
 /// commits a new root (new `preimage_hash`), so a stale `root_hash` invalidates the
 /// whole cache on the next read — a forgotten or superseded entry can never be
 /// served. Only key-index recalls are cached; semantic recalls bypass it.
+///
+/// Eviction strategy: monotonic `generation` counter tracks insertion order.
+/// On overflow the entry with the smallest generation (oldest) is evicted first.
+/// This keeps the other 255 warm entries alive through burst access, unlike the
+/// previous strategy of clearing the entire map on every 256th insertion.
 #[derive(Default)]
 struct RecallSessionCache {
     root_hash: [u8; 32],
-    entries: HashMap<([u8; 32], u8), Vec<Entry>>,
+    /// `(entries, insertion_generation)` per slot.
+    entries: HashMap<([u8; 32], u8), (Vec<Entry>, u64)>,
+    generation: u64,
 }
 
 impl RecallSessionCache {
@@ -79,15 +87,37 @@ impl RecallSessionCache {
         if &self.root_hash != root_hash {
             return None;
         }
-        self.entries.get(key).cloned()
+        self.entries.get(key).map(|(v, _)| v.clone())
     }
 
     fn store(&mut self, root_hash: [u8; 32], key: ([u8; 32], u8), entries: &[Entry]) {
-        if self.root_hash != root_hash || self.entries.len() >= RECALL_CACHE_CAP {
+        // Root changed: entire cache is stale — clear and start fresh.
+        if self.root_hash != root_hash {
             self.entries.clear();
+            self.generation = 0;
             self.root_hash = root_hash;
         }
-        self.entries.insert(key, entries.to_vec());
+        // Already cached under this root: refresh generation without eviction.
+        if let std::collections::hash_map::Entry::Occupied(mut e) = self.entries.entry(key) {
+            let slot_gen = self.generation;
+            self.generation = self.generation.wrapping_add(1);
+            e.insert((entries.to_vec(), slot_gen));
+            return;
+        }
+        // At capacity: evict the single oldest entry instead of flushing all.
+        if self.entries.len() >= RECALL_CACHE_CAP {
+            let oldest = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, slot_gen))| *slot_gen)
+                .map(|(k, _)| *k);
+            if let Some(old_key) = oldest {
+                self.entries.remove(&old_key);
+            }
+        }
+        let slot_gen = self.generation;
+        self.generation = self.generation.wrapping_add(1);
+        self.entries.insert(key, (entries.to_vec(), slot_gen));
     }
 }
 
@@ -1157,5 +1187,112 @@ fn index_err(e: mneme_index::IndexError) -> MnemeError {
         mneme_index::IndexError::DuplicateObject | mneme_index::IndexError::ObjectNotIndexed => {
             MnemeError::IndexPathInvalid
         }
+    }
+}
+
+#[cfg(test)]
+mod recall_session_cache_tests {
+    use super::*;
+    use mneme_core::object::{MemoryKind, ObjectRecord};
+
+    fn root(seed: u8) -> [u8; 32] {
+        [seed; 32]
+    }
+    /// Build a unique cache key from an index without risking u8 overflow.
+    /// Uses the high byte of the key array as the index byte and tier=0.
+    fn idx_key(i: usize) -> ([u8; 32], u8) {
+        let mut arr = [0u8; 32];
+        arr[0] = (i >> 8) as u8;
+        arr[1] = (i & 0xFF) as u8;
+        (arr, 0u8)
+    }
+    fn entry_for(seed: u8) -> Entry {
+        Entry {
+            id: mneme_core::ObjectId([seed; 32]),
+            record: ObjectRecord::fixture(MemoryKind::Working),
+            plaintext: vec![seed],
+        }
+    }
+
+    #[test]
+    fn lru_evicts_only_oldest_on_overflow() {
+        let mut cache = RecallSessionCache::default();
+        let r = root(0xAA);
+
+        // Fill to capacity.
+        for i in 0..RECALL_CACHE_CAP {
+            cache.store(r, idx_key(i), &[entry_for(0)]);
+        }
+        assert_eq!(cache.entries.len(), RECALL_CACHE_CAP);
+        // idx_key(0) is oldest — adding one more (distinct key) must evict it.
+        let new_key = idx_key(RECALL_CACHE_CAP); // i = 256, always unique
+        cache.store(r, new_key, &[entry_for(1)]);
+        assert_eq!(cache.entries.len(), RECALL_CACHE_CAP);
+        // Oldest slot gone.
+        assert!(
+            cache.lookup(&r, &idx_key(0)).is_none(),
+            "oldest must be evicted"
+        );
+        // New entry and slot 1 survive.
+        assert!(
+            cache.lookup(&r, &new_key).is_some(),
+            "new entry must survive"
+        );
+        assert!(
+            cache.lookup(&r, &idx_key(1)).is_some(),
+            "slot 1 must survive"
+        );
+    }
+
+    #[test]
+    fn hot_key_survives_after_refresh() {
+        let mut cache = RecallSessionCache::default();
+        let r = root(0xBB);
+
+        // Insert idx_key(0) first — lowest generation.
+        cache.store(r, idx_key(0), &[entry_for(0)]);
+        // Fill remaining slots.
+        for i in 1..RECALL_CACHE_CAP {
+            cache.store(r, idx_key(i), &[entry_for(0)]);
+        }
+        // Refresh idx_key(0) — now has highest generation.
+        cache.store(r, idx_key(0), &[entry_for(0)]);
+        // Adding one more (unique) should evict idx_key(1) (now oldest), NOT idx_key(0).
+        cache.store(r, idx_key(RECALL_CACHE_CAP), &[entry_for(1)]);
+        assert!(
+            cache.lookup(&r, &idx_key(0)).is_some(),
+            "hot key(0) must survive"
+        );
+        assert!(
+            cache.lookup(&r, &idx_key(1)).is_none(),
+            "key(1) should be evicted"
+        );
+    }
+
+    #[test]
+    fn root_rotation_clears_all_entries() {
+        let mut cache = RecallSessionCache::default();
+        let r1 = root(0xC1);
+        let r2 = root(0xC2);
+        for i in 0..10usize {
+            cache.store(r1, idx_key(i), &[entry_for(0)]);
+        }
+        // New root wipes all old entries.
+        cache.store(r2, idx_key(0xDE), &[entry_for(1)]);
+        assert_eq!(cache.entries.len(), 1);
+        assert!(cache.lookup(&r1, &idx_key(0)).is_none());
+        assert!(cache.lookup(&r2, &idx_key(0xDE)).is_some());
+    }
+
+    #[test]
+    fn re_inserting_existing_key_does_not_grow_map() {
+        let mut cache = RecallSessionCache::default();
+        let r = root(0xDD);
+        cache.store(r, idx_key(1), &[entry_for(1)]);
+        cache.store(r, idx_key(1), &[entry_for(2)]); // same key, updated payload
+        assert_eq!(cache.entries.len(), 1);
+        // Content should be the updated payload.
+        let got = cache.lookup(&r, &idx_key(1)).unwrap();
+        assert_eq!(got[0].plaintext, vec![2u8]);
     }
 }

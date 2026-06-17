@@ -282,3 +282,72 @@ pub fn encode_context_set_lock_sidecar(proof: &ContextSetLockProof) -> Result<Ve
 pub fn decode_context_set_lock_sidecar(bytes: &[u8]) -> Result<ContextSetLockProof, MnemeError> {
     from_bytes_strict(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_core::ObjectId;
+
+    fn oid(n: u8) -> ObjectId {
+        ObjectId([n; 32])
+    }
+
+    /// CTX-LOCK-1: prove + verify roundtrip for a single entry.
+    #[test]
+    fn prove_verify_roundtrip_single_entry() {
+        let entries = vec![oid(0x01)];
+        let proof = prove_context_set_lock(&entries).expect("prove must succeed");
+        verify_context_set_lock(&proof, &entries)
+            .expect("fresh proof must verify for same entry set");
+    }
+
+    /// CTX-LOCK-2: prove + verify roundtrip for multiple entries.
+    #[test]
+    fn prove_verify_roundtrip_multiple_entries() {
+        let entries = vec![oid(0xAA), oid(0xBB), oid(0xCC)];
+        let proof = prove_context_set_lock(&entries).expect("prove must succeed");
+        verify_context_set_lock(&proof, &entries)
+            .expect("fresh proof must verify for same multi-entry set");
+    }
+
+    /// CTX-LOCK-3: empty entry set is rejected by sum_set_commit (fail-closed).
+    #[test]
+    fn sum_set_commit_rejects_empty_entries() {
+        let err = sum_set_commit(&[]);
+        assert!(err.is_err(), "empty entry set must be rejected");
+    }
+
+    /// CTX-LOCK-4: tampered set_commit is rejected by verify_context_set_lock (fail-closed).
+    #[test]
+    fn verify_rejects_tampered_set_commit() {
+        let entries = vec![oid(0x10), oid(0x20)];
+        let mut proof = prove_context_set_lock(&entries).expect("prove");
+        proof.set_commit[0] ^= 0xFF; // tamper
+        assert!(
+            verify_context_set_lock(&proof, &entries).is_err(),
+            "tampered set_commit must be rejected"
+        );
+    }
+
+    /// CTX-LOCK-5: sidecar encode/decode roundtrip preserves proof fields.
+    #[test]
+    fn sidecar_encode_decode_roundtrip() {
+        let entries = vec![oid(0x42)];
+        let proof = prove_context_set_lock(&entries).expect("prove");
+        let bytes = encode_context_set_lock_sidecar(&proof).expect("sidecar encode");
+        let decoded = decode_context_set_lock_sidecar(&bytes).expect("sidecar decode");
+        assert_eq!(decoded.set_commit, proof.set_commit);
+        assert_eq!(decoded.context_commit, proof.context_commit);
+        assert_eq!(decoded.proof_bytes.len(), CONTEXT_SET_LOCK_PROOF_LEN);
+    }
+
+    /// CTX-LOCK-6: hash_entry_scalar is deterministic and domain-separated.
+    #[test]
+    fn hash_entry_scalar_deterministic_and_distinct() {
+        let s1 = hash_entry_scalar(&oid(0x01));
+        let s2 = hash_entry_scalar(&oid(0x01));
+        assert_eq!(s1, s2, "hash_entry_scalar must be deterministic");
+        let s3 = hash_entry_scalar(&oid(0x02));
+        assert_ne!(s1, s3, "different entries must yield different scalars");
+    }
+}

@@ -168,6 +168,15 @@ impl SemanticIndex {
             })
             .collect::<Result<_, IndexError>>()?;
 
+        let mut candidates_embeddings = Vec::with_capacity(candidates.len());
+        for (candidate_id, _, _) in &candidates {
+            let entry = self
+                .entries
+                .get(candidate_id.as_bytes())
+                .ok_or(IndexError::ObjectNotIndexed)?;
+            candidates_embeddings.push(entry.embedding.clone());
+        }
+
         let vo = VerificationObject {
             nodes,
             candidates,
@@ -175,6 +184,7 @@ impl SemanticIndex {
             procedure_id: procedure_id(proc),
             query_commit: query.commit(),
             result_ids,
+            candidates_embeddings: Some(candidates_embeddings),
         };
         Ok((vo.result_ids.clone(), vo))
     }
@@ -217,6 +227,15 @@ impl SemanticIndex {
             nodes.push((commit, path));
             leaf_indices.push(i);
         }
+        let mut candidates_embeddings = Vec::with_capacity(candidates.len());
+        for (candidate_id, _, _) in &candidates {
+            let entry = self
+                .entries
+                .get(candidate_id.as_bytes())
+                .ok_or(IndexError::ObjectNotIndexed)?;
+            candidates_embeddings.push(entry.embedding.clone());
+        }
+
         let vo = VerificationObject {
             nodes,
             candidates,
@@ -224,6 +243,7 @@ impl SemanticIndex {
             procedure_id: procedure_id(proc),
             query_commit: query.commit(),
             result_ids,
+            candidates_embeddings: Some(candidates_embeddings),
         };
         Ok((visited, vo))
     }
@@ -238,7 +258,7 @@ impl SemanticIndex {
     ) -> Result<SemanticRecallReceipt, IndexError> {
         use crate::receipt::ZkannAttachment;
         let (visited_order, vo) = match level {
-            mneme_core::RetrievalProofLevel::ExactDominance => {
+            mneme_core::RetrievalProofLevel::ProcedureFaithfulTopK => {
                 let (ids, vo) = self.search_deterministic(proc, query)?;
                 (ids, vo)
             }

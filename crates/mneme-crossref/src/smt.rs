@@ -262,3 +262,108 @@ pub fn root_from_entries(entries: &[([u8; 32], [u8; 32])]) -> [u8; 32] {
     let map: BTreeMap<_, _> = entries.iter().copied().collect();
     hash_subtree(collect_leaves(&map), 0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn k(n: u8) -> [u8; 32] {
+        let mut v = [0u8; 32];
+        v[0] = n;
+        v
+    }
+    fn val(n: u8) -> [u8; 32] {
+        let mut v = [0xFFu8; 32];
+        v[0] = n;
+        v
+    }
+
+    /// SMT-REF-1: Membership proof roundtrip — prove then verify succeeds.
+    #[test]
+    fn membership_proof_roundtrip_succeeds() {
+        let mut smt = SparseMerkleTree::new();
+        smt.upsert(k(1), val(1));
+        smt.rebuild_root_cache();
+        let proof = smt
+            .prove_membership(k(1))
+            .expect("key exists, proof must succeed");
+        assert_eq!(
+            proof.path.len(),
+            TREE_DEPTH,
+            "auth path must be TREE_DEPTH long"
+        );
+        SparseMerkleTree::verify_membership(&proof).expect("fresh proof must verify");
+    }
+
+    /// SMT-REF-2: Tampered membership proof root is rejected.
+    #[test]
+    fn membership_proof_tampered_root_rejected() {
+        let mut smt = SparseMerkleTree::new();
+        smt.upsert(k(2), val(2));
+        smt.rebuild_root_cache();
+        let mut proof = smt.prove_membership(k(2)).unwrap();
+        proof.root[0] ^= 0x01; // tamper the committed root
+        assert!(
+            SparseMerkleTree::verify_membership(&proof).is_err(),
+            "tampered root must be rejected"
+        );
+    }
+
+    /// SMT-REF-3: Non-membership proof for a key never inserted succeeds.
+    #[test]
+    fn non_membership_proof_for_absent_key_succeeds() {
+        let mut smt = SparseMerkleTree::new();
+        smt.upsert(k(5), val(5)); // insert a different key
+        smt.rebuild_root_cache();
+        let proof = smt
+            .prove_non_membership(k(99))
+            .expect("absent key must produce non-membership proof");
+        SparseMerkleTree::verify_non_membership(&proof).expect("non-membership proof must verify");
+    }
+
+    /// SMT-REF-4: prove_non_membership rejects a live key — fail-closed invariant.
+    #[test]
+    fn prove_non_membership_rejects_live_key() {
+        let mut smt = SparseMerkleTree::new();
+        smt.upsert(k(7), val(7));
+        smt.rebuild_root_cache();
+        assert!(
+            smt.prove_non_membership(k(7)).is_err(),
+            "live key must not produce a non-membership proof"
+        );
+    }
+
+    /// SMT-REF-5: empty_root() is deterministic and non-zero.
+    #[test]
+    fn empty_root_is_deterministic_and_nonzero() {
+        let r1 = empty_root();
+        let r2 = empty_root();
+        assert_eq!(r1, r2);
+        assert_ne!(r1, [0u8; 32]);
+    }
+
+    /// SMT-REF-6: fold_auth_path rejects wrong-length auth path.
+    #[test]
+    fn fold_auth_path_rejects_wrong_length() {
+        let leaf = [0u8; 32];
+        let key = k(1);
+        let short_path = vec![[0u8; 32]; TREE_DEPTH - 1]; // one too short
+        assert!(
+            fold_auth_path(leaf, &key, &short_path).is_err(),
+            "auth path with wrong length must be rejected"
+        );
+    }
+
+    /// SMT-REF-7: prove_membership fails for tombstoned key.
+    #[test]
+    fn prove_membership_rejects_tombstoned_key() {
+        let mut smt = SparseMerkleTree::new();
+        smt.upsert(k(3), val(3));
+        smt.upsert(k(3), TOMBSTONE); // overwrite with tombstone
+        smt.rebuild_root_cache();
+        assert!(
+            smt.prove_membership(k(3)).is_err(),
+            "tombstoned key must not yield a membership proof"
+        );
+    }
+}

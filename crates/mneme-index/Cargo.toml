@@ -49,9 +49,6 @@ commitment_binding = []
 # The feature name reflects the actual backend. The `B3_DEFERRAL_STATUS` string in
 # `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral.
 pedersen_schnorr_zk = ["dep:curve25519-dalek", "dep:rand"]
-# Deprecated compatibility alias for pre-rename operator/CI commands. This enables the
-# same honest Pedersen+Schnorr backend; it does not add or claim Plonky2/FRI.
-plonky2_prover = ["pedersen_schnorr_zk"]
 # Phase IV-A research seam (UNIMPLEMENTED). Off by default; wired into NO recall/receipt/
 # verify path. The entry point returns UnsupportedVersion so it can never fabricate a proof.
 # Proves NOTHING — not exact-NN, not Plonky2/FRI, not a SNARK. Pure research placeholder
@@ -88,8 +85,8 @@ path = "tests/context_set_lock.rs"
 required-features = ["context_set_lock"]
 
 [[test]]
-name = "zkann_exact_dominance"
-path = "tests/zkann_exact_dominance.rs"
+name = "zkann_procedure_faithful_topk"
+path = "tests/zkann_procedure_faithful_topk.rs"
 
 [dev-dependencies]
 hex.workspace = true

@@ -96,6 +96,42 @@ fn mst_diff_detects_peer_only_key() {
     let _ = local;
 }
 
+/// When both SMT roots are identical the leaf sets are byte-identical — the
+/// short-circuit must return an empty diff without iterating any leaves.
+#[test]
+fn mst_diff_identical_roots_returns_empty() {
+    let mut a = SparseMerkleTree::new();
+    let mut b = SparseMerkleTree::new();
+    for i in 0u8..16 {
+        a.upsert([i; 32], [i.wrapping_add(1); 32]);
+        b.upsert([i; 32], [i.wrapping_add(1); 32]);
+    }
+    assert_eq!(a.root(), b.root(), "precondition: roots must match");
+    let diff = mst_diff(&a, &b);
+    assert!(diff.peer_only_keys.is_empty());
+    assert!(diff.local_only_keys.is_empty());
+    assert!(diff.conflicting_keys.is_empty());
+}
+
+/// Diverged trees (different roots) must still produce a correct diff even when
+/// one side tombstones a key the other holds live.
+#[test]
+fn mst_diff_diverged_roots_produces_correct_diff() {
+    let mut local = SparseMerkleTree::new();
+    let mut peer = SparseMerkleTree::new();
+    let key_a = [0xAA; 32];
+    let key_b = [0xBB; 32];
+    local.upsert(key_a, [1u8; 32]);
+    peer.upsert(key_a, [1u8; 32]);
+    // Only peer has key_b.
+    peer.upsert(key_b, [2u8; 32]);
+    assert_ne!(local.root(), peer.root(), "precondition: roots must differ");
+    let diff = mst_diff(&local, &peer);
+    assert_eq!(diff.peer_only_keys, vec![key_b]);
+    assert!(diff.conflicting_keys.is_empty());
+    assert!(diff.local_only_keys.is_empty());
+}
+
 #[test]
 fn crdt_lww_identity_picks_newer_hlc() {
     let w = writer_hash(&[0x22; 32]);

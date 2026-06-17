@@ -277,4 +277,35 @@ mod tests {
             "only the debug-only helper may inspect MNEME_NO_FSYNC"
         );
     }
+
+    /// ATOMIC-1: check_no_incomplete rejects a store with an incomplete marker present.
+    /// This is the crash-recovery fail-closed invariant: a store interrupted mid-write
+    /// must never silently open as if nothing happened.
+    #[test]
+    fn check_no_incomplete_fails_while_marker_present() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let store = dir.path();
+        super::begin_incomplete(store).expect("begin_incomplete");
+        let result = super::check_no_incomplete(store);
+        assert_eq!(
+            result.unwrap_err(),
+            mneme_core::MnemeError::IncompleteTransaction,
+            "check_no_incomplete must fail closed while marker is present"
+        );
+        super::end_incomplete(store).expect("end_incomplete");
+        assert!(
+            super::check_no_incomplete(store).is_ok(),
+            "check_no_incomplete must succeed after end_incomplete clears the marker"
+        );
+    }
+
+    /// ATOMIC-2: check_no_incomplete succeeds on a freshly created store with no marker.
+    #[test]
+    fn check_no_incomplete_succeeds_on_clean_store() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        assert!(
+            super::check_no_incomplete(dir.path()).is_ok(),
+            "check_no_incomplete must succeed on a clean store"
+        );
+    }
 }

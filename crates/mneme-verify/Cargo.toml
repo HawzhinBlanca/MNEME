@@ -23,3 +23,5 @@ mneme-core.workspace = true
 mneme-index.workspace = true
 mneme-root.workspace = true
 mneme-store = { path = "../mneme-store" }
+rand.workspace = true
+

@@ -13,7 +13,7 @@ other file.
 
 ## What is MNEME
 
-Verifiable memory substrate for AI agents. Every recall must carry a receipt that verifies against a signed root under a declared retrieval procedure — if verification fails for any reason, the read **fails closed** and the memory never enters context. The system proves integrity, provenance, and authorization; it explicitly **does not** prove semantic truth or exact nearest-neighbor optimality.
+Fail-closed verifiable recall for AI-agent memory. Every recall must carry a receipt that verifies against a signed root — if verification fails for any reason, the read **fails closed** and the memory never enters context. The 474-line verifier TCB (`mneme-verify`) proves integrity, provenance, and authorization for key-index recall. Semantic (vector) recall verification exists behind the `experimental_semantic` feature and delegates ~1,420 lines in `mneme-index/src/{verify,zkann,beacon_spot_check}.rs` that are **outside** the budgeted TCB. The system explicitly **does not** prove semantic truth or exact nearest-neighbor optimality.
 
 ## Build and test commands
 
@@ -107,7 +107,7 @@ The `mneme-crossref` crate is an independent reimplementation of the Appendix B 
 ## Honesty boundary (must be preserved in all code and docs)
 
 1. **Authenticated ≠ true.** Signed entries verify even when content is false. MNEME proves integrity, provenance, authorization — not truth.
-2. **Verifiable retrieval proves procedure-faithfulness, not exact nearest neighbors.**
+2. **Verifiable retrieval (§3) proves procedure-faithfulness, not exact nearest neighbors.**
    For Phase I `ExactDominance`, the current v1 verification object proves
    membership/completeness plus top-k over prover-asserted distances for the
    authenticated candidate set; true top-k ranking is not proven and it is not

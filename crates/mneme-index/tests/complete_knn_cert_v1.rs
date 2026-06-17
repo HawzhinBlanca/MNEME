@@ -59,6 +59,7 @@ fn build_complete_topk_cert() -> (Vec<u8>, TrustConfig) {
             procedure_id: [0xee; 32],
             query_commit: [0x11; 32],
             result_ids: (0..returned_len).map(|_| ObjectId([0x22; 32])).collect(),
+            candidates_embeddings: None,
         },
     );
     receipt.zkann = Some(ZkannAttachment {

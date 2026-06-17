@@ -164,7 +164,7 @@ discipline — `TCB_LINE_BUDGET`, fail-closed — scaled to cognition.)
 
 ## 6. Program plan — 3 phases, ~12 months
 
-**Phase I (months 0–3): Verifiable Retrieval + Certificate v1**
+**Phase I (months 0–3): Verifiable Retrieval (§3) + Certificate v1**
 - Cryptography: ship **zkANN** authenticated dominance evidence over the existing HNSW/flat paths; true distance-recomputed top-k remains a later PIOP target. *Exit:* forged reordered/truncated candidate sets fail closed with typed errors; <X ms prove at 10k.
 - Kernel: bi-temporal ledger + `recall_verified_at`; poison-evidence provenance-scoped recall.
 - Verifier: **Cognition Certificate v1** schema (memory + retrieval + time), offline verifier SDK.
@@ -193,7 +193,7 @@ tries to forge each proof, nothing ships until forgeries fail closed.
 **Genuinely first-time:** the **Context-Consumption Proof** (process 4) and its fusion of
 verifiable memory + proven retrieval + attested execution into **one portable cognition
 certificate with a formally-verified verifier**. No system in 2026 binds *what an opaque model
-actually consumed* to a verifiable memory substrate. If it works at production reliability with
+actually consumed* to a verifiable memory substrate (§3). If it works at production reliability with
 a machine-checked TCB, it is a foundational accountability primitive for AI — the kind of result
 standards bodies build on.
 

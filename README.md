@@ -1,6 +1,6 @@
 # MNEME
 
-Verifiable memory substrate for AI agents — fail-closed reads, content-addressed storage, signed roots, and typed verification receipts.
+Fail-closed verifiable recall for AI-agent memory — every read carries an offline receipt proving integrity, provenance, and authorization against a signed root.
 
 See [MNEME_BLUEPRINT.md](MNEME_BLUEPRINT.md) for the full build specification. Contributing and security: [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md). The **2.0 multi-agent upgrade** task list is in [MNEME_2.0_TASK_SPEC.md](MNEME_2.0_TASK_SPEC.md). Program phases and honest completion status: [ROADMAP.md](docs/ROADMAP.md), [PROGRAM_STATUS.md](docs/phase-program/PROGRAM_STATUS.md); gated CI: `scripts/ci/phase-program-gate.sh`.
 
@@ -18,13 +18,13 @@ MNEME makes two limits explicit everywhere this project speaks to users:
 
 1. **Authenticated ≠ true.** A correctly signed entry from an authorized writer verifies even when its *content* is false. MNEME proves integrity, provenance, and authorization — not truth.
 
-2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I `ExactDominance` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven, and returned items are not proven to be the true nearest neighbors.
+2. **Verifiable retrieval (§3) proves procedure-faithfulness, not optimality.** A recall receipt shows the declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I `ProcedureFaithfulTopK` proves membership/completeness plus top-k over prover-asserted distances; true top-k ranking is not proven, and returned items are not proven to be the true nearest neighbors.
 
 These limits appear in `MnemeError` messages (e.g. `ProcedureMismatch`, `BelowTierPolicy`, `ZkProofInvalid`), MCP tool descriptions (`mneme-mcp/src/honesty.rs`), and verifier exports (`HONESTY_PROCEDURE`, `BINDING_HONESTY`).
 
 The opt-in `commitment_binding` feature ships a **tagged BLAKE3 binding envelope only** — it binds `(object_id, embedding_commit)` to a semantic-leaf commitment and rejects forgeries via `ZkProofInvalid`. It is **not** zero-knowledge, **not** a SNARK, and **not** Plonky2. (A legacy `zk = ["commitment_binding"]` Cargo feature alias was removed because it implied zero-knowledge, which the BLAKE3 envelope is not.)
 
-**Transparent ZK retrieval** (`pedersen_schnorr_zk` Cargo feature, off by default) is the **12-month / MNEME 2.0-B** path: a real transparent Pedersen + Schnorr equality-of-openings NIZK over the Ristretto group (Fiat–Shamir, no trusted setup) on stable Rust — **not** Plonky2, **not** FRI, **not** a SNARK. The feature was previously mis-named `plonky2_prover` and has been renamed for honesty; `plonky2_prover` remains only as a deprecated compatibility alias for old commands and enables the same Pedersen/Schnorr backend. The `B3_DEFERRAL_STATUS` string in `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral. When enabled, semantic `recall_receipt` may attach a real zero-knowledge proof and `verify_semantic_recall` verifies it via `mneme-index` (verifier TCB unchanged). v0/90-day default remains ADS + optional BLAKE3 `commitment_binding` only.
+**Transparent ZK retrieval** (`pedersen_schnorr_zk` Cargo feature, off by default) is an **experimental, deferred 12-month / MNEME 2.0-B** path: a real transparent Pedersen + Schnorr equality-of-openings NIZK over the Ristretto group (Fiat–Shamir, no trusted setup) on stable Rust — **not** Plonky2, **not** FRI, **not** a SNARK. The feature was previously mis-named `plonky2_prover` and has been renamed for honesty (the deprecated alias has been fully removed). The `B3_DEFERRAL_STATUS` string in `pedersen_schnorr_zk.rs` records the Plonky2/FRI SNARK deferral. When enabled, semantic `recall_receipt` may attach a real zero-knowledge proof and `verify_semantic_recall` verifies it via `mneme-index` (verifier TCB unchanged). v0/90-day default remains ADS + optional BLAKE3 `commitment_binding` only.
 
 Design and API docs must never imply semantic truth, exact-NN guarantees, or SNARK/Plonky2 verification for the v0 binding path.
 

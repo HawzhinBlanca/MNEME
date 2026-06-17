@@ -36,7 +36,15 @@ pub struct MstDiff {
 }
 
 /// Diff key-index SMT leaf sets (order-independent).
+///
+/// Fast path (O(1)): if both roots are identical the leaf sets are byte-identical
+/// by the collision-resistance of the SMT hash — return an empty diff immediately
+/// without materialising any leaf vectors.
 pub fn mst_diff(local: &SparseMerkleTree, peer: &SparseMerkleTree) -> MstDiff {
+    // Short-circuit: matching roots ⇒ identical leaf sets (sound by SMT hash-binding).
+    if local.root() == peer.root() {
+        return MstDiff::default();
+    }
     let local_keys: BTreeSet<_> = local.iter_leaves().map(|(k, _)| k).collect();
     let peer_keys: BTreeSet<_> = peer.iter_leaves().map(|(k, _)| k).collect();
     let mut diff = MstDiff::default();
@@ -73,6 +81,22 @@ pub fn apply_peer_snapshot(
     peer: &PeerSnapshot,
     trust: &dyn WriterTrust,
 ) -> Result<MergeApplyResult, MnemeError> {
+    // Fast path: matching SMT roots ⇒ identical key-index state — nothing to merge.
+    // Also avoids tombstone_keys() O(n) iteration and all downstream work.
+    if local_key_index.root() == peer.key_index.root() {
+        // Still import peer object_keys mappings for any live keys we share (the
+        // OR-set import at line ~171) but skip the entire key-index diff/apply loop.
+        let result = import_peer_object_keys_only(
+            local_key_to_object,
+            local_object_keys,
+            local_objects,
+            local_dag,
+            peer,
+            trust,
+        )?;
+        return Ok(result);
+    }
+
     let diff = mst_diff(local_key_index, &peer.key_index);
     let mut result = MergeApplyResult::default();
 
@@ -177,6 +201,40 @@ fn authorize_writer(bytes: &[u8], trust: &dyn WriterTrust) -> Result<(), MnemeEr
     Ok(())
 }
 
+/// Fast-path helper for the root-identity short-circuit: import only the OR-set
+/// alternate object mappings from a peer whose SMT root already matches local.
+/// The key-index and tombstone loops are skipped entirely — only the OR-set
+/// alternate objects (peer object_keys not yet in local_object_keys) are added.
+fn import_peer_object_keys_only(
+    local_key_to_object: &mut HashMap<[u8; 32], [u8; 32]>,
+    local_object_keys: &mut HashMap<[u8; 32], LogicalKey>,
+    local_objects: &mut HashMap<[u8; 32], Vec<u8>>,
+    local_dag: &mut DagIndex,
+    peer: &PeerSnapshot,
+    trust: &dyn WriterTrust,
+) -> Result<MergeApplyResult, MnemeError> {
+    let mut result = MergeApplyResult::default();
+    for (peer_obj_id, peer_lk) in &peer.object_keys {
+        let key_hash = peer_lk.hash();
+        if local_key_to_object.contains_key(&key_hash) {
+            let mut has_object = local_objects.contains_key(peer_obj_id);
+            if !has_object {
+                if let Some(peer_bytes) = peer.objects.get(peer_obj_id) {
+                    verify_object_bytes(peer_obj_id, peer_bytes)?;
+                    authorize_writer(peer_bytes, trust)?;
+                    ingest_object_bytes(local_objects, local_dag, *peer_obj_id, peer_bytes)?;
+                    result.objects_inserted += 1;
+                    has_object = true;
+                }
+            }
+            if has_object && !local_object_keys.contains_key(peer_obj_id) {
+                local_object_keys.insert(*peer_obj_id, peer_lk.clone());
+            }
+        }
+    }
+    Ok(result)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn ingest_object(
     key_index: &mut SparseMerkleTree,
@@ -224,4 +282,125 @@ pub fn peer_object_ids_to_fetch(
         .filter(|id| !local.contains_key(*id))
         .copied()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_smt::SparseMerkleTree;
+
+    fn key(n: u8) -> [u8; 32] {
+        let mut k = [0u8; 32];
+        k[0] = n;
+        k
+    }
+
+    fn obj(n: u8) -> [u8; 32] {
+        let mut v = [0xFFu8; 32];
+        v[0] = n;
+        v
+    }
+
+    /// MERGE-1: mst_diff O(1) fast-path — identical roots produce an empty diff.
+    /// This is the most performance-critical correctness invariant: matching roots
+    /// means identical leaf sets by SMT collision resistance. An empty diff must
+    /// have no peer_only, local_only, or conflicting keys.
+    #[test]
+    fn mst_diff_identical_roots_returns_empty_diff() {
+        let mut smt = SparseMerkleTree::new();
+        smt.upsert(key(1), obj(1));
+        // Same tree on both sides — roots match.
+        let diff = mst_diff(&smt, &smt);
+        assert!(
+            diff.peer_only_keys.is_empty(),
+            "identical roots: peer_only must be empty"
+        );
+        assert!(
+            diff.local_only_keys.is_empty(),
+            "identical roots: local_only must be empty"
+        );
+        assert!(
+            diff.conflicting_keys.is_empty(),
+            "identical roots: conflicting must be empty"
+        );
+    }
+
+    /// MERGE-2: A key only in the peer appears in peer_only_keys.
+    #[test]
+    fn mst_diff_detects_peer_only_key() {
+        let local = SparseMerkleTree::new();
+        let mut peer = SparseMerkleTree::new();
+        peer.upsert(key(42), obj(42));
+        let diff = mst_diff(&local, &peer);
+        assert!(
+            diff.peer_only_keys.contains(&key(42)),
+            "peer-only key must appear in peer_only_keys"
+        );
+        assert!(diff.local_only_keys.is_empty());
+        assert!(diff.conflicting_keys.is_empty());
+    }
+
+    /// MERGE-3: A key only in local appears in local_only_keys.
+    #[test]
+    fn mst_diff_detects_local_only_key() {
+        let mut local = SparseMerkleTree::new();
+        local.upsert(key(7), obj(7));
+        let peer = SparseMerkleTree::new();
+        let diff = mst_diff(&local, &peer);
+        assert!(
+            diff.local_only_keys.contains(&key(7)),
+            "local-only key must appear in local_only_keys"
+        );
+        assert!(diff.peer_only_keys.is_empty());
+        assert!(diff.conflicting_keys.is_empty());
+    }
+
+    /// MERGE-4: Same key mapping to different objects → conflicting_keys.
+    /// This is the version-conflict detection path: both sides have the key
+    /// but point to different object_ids.
+    #[test]
+    fn mst_diff_detects_conflicting_key() {
+        let mut local = SparseMerkleTree::new();
+        local.upsert(key(3), obj(10)); // local version
+        let mut peer = SparseMerkleTree::new();
+        peer.upsert(key(3), obj(20)); // peer version — different object
+        let diff = mst_diff(&local, &peer);
+        assert!(
+            diff.conflicting_keys.contains(&key(3)),
+            "differing values for same key must be conflicting"
+        );
+        assert!(diff.peer_only_keys.is_empty());
+        assert!(diff.local_only_keys.is_empty());
+    }
+
+    /// MERGE-5: peer_object_ids_to_fetch excludes objects already held locally.
+    #[test]
+    fn peer_object_ids_to_fetch_excludes_locally_held() {
+        let mut local: HashMap<[u8; 32], Vec<u8>> = HashMap::new();
+        local.insert(obj(1), b"local-copy".to_vec()); // already have this
+
+        let mut peer = PeerSnapshot::default();
+        peer.objects.insert(obj(1), b"peer-copy".to_vec()); // local has it
+        peer.objects.insert(obj(2), b"new-object".to_vec()); // local needs it
+
+        let to_fetch = peer_object_ids_to_fetch(&local, &peer);
+        assert!(
+            !to_fetch.contains(&obj(1)),
+            "locally held object must not be requested"
+        );
+        assert!(
+            to_fetch.contains(&obj(2)),
+            "missing object must be requested"
+        );
+        assert_eq!(to_fetch.len(), 1);
+    }
+
+    /// MERGE-6: MstDiff::default has all-empty vecs.
+    #[test]
+    fn mst_diff_default_is_all_empty() {
+        let d = MstDiff::default();
+        assert!(d.peer_only_keys.is_empty());
+        assert!(d.local_only_keys.is_empty());
+        assert!(d.conflicting_keys.is_empty());
+    }
 }

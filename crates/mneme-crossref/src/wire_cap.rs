@@ -342,3 +342,174 @@ fn parse_fixed16(v: &CborValue) -> Result<[u8; 16], CrossrefError> {
         .try_into()
         .map_err(|_| CrossrefError::SchemaDrift)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn hlc(wall_ms: u64, counter: u32) -> Hlc {
+        Hlc {
+            wall_ms,
+            counter,
+            node_id: [0u8; 16],
+        }
+    }
+
+    fn make_cap_no_sig(issuer: [u8; 32], subject: [u8; 32]) -> Capability {
+        Capability {
+            issuer,
+            subject,
+            namespaces: vec!["ns1".into()],
+            kinds: vec![1, 2],
+            tier_max: 3,
+            tier_default: 1,
+            permissions: 0xFF,
+            caveats: vec![],
+            signature: vec![0u8; SIG_LEN], // placeholder — not used in most tests
+        }
+    }
+
+    /// CAP-1: Hlc::is_before orders by (wall_ms, counter, node_id).
+    #[test]
+    fn hlc_is_before_ordering() {
+        let a = hlc(100, 0);
+        let b = hlc(200, 0);
+        let c = hlc(100, 1);
+        assert!(a.is_before(&b), "lower wall_ms must be before");
+        assert!(!b.is_before(&a), "is_before must not hold in reverse");
+        assert!(
+            a.is_before(&c),
+            "same wall_ms, lower counter must be before"
+        );
+        assert!(!a.is_before(&a), "hlc must not be before itself");
+    }
+
+    /// CAP-2: sig_chain rejects empty or non-multiple-of-64 signature bytes.
+    #[test]
+    fn sig_chain_rejects_bad_length() {
+        let mut cap = make_cap_no_sig([0x01; 32], [0x02; 32]);
+        cap.signature = vec![];
+        assert!(cap.sig_chain().is_err(), "empty signature must be rejected");
+        cap.signature = vec![0u8; 63]; // not a multiple of 64
+        assert!(
+            cap.sig_chain().is_err(),
+            "63-byte signature must be rejected"
+        );
+        cap.signature = vec![0u8; SIG_LEN];
+        assert!(
+            cap.sig_chain().is_ok(),
+            "64-byte signature must produce one-element chain"
+        );
+    }
+
+    /// CAP-3: evaluate_not_after passes before the limit and fails at/after.
+    #[test]
+    fn evaluate_not_after_passes_before_fails_at_or_after() {
+        let limit = hlc(100, 0);
+        let mut cap = make_cap_no_sig([0x01; 32], [0x02; 32]);
+        cap.caveats = vec![Caveat::NotAfter(limit.clone())];
+
+        let before = hlc(50, 0);
+        cap.evaluate_not_after(&before)
+            .expect("before limit must pass");
+
+        let at = hlc(100, 0);
+        assert!(
+            cap.evaluate_not_after(&at).is_err(),
+            "exactly at limit must fail (not strictly before)"
+        );
+
+        let after = hlc(200, 0);
+        assert!(
+            cap.evaluate_not_after(&after).is_err(),
+            "after limit must fail"
+        );
+    }
+
+    /// CAP-4: cap_id_for_caveats is deterministic for the same capability.
+    #[test]
+    fn cap_id_for_caveats_is_deterministic() {
+        let cap = make_cap_no_sig([0xAA; 32], [0xBB; 32]);
+        let id1 = cap.cap_id_for_caveats(0).expect("cap_id must compute");
+        let id2 = cap.cap_id_for_caveats(0).expect("cap_id must compute");
+        assert_eq!(id1, id2, "cap_id_for_caveats must be deterministic");
+        assert_ne!(id1, [0u8; 32], "cap_id must not be all-zeros");
+    }
+
+    /// CAP-5: cap_id_for_caveats differs for different issuer/subject pairs.
+    #[test]
+    fn cap_id_different_issuer_yields_different_id() {
+        let cap1 = make_cap_no_sig([0x01; 32], [0x02; 32]);
+        let cap2 = make_cap_no_sig([0x03; 32], [0x02; 32]);
+        let id1 = cap1.cap_id_for_caveats(0).unwrap();
+        let id2 = cap2.cap_id_for_caveats(0).unwrap();
+        assert_ne!(id1, id2, "different issuers must produce different cap IDs");
+    }
+
+    /// CAP-6: verify_sig_chain succeeds for a properly constructed single-signature capability.
+    #[test]
+    fn verify_sig_chain_succeeds_for_valid_issuer_sig() {
+        let issuer_sk = SigningKey::from_bytes(&[0x11; 32]);
+        let issuer_pk = issuer_sk.verifying_key().to_bytes();
+        let subject_pk = SigningKey::from_bytes(&[0x22; 32])
+            .verifying_key()
+            .to_bytes();
+
+        // Build the capability with a placeholder signature.
+        let mut cap = Capability {
+            issuer: issuer_pk,
+            subject: subject_pk,
+            namespaces: vec!["ns".into()],
+            kinds: vec![1],
+            tier_max: 2,
+            tier_default: 1,
+            permissions: 0x01,
+            caveats: vec![],
+            signature: vec![0u8; SIG_LEN], // placeholder
+        };
+
+        // Compute the cap_id (with 0 caveats, chain length 1 → caveat_count = 0).
+        let cap_id = cap.cap_id_for_caveats(0).expect("cap_id must compute");
+        // Sign the cap_id with the issuer key.
+        let sig: [u8; SIG_LEN] = issuer_sk.sign(&cap_id).to_bytes();
+        cap.signature = sig.to_vec();
+
+        cap.verify_sig_chain()
+            .expect("valid issuer-signed capability must verify");
+    }
+
+    /// CAP-7: verify_sig_chain rejects a tampered cap (changed issuer byte → wrong cap_id).
+    #[test]
+    fn verify_sig_chain_rejects_tampered_capability() {
+        let issuer_sk = SigningKey::from_bytes(&[0x33; 32]);
+        let issuer_pk = issuer_sk.verifying_key().to_bytes();
+        let subject_pk = SigningKey::from_bytes(&[0x44; 32])
+            .verifying_key()
+            .to_bytes();
+
+        let mut cap = Capability {
+            issuer: issuer_pk,
+            subject: subject_pk,
+            namespaces: vec!["ns".into()],
+            kinds: vec![1],
+            tier_max: 2,
+            tier_default: 1,
+            permissions: 0x01,
+            caveats: vec![],
+            signature: vec![0u8; SIG_LEN],
+        };
+
+        let cap_id = cap.cap_id_for_caveats(0).unwrap();
+        let sig: [u8; SIG_LEN] = issuer_sk.sign(&cap_id).to_bytes();
+        cap.signature = sig.to_vec();
+
+        // Tamper: flip one bit in the namespace.
+        cap.namespaces[0] = "TAMPERED".into();
+
+        assert!(
+            cap.verify_sig_chain().is_err(),
+            "tampered capability must fail sig verification"
+        );
+    }
+}

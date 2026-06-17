@@ -156,3 +156,92 @@ pub fn hex32(s: &str) -> Result<[u8; 32], CrossrefError> {
     let bytes = hex::decode(s).map_err(|_| CrossrefError::SchemaDrift)?;
     bytes.try_into().map_err(|_| CrossrefError::SchemaDrift)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_root() -> StoredRoot {
+        StoredRoot {
+            version: 1,
+            dag_head_root: [0x01; 32],
+            key_index_root: [0x02; 32],
+            semantic_commit: [0x03; 32],
+            hlc_max: [0x04; 14],
+            prev_root: [0x05; 32],
+            preimage_hash: [0x00; 32], // to be filled by recompute
+            signature: vec![0u8; 64],
+            sequence: 42,
+        }
+    }
+
+    /// WIRE-ROOT-1: hex32 roundtrips a valid hex string.
+    #[test]
+    fn hex32_roundtrips_valid_hex() {
+        let original = [0xDEu8; 32];
+        let hex_str: String = original.iter().map(|b| format!("{b:02x}")).collect();
+        let decoded = hex32(&hex_str).expect("valid hex must decode");
+        assert_eq!(decoded, original, "hex32 roundtrip must preserve bytes");
+    }
+
+    /// WIRE-ROOT-2: hex32 rejects invalid hex and wrong-length strings.
+    #[test]
+    fn hex32_rejects_invalid_input() {
+        assert!(
+            hex32("not_hex_at_all").is_err(),
+            "non-hex string must be rejected"
+        );
+        // 62 hex chars = 31 bytes — not 32.
+        let short = "aa".repeat(31);
+        assert!(
+            hex32(&short).is_err(),
+            "31-byte hex must be rejected (must be exactly 32)"
+        );
+        // 66 hex chars = 33 bytes — not 32.
+        let long = "bb".repeat(33);
+        assert!(hex32(&long).is_err(), "33-byte hex must be rejected");
+    }
+
+    /// WIRE-ROOT-3: recompute_preimage_hash is deterministic and non-zero.
+    #[test]
+    fn recompute_preimage_hash_deterministic_and_nonzero() {
+        let root = make_root();
+        let h1 = root.recompute_preimage_hash();
+        let h2 = root.recompute_preimage_hash();
+        assert_eq!(h1, h2, "recompute_preimage_hash must be deterministic");
+        assert_ne!(h1, [0u8; 32], "preimage hash must not be all-zeros");
+    }
+
+    /// WIRE-ROOT-4: verify_signature rejects a wrong-length signature (fail-closed).
+    #[test]
+    fn verify_signature_rejects_wrong_length() {
+        let mut root = make_root();
+        let pk = [0x11u8; 32]; // placeholder public key bytes
+
+        root.signature = vec![0u8; 63]; // 63 bytes — not 64
+        assert!(
+            root.verify_signature(&pk).is_err(),
+            "63-byte signature must be rejected"
+        );
+
+        root.signature = vec![0u8; 0]; // empty
+        assert!(
+            root.verify_signature(&pk).is_err(),
+            "empty signature must be rejected"
+        );
+    }
+
+    /// WIRE-ROOT-5: recompute_preimage_hash differs for different root content.
+    #[test]
+    fn recompute_preimage_hash_differs_for_different_roots() {
+        let root1 = make_root();
+        let mut root2 = make_root();
+        root2.dag_head_root = [0xFF; 32]; // change one field
+        let h1 = root1.recompute_preimage_hash();
+        let h2 = root2.recompute_preimage_hash();
+        assert_ne!(
+            h1, h2,
+            "different dag_head_root must produce different preimage hashes"
+        );
+    }
+}

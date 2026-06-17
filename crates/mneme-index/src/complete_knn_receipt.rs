@@ -13,12 +13,7 @@ use mneme_core::{
 /// Dequantize fixed-point components to `R^d` for complete-kNN geometry (same scale as ingest).
 pub fn fixed_point_to_f64(emb: &FixedPointEmbedding) -> Result<Vec<f64>, MnemeError> {
     emb.validate_shape()?;
-    let scale = f64::powi(2.0, i32::from(emb.scale));
-    Ok(emb
-        .components
-        .iter()
-        .map(|&c| f64::from(c) * scale)
-        .collect())
+    Ok(emb.components.iter().map(|&c| f64::from(c)).collect())
 }
 
 /// Build a complete-kNN semantic receipt from committed embeddings (fail-closed).
@@ -80,6 +75,7 @@ pub fn build_complete_topk_receipt(
         procedure_id: procedure_id(proc),
         query_commit: query.commit(),
         result_ids,
+        candidates_embeddings: None,
     };
 
     let mut receipt = SemanticRecallReceipt::new(root_bound, semantic_commit, vo);

@@ -2,7 +2,7 @@
 pub const FLOOR_ATTRIBUTION_HONESTY: &str = "computational online memory checking floor is Ω(log n / log log n) (Dwork–Naor–Rothblum–Vaikuntanathan TCC'09, deterministic non-adaptive); fully general Merkle-matching floor is OPEN";
 pub const FLOOR_GAP_HONESTY: &str =
     "MNEME SMT recall is O(log n) probes — at the floor up to O(log log n); exact match is OPEN";
-pub const EXACT_DOMINANCE_FLOOR_HONESTY: &str = "ExactDominance verification is Θ(n) in committed candidate count under the transparent non-succinct model";
+pub const PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY: &str = "ProcedureFaithfulTopK verification is Θ(n) in committed candidate count under the transparent non-succinct model";
 pub const NON_USE_EPOCH_FLOOR_HONESTY: &str = "non-use after deletion costs Ω(N) epoch scans without per-epoch aggregation (Jewel C changes model)";
 #[must_use]
 pub const fn log2_ceil(n: u64) -> u32 {

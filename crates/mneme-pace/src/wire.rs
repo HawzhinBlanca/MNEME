@@ -226,3 +226,94 @@ fn parse_fixed32_value(value: &CborValue) -> Result<[u8; 32], MnemeError> {
     out.copy_from_slice(bytes);
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn calibration() -> PaceCalibration {
+        PaceCalibration {
+            alg: 1,
+            iterations_per_tick: 10_000,
+            tick_target_ms: 50,
+        }
+    }
+
+    fn segment(index: u64, label: Option<&str>) -> PaceSegment {
+        PaceSegment {
+            index,
+            prev_output: [index as u8; 32],
+            iterations: 1_000 + index,
+            output: [(index + 1) as u8; 32],
+            label: label.map(|s| s.to_string()),
+        }
+    }
+
+    /// PACE-WIRE-1: PaceCalibration encode/decode roundtrip.
+    #[test]
+    fn pace_calibration_roundtrip() {
+        let cal = calibration();
+        let bytes = encode_pace_calibration(&cal).expect("calibration must encode");
+        let decoded = decode_pace_calibration(&bytes).expect("calibration must decode");
+        assert_eq!(
+            decoded, cal,
+            "calibration roundtrip must preserve all fields"
+        );
+    }
+
+    /// PACE-WIRE-2: PaceLog encode/decode roundtrip with a labeled segment.
+    #[test]
+    fn pace_log_roundtrip_with_labeled_segment() {
+        let log = PaceLog {
+            version: 1,
+            genesis: [0xAB; 32],
+            calibration: calibration(),
+            segments: vec![segment(0, Some("root-seq-7"))],
+        };
+        let bytes = encode_pace_log(&log).expect("log must encode");
+        let decoded = decode_pace_log(&bytes).expect("log must decode");
+        assert_eq!(decoded, log, "log roundtrip must preserve all fields");
+        assert_eq!(decoded.segments[0].label, Some("root-seq-7".to_string()));
+    }
+
+    /// PACE-WIRE-3: PaceLog with no segments roundtrips correctly.
+    #[test]
+    fn pace_log_roundtrip_no_segments() {
+        let log = PaceLog {
+            version: 2,
+            genesis: [0xCC; 32],
+            calibration: calibration(),
+            segments: vec![],
+        };
+        let bytes = encode_pace_log(&log).expect("log must encode");
+        let decoded = decode_pace_log(&bytes).expect("log must decode");
+        assert_eq!(decoded, log);
+        assert!(
+            decoded.segments.is_empty(),
+            "no-segment log must decode as empty"
+        );
+    }
+
+    /// PACE-WIRE-4: Empty bytes must fail decode for both types.
+    #[test]
+    fn empty_bytes_fail_decode() {
+        assert!(
+            decode_pace_calibration(&[]).is_err(),
+            "empty bytes must not decode calibration"
+        );
+        assert!(
+            decode_pace_log(&[]).is_err(),
+            "empty bytes must not decode log"
+        );
+    }
+
+    /// PACE-WIRE-5: encode_pace_calibration is deterministic (idempotent).
+    #[test]
+    fn pace_calibration_encode_is_deterministic() {
+        let cal = calibration();
+        let b1 = encode_pace_calibration(&cal).unwrap();
+        let b2 = encode_pace_calibration(&cal).unwrap();
+        assert_eq!(b1, b2, "calibration encoding must be deterministic");
+        assert!(!b1.is_empty(), "encoding must not be empty");
+    }
+}
