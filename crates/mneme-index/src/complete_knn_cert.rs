@@ -125,8 +125,9 @@ pub fn encode_complete_knn_attachment(
     enc.encode_unsigned(u64::from(att.k))?;
     enc.encode_unsigned(F_PROOF)?;
     encode_proof(&mut enc, &att.proof)?;
-    enc.encode_unsigned(F_CONSTANT_SIZE)?;
-    enc.encode_bool(att.constant_size)?;
+    // dCBOR requires canonical (ascending) map-key order. Emit optional fields in
+    // key order 5,6 (beacon) → 7 → 8 → 9 so strict decode never rejects a
+    // constant-size attachment (which carries fields 7 and 8 alongside 9).
     if let Some(beacon) = &att.beacon {
         enc.encode_unsigned(F_BEACON_ROUND)?;
         enc.encode_unsigned(beacon.round)?;
@@ -141,6 +142,8 @@ pub fn encode_complete_knn_attachment(
         enc.encode_unsigned(F_MERKLE_HNSW_ROOT)?;
         enc.encode_bytes(root)?;
     }
+    enc.encode_unsigned(F_CONSTANT_SIZE)?;
+    enc.encode_bool(att.constant_size)?;
     Ok(enc.finish())
 }
 
@@ -476,4 +479,89 @@ fn parse_u64(value: &CborValue) -> Result<u64, MnemeError> {
 fn parse_fixed32(value: &CborValue) -> Result<[u8; 32], MnemeError> {
     let b = value.as_bytes().ok_or(complete_knn_cert_invalid_error())?;
     b.try_into().map_err(|_| complete_knn_cert_invalid_error())
+}
+
+#[cfg(test)]
+mod ttrp_constant_size_tests {
+    //! TTRP-1: the constant-size attachment carries only a BLAKE3 hash of the proof
+    //! plus the HNSW Merkle root; the full proof travels out-of-band and is bound
+    //! back at verify time. Exercises the `constant_size = true` path end to end.
+    use super::*;
+    use crate::complete_knn::{AuthenticatedBallTree, prove_complete_knn};
+
+    fn real_proof() -> (CompleteKnnProof, [u8; 32], Vec<f64>, u32) {
+        let tree = AuthenticatedBallTree::from_points(vec![
+            vec![0.0, 0.0],
+            vec![1.0, 0.0],
+            vec![3.0, 1.0],
+            vec![7.0, 2.0],
+        ]);
+        let query = vec![0.0, 0.0];
+        let k = 2usize;
+        let proof = prove_complete_knn(&tree, &query, k).expect("prove");
+        (proof, tree.commitment(), query, k as u32)
+    }
+
+    fn constant_size_att(
+        proof: &CompleteKnnProof,
+        commitment: [u8; 32],
+        query: Vec<f64>,
+        k: u32,
+    ) -> CompleteKnnCertAttachment {
+        CompleteKnnCertAttachment {
+            commitment,
+            query,
+            k,
+            // body emptied — only the hash binds the out-of-band proof.
+            proof: CompleteKnnProof {
+                total_points: proof.total_points,
+                returned: Vec::new(),
+                frontier: Vec::new(),
+                excluded: Vec::new(),
+            },
+            beacon: None,
+            constant_proof_hash: Some(hash_proof(proof).expect("hash")),
+            merkle_hnsw_root: Some(commitment),
+            constant_size: true,
+        }
+    }
+
+    #[test]
+    fn constant_size_wire_roundtrips_and_verifies_with_out_of_band_proof() {
+        let (proof, commitment, query, k) = real_proof();
+        let att = constant_size_att(&proof, commitment, query, k);
+        let wire = encode_complete_knn_attachment(&att).expect("encode");
+        let decoded = decode_complete_knn_attachment(&wire).expect("decode");
+        assert!(decoded.constant_size);
+        assert_eq!(decoded.constant_proof_hash, att.constant_proof_hash);
+        assert_eq!(decoded.merkle_hnsw_root, Some(commitment));
+        // A constant-size cert must fail closed without the out-of-band proof…
+        assert!(decoded.verify_offline().is_err());
+        // …and verify once the matching proof is supplied.
+        decoded
+            .verify_offline_with_proof(&proof)
+            .expect("verify with carried proof");
+    }
+
+    #[test]
+    fn constant_size_rejects_proof_whose_hash_does_not_match() {
+        let (proof, commitment, query, k) = real_proof();
+        let att = constant_size_att(&proof, commitment, query, k);
+        // A different proof → hash mismatch → fail closed (ObjectTampered).
+        let other_tree = AuthenticatedBallTree::from_points(vec![
+            vec![9.0, 9.0],
+            vec![1.0, 2.0],
+            vec![4.0, 4.0],
+        ]);
+        let other = prove_complete_knn(&other_tree, &[9.0, 9.0], 1).expect("prove other");
+        assert!(att.verify_offline_with_proof(&other).is_err());
+    }
+
+    #[test]
+    fn constant_size_rejects_zero_merkle_root() {
+        let (proof, commitment, query, k) = real_proof();
+        let mut att = constant_size_att(&proof, commitment, query, k);
+        att.merkle_hnsw_root = Some([0u8; 32]);
+        assert!(att.verify_offline_with_proof(&proof).is_err());
+    }
 }
