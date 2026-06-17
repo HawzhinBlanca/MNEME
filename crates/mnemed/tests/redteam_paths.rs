@@ -269,6 +269,7 @@ async fn expect_unix_response(sock: &PathBuf, cap_b64: String, context: &str) ->
             weight_measurement_hex: None,
             sampling_params: None,
             output_token_commit_hex: None,
+            embedding: None,
         },
     )
     .await
@@ -330,6 +331,7 @@ async fn redteam_grpc_recall_rejects_out_of_band_object_tamper() {
                 name: "grpc-adb".into(),
                 kind: "semantic".into(),
                 body: b"grpc honest".to_vec(),
+                embedding: None,
             })
             .await,
         "gRPC redteam remember",
@@ -342,6 +344,7 @@ async fn redteam_grpc_recall_rejects_out_of_band_object_tamper() {
             namespace: "redteam".into(),
             name: "grpc-adb".into(),
             min_tier: "working".into(),
+            embedding: None,
         })
         .await
         .unwrap_err();

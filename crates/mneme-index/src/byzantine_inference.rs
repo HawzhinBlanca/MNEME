@@ -442,6 +442,7 @@ mod tests {
                 procedure_id: [0x33; 32],
                 query_commit: [0x66; 32],
                 result_ids: vec![id],
+                candidates_embeddings: None,
             },
         )
     }

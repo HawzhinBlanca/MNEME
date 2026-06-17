@@ -32,7 +32,7 @@ Phase 0 ✅ ──▶ Phase I ✅ ──▶ Phase II ──▶ Phase III ──�
 
 ---
 
-## Phase I — Verifiable retrieval + Certificate v1  *(buildable today)*
+## Phase I — Verifiable retrieval (§3) + Certificate v1  *(buildable today)*
 
 **Goal:** prove a recall is receipt-bound, time-anchored, and un-poisoned; fuse into one offline cert.
 

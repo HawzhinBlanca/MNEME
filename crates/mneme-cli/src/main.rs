@@ -31,7 +31,7 @@ use std::process::ExitCode;
 #[command(
     name = "mneme",
     version,
-    about = "Verifiable memory substrate — fail-closed verify, recall, forget, merge",
+    about = "Fail-closed verifiable recall — verify, recall, forget, merge",
     long_about = None
 )]
 struct Cli {
@@ -123,7 +123,7 @@ enum Commands {
         dim: u16,
         #[arg(long, default_value_t = 0)]
         scale: i8,
-        #[arg(long = "proof-level", default_value = "exact-dominance")]
+        #[arg(long = "proof-level", default_value = "procedure-faithful-top-k")]
         proof_level: ProofLevelArg,
     },
     /// Offline verify Cognition Certificate v1 (Phase I)
@@ -481,7 +481,8 @@ enum ForgetModeArg {
 #[derive(Clone, Copy, ValueEnum, Default)]
 enum ProofLevelArg {
     #[default]
-    ExactDominance,
+    #[value(alias = "exact-dominance")]
+    ProcedureFaithfulTopK,
     HnswAuditOnDemand,
     CompleteTopK,
 }
@@ -489,7 +490,7 @@ enum ProofLevelArg {
 impl From<ProofLevelArg> for RetrievalProofLevel {
     fn from(v: ProofLevelArg) -> Self {
         match v {
-            ProofLevelArg::ExactDominance => RetrievalProofLevel::ExactDominance,
+            ProofLevelArg::ProcedureFaithfulTopK => RetrievalProofLevel::ProcedureFaithfulTopK,
             ProofLevelArg::HnswAuditOnDemand => RetrievalProofLevel::HnswAuditOnDemand,
             ProofLevelArg::CompleteTopK => RetrievalProofLevel::CompleteTopK,
         }

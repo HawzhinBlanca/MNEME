@@ -179,3 +179,108 @@ fn parse_segment(v: &CborValue) -> Result<StoredPaceSegment, CrossrefError> {
         label,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_cal(alg: u8) -> StoredPaceCalibration {
+        StoredPaceCalibration {
+            alg,
+            iterations_per_tick: 10,
+            tick_target_ms: 50,
+        }
+    }
+
+    /// Build a 2-segment log that will pass verify().
+    fn make_valid_log(genesis: [u8; 32]) -> StoredPaceLog {
+        let anchor = pace_genesis_anchor(&genesis);
+        let out0 = blake3_sequential(&anchor, 3);
+        let out1 = blake3_sequential(&out0, 5);
+        StoredPaceLog {
+            version: 1,
+            genesis,
+            calibration: make_cal(PACE_ALG_BLAKE3_SEQUENTIAL),
+            segments: vec![
+                StoredPaceSegment {
+                    index: 0,
+                    prev_output: anchor,
+                    iterations: 3,
+                    output: out0,
+                    label: None,
+                },
+                StoredPaceSegment {
+                    index: 1,
+                    prev_output: out0,
+                    iterations: 5,
+                    output: out1,
+                    label: Some("root-seq-1".into()),
+                },
+            ],
+        }
+    }
+
+    /// XPACE-1: pace_genesis_anchor is domain-separated — non-zero and input-dependent.
+    #[test]
+    fn pace_genesis_anchor_is_domain_separated() {
+        let a = pace_genesis_anchor(&[0x01; 32]);
+        let b = pace_genesis_anchor(&[0x02; 32]);
+        assert_ne!(a, [0u8; 32], "genesis anchor must not be all-zeros");
+        assert_ne!(
+            a, b,
+            "different genesis values must yield different anchors"
+        );
+    }
+
+    /// XPACE-2: blake3_sequential is deterministic and changes output each step.
+    #[test]
+    fn blake3_sequential_deterministic_and_progressive() {
+        let seed = [0xABu8; 32];
+        let r1 = blake3_sequential(&seed, 5);
+        let r2 = blake3_sequential(&seed, 5);
+        assert_eq!(r1, r2, "blake3_sequential must be deterministic");
+        assert_ne!(r1, seed, "output must differ from seed after 5 iterations");
+        let r3 = blake3_sequential(&seed, 6);
+        assert_ne!(
+            r1, r3,
+            "different iteration counts must yield different outputs"
+        );
+    }
+
+    /// XPACE-3: verify() passes for a correctly constructed 2-segment log.
+    #[test]
+    fn verify_passes_for_correct_log() {
+        let log = make_valid_log([0x77; 32]);
+        log.verify().expect("valid 2-segment pace log must verify");
+    }
+
+    /// XPACE-4: verify() rejects an unsupported algorithm (fail-closed).
+    #[test]
+    fn verify_rejects_wrong_alg() {
+        let mut log = make_valid_log([0x88; 32]);
+        log.calibration.alg = 99; // unknown alg
+        assert!(log.verify().is_err(), "wrong alg must be rejected");
+    }
+
+    /// XPACE-5: verify() rejects a tampered prev_output (broken chain linkage).
+    #[test]
+    fn verify_rejects_tampered_prev_output() {
+        let mut log = make_valid_log([0x99; 32]);
+        log.segments[1].prev_output[0] ^= 0xFF; // break chain link
+        assert!(
+            log.verify().is_err(),
+            "tampered prev_output must break chain verification"
+        );
+    }
+
+    /// XPACE-6: verify() rejects a falsified output (wrong PoW value).
+    #[test]
+    fn verify_rejects_falsified_output() {
+        let mut log = make_valid_log([0xAA; 32]);
+        log.segments[0].output = [0x00; 32]; // wrong PoW output
+        assert!(
+            log.verify().is_err(),
+            "falsified segment output must be rejected"
+        );
+    }
+}

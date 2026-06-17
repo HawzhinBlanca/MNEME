@@ -1,4 +1,4 @@
-use mneme_core::cognition_bounds::EXACT_DOMINANCE_FLOOR_HONESTY;
+use mneme_core::cognition_bounds::PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY;
 use mneme_core::{
     DistanceMetric, FixedPointEmbedding, MnemeError, ObjectId, Procedure, ProcedureAlgo,
     VerificationObject,
@@ -48,6 +48,7 @@ fn vo(n: usize, k: u32) -> (VerificationObject, [u8; 32], Procedure) {
             procedure_id: procedure_id(&p),
             query_commit: q.commit(),
             result_ids: rid,
+            candidates_embeddings: None,
         },
         r,
         p,
@@ -79,6 +80,6 @@ fn shape_mismatch_rejected() {
 }
 #[test]
 fn honesty() {
-    assert!(EXACT_DOMINANCE_FLOOR_HONESTY.contains("Θ(n)"));
-    assert!(EXACT_DOMINANCE_FLOOR_HONESTY.contains("transparent non-succinct"));
+    assert!(PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY.contains("Θ(n)"));
+    assert!(PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY.contains("transparent non-succinct"));
 }

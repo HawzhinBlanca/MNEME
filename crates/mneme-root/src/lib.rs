@@ -132,3 +132,94 @@ pub fn check_replay(current: &Root, last_seen_hlc: Option<[u8; 14]>) -> Result<(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_core::Root;
+
+    fn sample_root(preimage_hash: [u8; 32], prev_root: [u8; 32], seq: u64, hlc: [u8; 14]) -> Root {
+        Root {
+            version: 1,
+            preimage_hash,
+            dag_head_root: [0u8; 32],
+            key_index_root: [0u8; 32],
+            semantic_commit: [0u8; 32],
+            hlc_max: hlc,
+            prev_root,
+            signature: vec![],
+            sequence: seq,
+        }
+    }
+
+    fn hlc(wall_ms_be: u64) -> [u8; 14] {
+        let mut h = [0u8; 14];
+        h[0..8].copy_from_slice(&wall_ms_be.to_be_bytes());
+        h
+    }
+
+    /// INV-4-1: A valid chain (prev_root matches, sequence monotonically increases) is accepted.
+    #[test]
+    fn verify_root_chain_valid_succession_is_accepted() {
+        let prev = sample_root([0x01; 32], [0x00; 32], 1, hlc(100));
+        let curr = sample_root([0x02; 32], prev.preimage_hash, 2, hlc(200));
+        assert!(
+            verify_root_chain(&curr, Some(&prev)).is_ok(),
+            "valid succession must be accepted"
+        );
+    }
+
+    /// INV-4-2: Broken prev_root hash link is rejected with RootInconsistent.
+    #[test]
+    fn verify_root_chain_broken_prev_hash_fails_with_root_inconsistent() {
+        let prev = sample_root([0x01; 32], [0x00; 32], 1, hlc(100));
+        let curr = sample_root([0x02; 32], [0xFF; 32], 2, hlc(200)); // wrong prev_root
+        assert_eq!(
+            verify_root_chain(&curr, Some(&prev)).unwrap_err(),
+            MnemeError::RootInconsistent,
+            "broken prev_root hash link must fail with RootInconsistent"
+        );
+    }
+
+    /// INV-4-3: Non-monotonic sequence (same or lower) is rejected.
+    #[test]
+    fn verify_root_chain_sequence_regression_fails() {
+        let prev = sample_root([0x01; 32], [0x00; 32], 5, hlc(100));
+        let curr = sample_root([0x02; 32], prev.preimage_hash, 5, hlc(200)); // same seq
+        assert_eq!(
+            verify_root_chain(&curr, Some(&prev)).unwrap_err(),
+            MnemeError::RootInconsistent,
+            "non-monotonic sequence must be rejected"
+        );
+    }
+
+    /// A-REPLAY-1: check_replay rejects a root whose HLC regresses vs last seen (replay attack).
+    #[test]
+    fn check_replay_rejects_regressed_hlc() {
+        let root = sample_root([0x01; 32], [0x00; 32], 1, hlc(100));
+        let last_seen = hlc(200); // last seen is higher than root's hlc_max
+        assert_eq!(
+            check_replay(&root, Some(last_seen)).unwrap_err(),
+            MnemeError::RootReplayed,
+            "a root whose HLC regresses vs last_seen must be rejected as a replay"
+        );
+    }
+
+    /// A-REPLAY-2: check_replay accepts an equal or advancing HLC.
+    #[test]
+    fn check_replay_accepts_equal_or_advancing_hlc() {
+        let root = sample_root([0x01; 32], [0x00; 32], 1, hlc(200));
+        assert!(
+            check_replay(&root, Some(hlc(200))).is_ok(),
+            "equal HLC must be accepted"
+        );
+        assert!(
+            check_replay(&root, Some(hlc(100))).is_ok(),
+            "advancing HLC must be accepted"
+        );
+        assert!(
+            check_replay(&root, None).is_ok(),
+            "no last_seen must always be accepted"
+        );
+    }
+}

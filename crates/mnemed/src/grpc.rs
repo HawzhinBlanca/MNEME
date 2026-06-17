@@ -66,6 +66,7 @@ impl MemoryService for GrpcMemoryService {
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
         validate_logical_key_grpc(&req.namespace, &req.name)?;
         let kind = parse_kind_grpc(&req.kind)?;
+        let embedding = parse_embedding_grpc(req.embedding)?;
         let mut store = self.state.store.lock().map_err(grpc_internal)?;
         let draft = Draft {
             namespace: req.namespace,
@@ -75,7 +76,7 @@ impl MemoryService for GrpcMemoryService {
             parent_ids: vec![],
             session: [0xcd; 16],
             trust_tier: None,
-            embedding: None,
+            embedding,
             valid_time_ms: None,
         };
         let (id, root) = store.remember(draft, &cap).map_err(grpc_status_mneme)?;
@@ -95,6 +96,7 @@ impl MemoryService for GrpcMemoryService {
         verify_cap(&self.state, &cap).map_err(grpc_status)?;
         validate_logical_key_grpc(&req.namespace, &req.name)?;
         let min_tier = parse_tier_grpc(&req.min_tier)?;
+        let embedding = parse_embedding_grpc(req.embedding)?;
         let store = self.state.store.lock().map_err(grpc_internal)?;
         let query = Query {
             logical_key: LogicalKey {
@@ -102,7 +104,7 @@ impl MemoryService for GrpcMemoryService {
                 name: req.name,
             },
             min_tier,
-            embedding: None,
+            embedding,
         };
         let entries = store
             .recall_verified_default(&query, &cap)
@@ -224,6 +226,27 @@ fn parse_tier_grpc(s: &str) -> Result<TrustTier, Status> {
         "identity" => Ok(TrustTier::Identity),
         _ => Err(Status::invalid_argument("invalid trust tier")),
     }
+}
+
+fn parse_embedding_grpc(
+    pb_emb: Option<pb::FixedPointEmbedding>,
+) -> Result<Option<mneme_core::FixedPointEmbedding>, Status> {
+    let Some(emb) = pb_emb else {
+        return Ok(None);
+    };
+    let scale = i8::try_from(emb.scale)
+        .map_err(|_| Status::invalid_argument("embedding scale out of bounds"))?;
+    let components: Vec<i16> = emb
+        .components
+        .into_iter()
+        .map(|c| {
+            i16::try_from(c)
+                .map_err(|_| Status::invalid_argument("embedding component out of bounds"))
+        })
+        .collect::<Result<_, _>>()?;
+    let core_emb = mneme_core::FixedPointEmbedding::new(emb.dim, scale, components)
+        .map_err(grpc_status_mneme)?;
+    Ok(Some(core_emb))
 }
 
 pub async fn serve_grpc(

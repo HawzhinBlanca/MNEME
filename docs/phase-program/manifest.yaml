@@ -1,5 +1,5 @@
 phases:
-  - phase: Phase I — Verifiable retrieval + Certificate v1
+  - phase: Phase I — Verifiable retrieval (§3) + Certificate v1
     status: done
     note: "Software-complete on master (9462a04): validation-lane full + cognition_cert_parse fuzz green; red-team #3 (provenance-scoped) and #5 (HNSW honesty) resolved at d433999. No TEE/PIOP/global-NN claims."
     items:
@@ -8,7 +8,7 @@ phases:
         status: done
         evidence:
           - path: docs/PHASE_I_TASK_SPEC.md
-          - path: crates/mneme-index/tests/zkann_exact_dominance.rs
+          - path: crates/mneme-index/tests/zkann_procedure_faithful_topk.rs
           - path: crates/mneme-index/tests/semantic_zk_recall.rs
       - id: P1-2
         title: Bi-temporal recall (recall_verified_at)

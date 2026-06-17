@@ -1,4 +1,4 @@
-//! zkRAG-style PIOP research seam — **Phase IV-A (research only, NOT implemented)**.
+//! zkRAG-style PIOP research seam — **Phase IV-A (experimental / dead code / NOT implemented)**.
 //!
 //! See `docs/research/PHASE_IV_A_PIOP_SPIKE.md`. This module is a *labelled
 //! placeholder for a research direction*, not a feature.
@@ -13,7 +13,7 @@ pub const PIOP_RESEARCH_HONESTY: &str = concat!(
     "Phase IV-A zkRAG-style PIOP is UNIMPLEMENTED research. This seam proves NOTHING: ",
     "not exact-NN / not exact nearest-neighbor, not procedure-faithfulness, not semantic truth, ",
     "and it is NOT Plonky2/FRI and NOT a SNARK. It does not retire the current Phase I ",
-    "ExactDominance caveat: current v1 proves membership/completeness plus top-k over ",
+    "ProcedureFaithfulTopK caveat: current v1 proves membership/completeness plus top-k over ",
     "prover-asserted distances; true top-k ranking is not proven and it is not top-k by true ",
     "query-to-embedding distance until verifiers recompute candidate distances. ",
     "The entry point returns UnsupportedVersion and is wired into no recall, receipt, or verification path. ",
@@ -24,7 +24,7 @@ pub const PIOP_RESEARCH_HONESTY: &str = concat!(
 pub const PIOP_RESEARCH_STATUS: &str = concat!(
     "UNIMPLEMENTED (Phase IV-A research spike): global exact-NN over the committed set via a ",
     "zkRAG-style PIOP is a RESEARCH DIRECTION, not a feature and not exact-NN proof in this repo. ",
-    "Current Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted ",
+    "Current Phase I ProcedureFaithfulTopK proves membership/completeness plus top-k over prover-asserted ",
     "distances; true top-k ranking is not proven and it is not top-k by true query-to-embedding ",
     "distance until verifiers recompute candidate distances. Three blockers remain ",
     "(stable-buildable succinct-argument stack; field-friendly commitment bridge for the BLAKE3 ",

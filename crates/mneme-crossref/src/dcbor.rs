@@ -520,6 +520,52 @@ pub fn fuzz_dcbor_decode(bytes: &[u8]) {
     }
 }
 
+impl DcborEncode for crate::procedure::FixedPointEmbedding {
+    fn dcbor_encode(&self, enc: &mut Encoder) -> Result<(), CrossrefError> {
+        enc.begin_map(3)?;
+        enc.encode_unsigned(1)?;
+        enc.encode_unsigned(self.dim as u64)?;
+        enc.encode_unsigned(2)?;
+        enc.encode_signed(self.scale as i64)?;
+        enc.encode_unsigned(3)?;
+        enc.begin_array(self.components.len() as u64)?;
+        for &comp in &self.components {
+            enc.encode_signed(comp as i64)?;
+        }
+        Ok(())
+    }
+}
+
+impl DcborDecode for crate::procedure::FixedPointEmbedding {
+    fn dcbor_decode(dec: &mut Decoder<'_>) -> Result<Self, CrossrefError> {
+        let map = dec.decode_map()?;
+        let mut dim = None;
+        let mut scale = None;
+        let mut components = None;
+        for (k, v) in map {
+            let key = k.as_u64().ok_or(CrossrefError::SchemaDrift)?;
+            match key {
+                1 => dim = Some(v.as_u64().ok_or(CrossrefError::SchemaDrift)? as u32),
+                2 => scale = Some(v.as_i64().ok_or(CrossrefError::SchemaDrift)? as i8),
+                3 => {
+                    let arr = v.as_array().ok_or(CrossrefError::SchemaDrift)?;
+                    let mut comps = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        let comp = item.as_i64().ok_or(CrossrefError::SchemaDrift)?;
+                        comps.push(comp as i16);
+                    }
+                    components = Some(comps);
+                }
+                _ => return Err(CrossrefError::SchemaDrift),
+            }
+        }
+        let dim = dim.ok_or(CrossrefError::SchemaDrift)?;
+        let scale = scale.ok_or(CrossrefError::SchemaDrift)?;
+        let components = components.ok_or(CrossrefError::SchemaDrift)?;
+        crate::procedure::FixedPointEmbedding::new(dim, scale, components)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

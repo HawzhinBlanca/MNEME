@@ -61,7 +61,12 @@ fn build_index() -> (SemanticIndex, FixedPointEmbedding) {
 fn zkann_genuine_receipt_verifies() {
     let (index, q) = build_index();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xab; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let n = receipt.verification_object.candidates.len();
     verify_zkann_attachment(&receipt, &proc(), n).expect("genuine receipt must verify");
@@ -72,7 +77,12 @@ fn zkann_genuine_receipt_verifies() {
 fn zkann_every_structural_mutation_fails_closed() {
     let (index, q) = build_index();
     let genuine = index
-        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xab; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let committed = genuine.verification_object.candidates.len();
     // Sanity: the genuine receipt verifies (so rejections below are meaningful, not vacuous).
@@ -206,7 +216,12 @@ fn zkann_every_structural_mutation_fails_closed() {
 fn zkann_verifier_never_panics_on_adversarial_input() {
     let (index, q) = build_index();
     let genuine = index
-        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xab; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let mut rng = Lcg(0xD15EA5E_u64);
     for _ in 0..2000 {

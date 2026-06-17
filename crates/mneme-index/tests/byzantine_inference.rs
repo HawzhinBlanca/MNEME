@@ -48,7 +48,7 @@ fn signed_fixture() -> (StoredRoot, mneme_index::SemanticRecallReceipt, TrustCon
             &proc(),
             &q,
             stored.preimage_hash,
-            RetrievalProofLevel::ExactDominance,
+            RetrievalProofLevel::ProcedureFaithfulTopK,
         )
         .unwrap();
     (

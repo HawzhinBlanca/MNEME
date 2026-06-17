@@ -96,6 +96,8 @@ pub enum KernelRequest {
         namespace: String,
         name: String,
         body_b64: String,
+        #[serde(default)]
+        embedding: Option<mneme_core::FixedPointEmbedding>,
     },
     RecallVerified {
         cap_b64: String,
@@ -109,6 +111,8 @@ pub enum KernelRequest {
         sampling_params: Option<String>,
         #[serde(default)]
         output_token_commit_hex: Option<String>,
+        #[serde(default)]
+        embedding: Option<mneme_core::FixedPointEmbedding>,
     },
     Forget {
         cap_b64: String,
@@ -681,7 +685,8 @@ fn dispatch_inner(state: &AppState, req: KernelRequest) -> Result<serde_json::Va
             namespace,
             name,
             body_b64,
-        } => remember(state, &cap_b64, namespace, name, body_b64),
+            embedding,
+        } => remember(state, &cap_b64, namespace, name, body_b64, embedding),
         KernelRequest::RecallVerified {
             cap_b64,
             namespace,
@@ -690,6 +695,7 @@ fn dispatch_inner(state: &AppState, req: KernelRequest) -> Result<serde_json::Va
             weight_measurement_hex,
             sampling_params,
             output_token_commit_hex,
+            embedding,
         } => recall(
             state,
             &cap_b64,
@@ -701,6 +707,7 @@ fn dispatch_inner(state: &AppState, req: KernelRequest) -> Result<serde_json::Va
                 sampling_params,
                 output_token_commit_hex,
             },
+            embedding,
         ),
         KernelRequest::Forget {
             cap_b64,
@@ -799,6 +806,7 @@ fn remember(
     namespace: String,
     name: String,
     body_b64: String,
+    embedding: Option<mneme_core::FixedPointEmbedding>,
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
@@ -812,7 +820,7 @@ fn remember(
         parent_ids: vec![],
         session: [0xab; 16],
         trust_tier: None,
-        embedding: None,
+        embedding,
         valid_time_ms: None,
     };
     let (id, root) = store.remember(draft, &cap)?;
@@ -854,6 +862,7 @@ fn recall(
     namespace: String,
     name: String,
     robr: RobrRecallParams,
+    embedding: Option<mneme_core::FixedPointEmbedding>,
 ) -> Result<serde_json::Value, MnemeError> {
     let cap = cap_from_b64(cap_b64)?;
     validate_logical_key(&namespace, &name)?;
@@ -869,7 +878,7 @@ fn recall(
     let query = Query {
         logical_key: LogicalKey { namespace, name },
         min_tier: TrustTier::Working,
-        embedding: None,
+        embedding,
     };
     let entries = store.recall_verified_default(&query, &cap)?;
 

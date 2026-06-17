@@ -31,6 +31,7 @@ message RememberRequest {
   string name = 3;
   string kind = 4;
   bytes body = 5;
+  FixedPointEmbedding embedding = 6;
 }
 
 message RememberResponse {
@@ -43,6 +44,13 @@ message RecallRequest {
   string namespace = 2;
   string name = 3;
   string min_tier = 4;
+  FixedPointEmbedding embedding = 5;
+}
+
+message FixedPointEmbedding {
+  uint32 dim = 1;
+  int32 scale = 2;
+  repeated int32 components = 3;
 }
 
 message RecallResponse {

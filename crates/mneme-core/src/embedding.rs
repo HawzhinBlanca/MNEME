@@ -14,6 +14,7 @@ enum EmbeddingFailure {
     DotProductSumOverflow,
     QuantizedComponentOutOfRange,
     NonFiniteComponent,
+    SerializationSchemaDrift,
 }
 
 fn embedding_failure_to_mneme(failure: EmbeddingFailure) -> MnemeError {
@@ -25,7 +26,8 @@ fn embedding_failure_to_mneme(failure: EmbeddingFailure) -> MnemeError {
         | EmbeddingFailure::DotProductTermOverflow
         | EmbeddingFailure::DotProductSumOverflow
         | EmbeddingFailure::QuantizedComponentOutOfRange
-        | EmbeddingFailure::NonFiniteComponent => MnemeError::SchemaDrift,
+        | EmbeddingFailure::NonFiniteComponent
+        | EmbeddingFailure::SerializationSchemaDrift => MnemeError::SchemaDrift,
     }
 }
 
@@ -61,8 +63,12 @@ fn embedding_non_finite_component_error() -> MnemeError {
     embedding_failure_to_mneme(EmbeddingFailure::NonFiniteComponent)
 }
 
+fn embedding_serialization_schema_drift() -> MnemeError {
+    embedding_failure_to_mneme(EmbeddingFailure::SerializationSchemaDrift)
+}
+
 /// Quantized fixed-point embedding: `value = component * 2^scale`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FixedPointEmbedding {
     pub dim: u32,
     pub scale: i8,
@@ -155,6 +161,70 @@ impl FixedPointEmbedding {
             })
             .collect::<Result<_, _>>()?;
         let dim = u32::try_from(values.len()).map_err(|_| embedding_declared_dimension_error())?;
+        Self::new(dim, scale, components)
+    }
+}
+
+impl crate::dcbor::DcborEncode for FixedPointEmbedding {
+    fn dcbor_encode(&self, enc: &mut crate::dcbor::Encoder) -> Result<(), MnemeError> {
+        enc.begin_map(3)?;
+        enc.encode_unsigned(1)?;
+        enc.encode_unsigned(self.dim as u64)?;
+        enc.encode_unsigned(2)?;
+        enc.encode_signed(self.scale as i64)?;
+        enc.encode_unsigned(3)?;
+        enc.begin_array(self.components.len() as u64)?;
+        for &comp in &self.components {
+            enc.encode_signed(comp as i64)?;
+        }
+        Ok(())
+    }
+}
+
+impl crate::dcbor::DcborDecode for FixedPointEmbedding {
+    fn dcbor_decode(dec: &mut crate::dcbor::Decoder<'_>) -> Result<Self, MnemeError> {
+        let map = dec.decode_map()?;
+        let mut dim = None;
+        let mut scale = None;
+        let mut components = None;
+        for (k, v) in map {
+            let key = k
+                .as_u64()
+                .ok_or_else(embedding_serialization_schema_drift)?;
+            match key {
+                1 => {
+                    dim = Some(
+                        v.as_u64()
+                            .ok_or_else(embedding_serialization_schema_drift)?
+                            as u32,
+                    )
+                }
+                2 => {
+                    scale = Some(
+                        v.as_i64()
+                            .ok_or_else(embedding_serialization_schema_drift)?
+                            as i8,
+                    )
+                }
+                3 => {
+                    let arr = v
+                        .as_array()
+                        .ok_or_else(embedding_serialization_schema_drift)?;
+                    let mut comps = Vec::with_capacity(arr.len());
+                    for item in arr {
+                        let comp = item
+                            .as_i64()
+                            .ok_or_else(embedding_serialization_schema_drift)?;
+                        comps.push(comp as i16);
+                    }
+                    components = Some(comps);
+                }
+                _ => return Err(embedding_serialization_schema_drift()),
+            }
+        }
+        let dim = dim.ok_or_else(embedding_serialization_schema_drift)?;
+        let scale = scale.ok_or_else(embedding_serialization_schema_drift)?;
+        let components = components.ok_or_else(embedding_serialization_schema_drift)?;
         Self::new(dim, scale, components)
     }
 }

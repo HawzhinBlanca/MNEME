@@ -1442,4 +1442,61 @@ mod tests {
             MnemeError::UnknownField { field: 99 }
         );
     }
+
+    /// SEC-TIER-1: TrustTier::as_u8 / from_u8 round-trips correctly for all valid variants.
+    /// A miscoded conversion would silently escalate or downgrade trust tiers.
+    #[test]
+    fn trust_tier_as_u8_from_u8_round_trips_all_variants() {
+        for tier in [
+            TrustTier::Quarantine,
+            TrustTier::Working,
+            TrustTier::Trusted,
+            TrustTier::Identity,
+        ] {
+            let byte = tier.as_u8();
+            let recovered = TrustTier::from_u8(byte).expect("valid tier byte must decode");
+            assert_eq!(
+                tier, recovered,
+                "TrustTier round-trip failed for {:?}",
+                tier
+            );
+        }
+    }
+
+    /// SEC-TIER-2: TrustTier::from_u8 rejects out-of-range values fail-closed.
+    /// An invalid tier byte must never succeed — it would allow forged tier escalation.
+    #[test]
+    fn trust_tier_from_u8_rejects_invalid_bytes_fail_closed() {
+        for invalid in [4u8, 10, 100, 255] {
+            assert!(
+                TrustTier::from_u8(invalid).is_err(),
+                "TrustTier::from_u8({invalid}) must fail closed"
+            );
+        }
+    }
+
+    /// SEC-KIND-1: MemoryKind::as_u8 / TryFrom<u8> round-trips correctly.
+    #[test]
+    fn memory_kind_as_u8_try_from_round_trips_all_variants() {
+        for kind in MemoryKind::ALL {
+            let byte = kind.as_u8();
+            let recovered = MemoryKind::try_from(byte).expect("valid kind byte must decode");
+            assert_eq!(
+                kind, recovered,
+                "MemoryKind round-trip failed for {:?}",
+                kind
+            );
+        }
+    }
+
+    /// SEC-KIND-2: MemoryKind::try_from rejects out-of-range values fail-closed.
+    #[test]
+    fn memory_kind_try_from_u8_rejects_invalid_bytes() {
+        for invalid in [5u8, 10, 100, 255] {
+            assert!(
+                MemoryKind::try_from(invalid).is_err(),
+                "MemoryKind::try_from({invalid}) must fail closed"
+            );
+        }
+    }
 }

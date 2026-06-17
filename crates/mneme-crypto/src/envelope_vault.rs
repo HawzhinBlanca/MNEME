@@ -340,3 +340,157 @@ impl Drop for EnvelopeKeyVault {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::KeyVault;
+    use tempfile::tempdir;
+
+    fn vault(dir: &std::path::Path) -> EnvelopeKeyVault {
+        let master = [0x42u8; 32];
+        EnvelopeKeyVault::from_master(dir, master).unwrap()
+    }
+
+    fn reload(dir: &std::path::Path) -> EnvelopeKeyVault {
+        let master = [0x42u8; 32];
+        EnvelopeKeyVault::from_master(dir, master).unwrap()
+    }
+
+    /// ENV-1: new_key → get returns the same object key (AEAD round-trip).
+    #[test]
+    fn new_key_get_round_trip() {
+        let dir = tempdir().unwrap();
+        let mut v = vault(dir.path());
+        let (key, id) = v.new_key().unwrap();
+        let got = v.get(&id).unwrap();
+        assert_eq!(key, got, "new_key + get must return the same object key");
+    }
+
+    /// ENV-2: shred must return Forgotten (not KeyVaultMissing) on subsequent get.
+    #[test]
+    fn shred_returns_forgotten_not_missing() {
+        let dir = tempdir().unwrap();
+        let mut v = vault(dir.path());
+        let (_key, id) = v.new_key().unwrap();
+        v.shred(&id).unwrap();
+        let result = v.get(&id);
+        assert_eq!(
+            result,
+            Err(MnemeError::Forgotten),
+            "shredded key must return Forgotten"
+        );
+    }
+
+    /// ENV-3: a vault opened with a different master key must fail AEAD.
+    #[test]
+    fn wrong_master_key_fails_aead() {
+        let dir = tempdir().unwrap();
+        {
+            let master = [0x11u8; 32];
+            let mut v = EnvelopeKeyVault::from_master(dir.path(), master).unwrap();
+            let _ = v.new_key().unwrap();
+        }
+        // Re-open with a different master — AEAD open() returns ObjectTampered on auth failure.
+        let bad_master = [0xFFu8; 32];
+        let result = EnvelopeKeyVault::from_master(dir.path(), bad_master);
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("wrong master key must fail AEAD authentication"),
+        };
+        // open() in aead.rs maps chacha20poly1305 auth failure → ObjectTampered.
+        assert!(
+            matches!(
+                err,
+                MnemeError::ObjectTampered | MnemeError::KeyVaultCorrupt
+            ),
+            "wrong master must produce ObjectTampered or KeyVaultCorrupt",
+        );
+    }
+
+    /// ENV-4: shredded tombstone survives vault reload — subsequent get still returns Forgotten.
+    #[test]
+    fn shred_persists_across_reload() {
+        let dir = tempdir().unwrap();
+        let id = {
+            let mut v = vault(dir.path());
+            let (_key, id) = v.new_key().unwrap();
+            v.shred(&id).unwrap();
+            id
+        };
+        let v2 = reload(dir.path());
+        assert_eq!(
+            v2.get(&id),
+            Err(MnemeError::Forgotten),
+            "tombstone must survive reload"
+        );
+    }
+
+    /// ENV-5: batch flush then reload recovers all keys intact.
+    #[test]
+    fn batch_flush_then_reload_recovers_keys() {
+        let dir = tempdir().unwrap();
+        let (key_a, id_a, key_b, id_b) = {
+            let mut v = vault(dir.path());
+            v.begin_batch().unwrap();
+            let (ka, ia) = v.new_key().unwrap();
+            let (kb, ib) = v.new_key().unwrap();
+            v.flush_batch().unwrap();
+            (ka, ia, kb, ib)
+        };
+        let v2 = reload(dir.path());
+        assert_eq!(
+            v2.get(&id_a).unwrap(),
+            key_a,
+            "batch key A must survive reload"
+        );
+        assert_eq!(
+            v2.get(&id_b).unwrap(),
+            key_b,
+            "batch key B must survive reload"
+        );
+    }
+
+    /// ENV-6: double-shred is idempotent — the second call must still succeed (or return Forgotten).
+    #[test]
+    fn double_shred_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let mut v = vault(dir.path());
+        let (_key, id) = v.new_key().unwrap();
+        v.shred(&id).unwrap();
+        // Second shred must not panic or return KeyVaultMissing — tombstone already exists.
+        let result = v.shred(&id);
+        assert!(
+            result.is_ok() || result == Err(MnemeError::Forgotten),
+            "double-shred must be idempotent (got error)",
+        );
+    }
+
+    /// ENV-7: cancel_batch must revoke in-memory keys — cancelled keys must not be readable.
+    #[test]
+    fn cancel_batch_revokes_keys() {
+        let dir = tempdir().unwrap();
+        let mut v = vault(dir.path());
+        v.begin_batch().unwrap();
+        let (_key, id) = v.new_key().unwrap();
+        // Key is accessible before cancel.
+        assert!(
+            v.get(&id).is_ok(),
+            "key must be accessible before cancel_batch"
+        );
+        v.cancel_batch();
+        // Key must NOT be accessible after cancel.
+        let result = v.get(&id);
+        assert!(
+            result.is_err(),
+            "cancelled batch key must not be accessible: {:?}",
+            result.ok(),
+        );
+        // Reload must also not see the key (it was never flushed to disk).
+        let v2 = reload(dir.path());
+        assert!(
+            v2.get(&id).is_err(),
+            "cancelled batch key must not survive reload",
+        );
+    }
+}

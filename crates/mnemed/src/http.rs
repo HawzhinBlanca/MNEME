@@ -59,6 +59,14 @@ struct RememberBody {
     name: String,
     kind: String,
     body: String,
+    embedding: Option<FixedPointEmbeddingJson>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+struct FixedPointEmbeddingJson {
+    dim: u32,
+    scale: i8,
+    components: Vec<i16>,
 }
 
 #[derive(Serialize)]
@@ -182,6 +190,14 @@ async fn remember(
         return Err(ApiError::bad_request("namespace and name required"));
     }
     let kind = parse_kind(&body.kind)?;
+    let embedding = match body.embedding {
+        Some(json) => {
+            let emb = mneme_core::FixedPointEmbedding::new(json.dim, json.scale, json.components)
+                .map_err(ApiError::from_mneme)?;
+            Some(emb)
+        }
+        None => None,
+    };
     let mut store = state
         .store
         .lock()
@@ -194,7 +210,7 @@ async fn remember(
         parent_ids: vec![],
         session: [0xab; 16],
         trust_tier: None,
-        embedding: None,
+        embedding,
         valid_time_ms: None,
     };
     let (id, root) = store.remember(draft, &cap).map_err(ApiError::from_mneme)?;
@@ -235,10 +251,19 @@ async fn recall(
         .store
         .lock()
         .map_err(|_| ApiError::internal("store lock poisoned"))?;
+    let embedding = if let Some(ref json_str) = params.embedding_json {
+        let json: FixedPointEmbeddingJson = serde_json::from_str(json_str)
+            .map_err(|_| ApiError::bad_request("invalid embedding_json"))?;
+        let emb = mneme_core::FixedPointEmbedding::new(json.dim, json.scale, json.components)
+            .map_err(ApiError::from_mneme)?;
+        Some(emb)
+    } else {
+        None
+    };
     let query = Query {
         logical_key: LogicalKey { namespace, name },
         min_tier,
-        embedding: None,
+        embedding,
     };
     let entries = store
         .recall_verified_default(&query, &cap)
@@ -292,6 +317,7 @@ struct RecallParams {
     weight_measurement_hex: Option<String>,
     sampling_params: Option<String>,
     output_token_commit_hex: Option<String>,
+    embedding_json: Option<String>,
 }
 
 #[derive(Deserialize)]

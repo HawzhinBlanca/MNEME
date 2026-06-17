@@ -21,8 +21,8 @@ pub use accountability::{
     decode_action_receipt, decode_forget_proof, encode_action_receipt, encode_forget_proof,
 };
 pub use cognition_bounds::{
-    EXACT_DOMINANCE_FLOOR_HONESTY, FLOOR_ATTRIBUTION_HONESTY, FLOOR_GAP_HONESTY,
-    NON_USE_EPOCH_FLOOR_HONESTY, computational_online_floor_queries, log2_ceil,
+    FLOOR_ATTRIBUTION_HONESTY, FLOOR_GAP_HONESTY, NON_USE_EPOCH_FLOOR_HONESTY,
+    PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY, computational_online_floor_queries, log2_ceil,
     open_log_log_gap_factor, smt_recall_within_named_gap,
 };
 pub use context::{

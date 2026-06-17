@@ -343,3 +343,103 @@ fn vault_channel_key_is_deterministic_domain_separated_and_not_the_seed() {
         "foreign channel key must fail AEAD open"
     );
 }
+
+#[test]
+fn ed25519_batch_verify_roundtrip() {
+    use mneme_crypto::verify_signatures_batch;
+
+    let kp1 = KeyPair::from_seed([0x11; 32]);
+    let kp2 = KeyPair::from_seed([0x22; 32]);
+    let kp3 = KeyPair::from_seed([0x33; 32]);
+
+    let msg1 = b"message 1";
+    let msg2 = b"message 2";
+    let msg3 = b"message 3";
+
+    let sig1 = kp1.sign(msg1);
+    let sig2 = kp2.sign(msg2);
+    let sig3 = kp3.sign(msg3);
+
+    let msgs: &[&[u8]] = &[msg1, msg2, msg3];
+    let sigs = &[sig1, sig2, sig3];
+    let pks = &[
+        kp1.verifying_key(),
+        kp2.verifying_key(),
+        kp3.verifying_key(),
+    ];
+
+    // Honest batch verifies successfully.
+    verify_signatures_batch(msgs, sigs, pks).expect("batch verification should pass");
+
+    // Any invalid signature in the batch fails the entire verification closed.
+    let mut bad_sigs = *sigs;
+    bad_sigs[1][0] ^= 0xff; // flip byte
+    verify_signatures_batch(msgs, &bad_sigs, pks)
+        .expect_err("tampered signature should fail batch verify");
+
+    // Length mismatch rejects batch verify.
+    let mismatch_msgs: &[&[u8]] = &[msg1, msg2];
+    verify_signatures_batch(mismatch_msgs, sigs, pks)
+        .expect_err("length mismatch should fail batch verify");
+
+    // Empty batch should be a no-op success.
+    verify_signatures_batch(&[], &[], &[]).expect("empty batch verify should pass");
+}
+
+/// CRYPTO-BATCH-EQ: verify_signatures_batch and serial verify_signature must produce
+/// **identical** accept/reject decisions for every input (i.e., batch verification is
+/// not a weaker predicate than serial). This guards against the class of attacks
+/// where a specially-crafted multi-signature batch passes batch verification but
+/// any individual signature would fail.
+#[test]
+fn ed25519_batch_verify_is_equivalent_to_serial() {
+    use mneme_crypto::{verify_signature, verify_signatures_batch};
+
+    let keypairs: Vec<KeyPair> = (0u8..8)
+        .map(|i| KeyPair::from_seed([i.wrapping_mul(0x11); 32]))
+        .collect();
+    let messages: Vec<Vec<u8>> = (0u8..8).map(|i| vec![i; 16]).collect();
+    let sigs: Vec<[u8; 64]> = keypairs
+        .iter()
+        .zip(messages.iter())
+        .map(|(kp, msg)| kp.sign(msg))
+        .collect();
+    let pks: Vec<_> = keypairs.iter().map(|kp| kp.verifying_key()).collect();
+
+    let msgs_ref: Vec<&[u8]> = messages.iter().map(|m| m.as_slice()).collect();
+
+    // Base case: all-valid batch ⟺ all-valid serial.
+    let batch_ok = verify_signatures_batch(&msgs_ref, &sigs, &pks).is_ok();
+    let serial_ok = keypairs
+        .iter()
+        .zip(messages.iter())
+        .zip(sigs.iter())
+        .all(|((kp, msg), sig)| verify_signature(&kp.verifying_key(), msg, sig).is_ok());
+    assert_eq!(
+        batch_ok, serial_ok,
+        "batch and serial must agree on the all-valid input"
+    );
+
+    // Fault injection: flip one signature byte at each position.
+    for tamper_idx in 0..8 {
+        let mut bad_sigs = sigs.clone();
+        bad_sigs[tamper_idx][0] ^= 0xFF;
+
+        let batch_rejects = verify_signatures_batch(&msgs_ref, &bad_sigs, &pks).is_err();
+        let serial_rejects = keypairs
+            .iter()
+            .zip(messages.iter())
+            .zip(bad_sigs.iter())
+            .any(|((kp, msg), sig)| verify_signature(&kp.verifying_key(), msg, sig).is_err());
+
+        // Batch must reject iff serial rejects at least one.
+        assert!(
+            batch_rejects || !serial_rejects,
+            "batch accepted a batch that serial rejected at index {tamper_idx} — soundness violation!"
+        );
+        assert!(
+            !batch_rejects || serial_rejects,
+            "batch rejected a batch that serial fully accepted at index {tamper_idx} — false positive!"
+        );
+    }
+}

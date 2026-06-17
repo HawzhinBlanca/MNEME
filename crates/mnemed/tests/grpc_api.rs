@@ -79,6 +79,7 @@ async fn grpc_remember_recall_forget() {
                 name: "note".into(),
                 kind: "semantic".into(),
                 body: b"hello grpc".to_vec(),
+                embedding: None,
             })
             .await,
         "gRPC remember",
@@ -92,6 +93,7 @@ async fn grpc_remember_recall_forget() {
                 namespace: "grpc".into(),
                 name: "note".into(),
                 min_tier: "working".into(),
+                embedding: None,
             })
             .await,
         "gRPC recall",
@@ -184,6 +186,7 @@ async fn grpc_message_limit_rejects_oversized_remember_request() {
                 name: "oversized-request".into(),
                 kind: "semantic".into(),
                 body: vec![0x41; GRPC_MAX_MESSAGE_BYTES + 1],
+                embedding: None,
             })
             .await,
         "oversized gRPC request must fail before remember",
@@ -211,6 +214,7 @@ async fn grpc_message_limit_rejects_oversized_recall_response() {
                 namespace: "grpc".into(),
                 name: "oversized-response".into(),
                 min_tier: "working".into(),
+                embedding: None,
             })
             .await,
         "oversized gRPC response must fail before client receives entry",
@@ -236,6 +240,7 @@ async fn grpc_key_scoped_requests_reject_empty_logical_key() {
                 name: "note".into(),
                 kind: "semantic".into(),
                 body: b"invalid".to_vec(),
+                embedding: None,
             })
             .await,
         "empty namespace must fail before remember",
@@ -249,6 +254,7 @@ async fn grpc_key_scoped_requests_reject_empty_logical_key() {
                 namespace: "grpc".into(),
                 name: " ".into(),
                 min_tier: "working".into(),
+                embedding: None,
             })
             .await,
         "empty name must fail before recall",

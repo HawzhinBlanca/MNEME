@@ -5,13 +5,16 @@
 
 use crate::domain::{empty_semantic_root, hash_sem_internal, hash_sem_leaf};
 use crate::error::CrossrefError;
-use crate::procedure::{CandidateRow, Procedure, procedure_id, replay_from_candidates};
+use crate::procedure::{
+    CandidateRow, DistanceMetric, FixedPointEmbedding, Procedure, procedure_id,
+    replay_from_candidates,
+};
 use std::collections::{HashMap, HashSet};
 
 pub const HONESTY_PROCEDURE: &str = concat!(
     "MNEME semantic receipts prove procedure-faithfulness over authenticated data, ",
     "not semantic truth, not exact nearest-neighbor optimality, and not true nearest neighbors. ",
-    "ExactDominance v1 proves membership/completeness plus top-k over prover-asserted distances; ",
+    "ProcedureFaithfulTopK v1 proves membership/completeness plus top-k over prover-asserted distances; ",
     "true top-k ranking is not proven and it is not top-k by true query-to-embedding distance ",
     "until verifiers recompute candidate distances."
 );
@@ -19,7 +22,7 @@ pub const HONESTY_PROCEDURE: &str = concat!(
 /// zkANN-1 retrieval proof level (tags match `RetrievalProofLevel`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetrievalProofLevel {
-    ExactDominance,
+    ProcedureFaithfulTopK,
     HnswAuditOnDemand,
     CompleteTopK,
 }
@@ -36,6 +39,7 @@ pub struct VerificationObject {
     pub procedure_id: [u8; 32],
     pub query_commit: [u8; 32],
     pub result_ids: Vec<[u8; 32]>,
+    pub candidates_embeddings: Option<Vec<FixedPointEmbedding>>,
 }
 
 /// zkANN-1 attachment: proof level + declared visit order.
@@ -73,6 +77,7 @@ pub fn verify_ads_vo(
     vo: &VerificationObject,
     semantic_commit: &[u8; 32],
     proc: &Procedure,
+    query_emb: Option<&FixedPointEmbedding>,
 ) -> Result<(), CrossrefError> {
     if vo.procedure_id != procedure_id(proc) {
         return Err(CrossrefError::ProcedureMismatch);
@@ -104,6 +109,28 @@ pub fn verify_ads_vo(
         verify_path_with_index(*leaf_index, &commit, path, semantic_commit)?;
     }
 
+    if let Some(ref embs) = vo.candidates_embeddings {
+        if embs.len() != vo.candidates.len() {
+            return Err(CrossrefError::PathInvalid);
+        }
+        for (i, c_emb) in embs.iter().enumerate() {
+            c_emb.validate_shape()?;
+            if c_emb.commit() != vo.candidates[i].1 {
+                return Err(CrossrefError::PathInvalid);
+            }
+            if let Some(q_emb) = query_emb {
+                q_emb.validate_shape()?;
+                let d = match proc.distance {
+                    DistanceMetric::SquaredL2I64 => q_emb.squared_l2_distance(c_emb)?,
+                    DistanceMetric::CosineI64 => q_emb.dot_product(c_emb)?,
+                };
+                if d != vo.candidates[i].2 {
+                    return Err(CrossrefError::RetrievalDominanceFailed);
+                }
+            }
+        }
+    }
+
     if replay_from_candidates(proc, &vo.candidates) != vo.result_ids {
         return Err(CrossrefError::ProcedureMismatch);
     }
@@ -117,12 +144,13 @@ pub fn verify_semantic_vo_zkann(
     proc: &Procedure,
     zkann: Option<&ZkannAttachment>,
     committed_leaf_count: usize,
+    query_emb: Option<&FixedPointEmbedding>,
 ) -> Result<(), CrossrefError> {
     match zkann {
         Some(z) => {
-            verify_ads_vo(vo, semantic_commit, proc)?;
+            verify_ads_vo(vo, semantic_commit, proc, query_emb)?;
             match z.level {
-                RetrievalProofLevel::ExactDominance => {
+                RetrievalProofLevel::ProcedureFaithfulTopK => {
                     // SOUNDNESS PARITY with the main verifier (mneme-index
                     // verify_candidate_set_binds_root): completeness MUST bind to the signed
                     // root, never a prover-supplied count. Without this, crossref accepts the
@@ -137,7 +165,7 @@ pub fn verify_semantic_vo_zkann(
                 RetrievalProofLevel::CompleteTopK => Ok(()),
             }
         }
-        None => verify_ads_vo(vo, semantic_commit, proc),
+        None => verify_ads_vo(vo, semantic_commit, proc, query_emb),
     }
 }
 
@@ -382,6 +410,7 @@ mod soundness_tests {
             procedure_id: [0u8; 32],
             query_commit: [0u8; 32],
             result_ids: vec![],
+            candidates_embeddings: None,
         }
     }
 

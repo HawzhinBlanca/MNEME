@@ -102,6 +102,7 @@ mod tests {
             procedure_id: [0x02; 32],
             query_commit,
             result_ids: vec![top_id],
+            candidates_embeddings: None,
         };
         let zk = ZkRetrievalAttachment {
             public_commit: proof.public_commit,
