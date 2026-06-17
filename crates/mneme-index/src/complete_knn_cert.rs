@@ -209,10 +209,12 @@ pub fn decode_complete_knn_attachment(
     })
 }
 
+/// Decode the out-of-band proof file emitted by `certify --constant-size --proof-out`.
+/// That file is a full complete-kNN attachment (the cert's `complete_knn.proof_bytes`,
+/// issued with `constant_size=false` so the proof body is present); the out-of-band
+/// proof we need for `verify_offline_with_proof` is its `proof` field.
 pub fn decode_proof_bytes_direct(bytes: &[u8]) -> Result<CompleteKnnProof, MnemeError> {
-    let mut dec = Decoder::new(bytes);
-    let value = dec.decode_any()?;
-    decode_proof(&value)
+    Ok(decode_complete_knn_attachment(bytes)?.proof)
 }
 
 fn encode_proof(enc: &mut Encoder, proof: &CompleteKnnProof) -> Result<(), MnemeError> {

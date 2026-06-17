@@ -164,6 +164,87 @@ fn certify_and_verify_cert_succeeds() {
 }
 
 #[test]
+fn certify_constant_size_and_verify_cert_with_proof_file_succeeds() {
+    // TTRP-1 end to end: `certify --constant-size --proof-out` emits a constant-size
+    // cert plus the full proof out-of-band; `verify-cert --proof-file` re-binds it.
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let output = dir.path().join("cert.cbor");
+    let proof_out = dir.path().join("proof.cbor");
+    let seed = [0x01; 32];
+    let seed_hex = hex::encode(seed);
+    let operator = KeyPair::from_seed(seed);
+    let cap = agent_cap(&operator, operator.public_key_bytes()).unwrap();
+    {
+        let mut s = Store::create(&store, operator.clone()).unwrap();
+        s.trust_mut().authorized_writers.push(cap.subject);
+        let draft = Draft {
+            namespace: "cert".into(),
+            logical_name: "semantic".into(),
+            kind: MemoryKind::Semantic,
+            body: b"body".to_vec(),
+            parent_ids: vec![],
+            session: [0xab; 16],
+            trust_tier: Some(TrustTier::Trusted),
+            embedding: Some(FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap()),
+            valid_time_ms: None,
+        };
+        s.remember(draft, &cap).unwrap();
+    }
+
+    mneme()
+        .args([
+            "certify",
+            store.to_str().unwrap(),
+            "--out",
+            output.to_str().unwrap(),
+            "--proof-level",
+            "complete-top-k",
+            "--constant-size",
+            "--proof-out",
+            proof_out.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    assert!(proof_out.exists(), "out-of-band proof file must be written");
+
+    // Without the proof file the constant-size cert must fail closed…
+    mneme()
+        .args([
+            "verify-cert",
+            output.to_str().unwrap(),
+            "--ef-search",
+            "64",
+            "--k",
+            "1",
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .failure();
+
+    // …and verify once the out-of-band proof is supplied.
+    mneme()
+        .args([
+            "verify-cert",
+            output.to_str().unwrap(),
+            "--proof-file",
+            proof_out.to_str().unwrap(),
+            "--ef-search",
+            "64",
+            "--k",
+            "1",
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verify-cert ok"));
+}
+
+#[test]
 fn verify_cert_audit_beacon_fixture_succeeds() {
     let cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../proof/vectors/certs/cognition_cert_v1_audit_beacon.cbor");
