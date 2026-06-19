@@ -17,8 +17,9 @@ trap cleanup EXIT INT TERM
 
 cargo build -q -p mneme-cli --bin mneme
 cargo build -q -p mnemed --bin mnemed
-BIN="$ROOT/target/debug/mneme"
-DAEMON="$ROOT/target/debug/mnemed"
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/mneme"
+DAEMON="$TARGET_DIR/debug/mnemed"
 
 "$BIN" init "$TMP/store" >/dev/null 2>&1
 "$BIN" cap mint "$TMP/store" --read --write --forget --promote --namespace '*' --tier-max trusted --out "$TMP/cap.txt" >/dev/null 2>&1

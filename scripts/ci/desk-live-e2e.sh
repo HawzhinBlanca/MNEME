@@ -32,8 +32,9 @@ want_status() { if printf '%s' "$1" | grep -qE "$2"; then pass "$3 ($1)"; else f
 echo "desk-live-e2e: build"
 cargo build -q -p mneme-cli --bin mneme
 cargo build -q -p mnemed --bin mnemed
-BIN="$ROOT/target/debug/mneme"
-DAEMON="$ROOT/target/debug/mnemed"
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/debug/mneme"
+DAEMON="$TARGET_DIR/debug/mnemed"
 
 echo "desk-live-e2e: provision store + capabilities"
 "$BIN" init "$TMP/store" >/dev/null 2>&1

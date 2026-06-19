@@ -115,6 +115,12 @@ jobs:
       - name: Playwright UI (skipped until MNEME_UI_BASE_URL)
         run: npm run test:e2e:ui
 
+      - name: MNEME Desk live e2e (real cap + daemon + host stack)
+        run: bash scripts/ci/desk-live-e2e.sh
+
+      - name: MNEME Desk live browser e2e (Playwright against the live stack)
+        run: npm run test:e2e:ui:live
+
       - name: Upload Playwright artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -122,6 +128,7 @@ jobs:
           name: playwright-e2e-failure
           path: |
             e2e/test-results/
+            e2e/test-results-live/
             playwright-report/
           if-no-files-found: ignore
 
