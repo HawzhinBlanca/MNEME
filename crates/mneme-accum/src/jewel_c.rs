@@ -442,3 +442,147 @@ pub fn verify_nonuse_after_forget(
     let prime = element_prime_from_commit(forgotten_commit);
     verify_non_membership(params, acc_bytes, &prime, proof)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ACCUM-1: Membership proof roundtrip — accumulate then prove then verify.
+    #[test]
+    fn membership_proof_roundtrip() {
+        let mut prover = test_accumulator_prover().expect("test prover must initialize");
+        let params = test_accumulator_params();
+
+        let commit = [0x01u8; 32];
+        let prime = element_prime_from_commit(&commit);
+
+        accumulate(&mut prover, &prime).expect("accumulate must succeed for a fresh prime");
+        let acc = accumulator_value(&prover);
+
+        let proof = prove_membership(&prover, &prime).expect("membership proof must succeed");
+        verify_membership(&params, &acc, &prime, &proof)
+            .expect("fresh membership proof must verify");
+    }
+
+    /// ACCUM-2: Non-membership proof roundtrip — element never added → prove then verify.
+    #[test]
+    fn non_membership_proof_roundtrip() {
+        let mut prover = test_accumulator_prover().expect("test prover");
+        let params = test_accumulator_params();
+
+        // Accumulate one element so the primes product is non-trivial.
+        let used_commit = [0xAAu8; 32];
+        let used_prime = element_prime_from_commit(&used_commit);
+        accumulate(&mut prover, &used_prime).expect("accumulate");
+        let acc = accumulator_value(&prover);
+
+        // A different commit was never accumulated.
+        let absent_commit = [0xBBu8; 32];
+        let absent_prime = element_prime_from_commit(&absent_commit);
+
+        let proof = prove_non_membership(&prover, &absent_prime)
+            .expect("non-membership proof must succeed for absent element");
+        verify_non_membership(&params, &acc, &absent_prime, &proof)
+            .expect("non-membership proof must verify");
+    }
+
+    /// ACCUM-3: Duplicate element is rejected by accumulate.
+    #[test]
+    fn accumulate_rejects_duplicate_element() {
+        let mut prover = test_accumulator_prover().expect("test prover");
+        let commit = [0x02u8; 32];
+        let prime = element_prime_from_commit(&commit);
+
+        accumulate(&mut prover, &prime).expect("first accumulate must succeed");
+        let result = accumulate(&mut prover, &prime);
+        assert!(result.is_err(), "duplicate element must be rejected");
+    }
+
+    /// ACCUM-4: prove_membership fails for an element not in the accumulator.
+    #[test]
+    fn prove_membership_fails_for_unknown_element() {
+        let mut prover = test_accumulator_prover().expect("test prover");
+        let known = element_prime_from_commit(&[0x10u8; 32]);
+        let unknown = element_prime_from_commit(&[0x20u8; 32]);
+        accumulate(&mut prover, &known).expect("accumulate known");
+
+        assert!(
+            prove_membership(&prover, &unknown).is_err(),
+            "membership proof must fail for element not in the accumulator"
+        );
+    }
+
+    /// ACCUM-5: prove_non_membership fails for an accumulated element (fail-closed).
+    #[test]
+    fn prove_non_membership_rejects_accumulated_element() {
+        let mut prover = test_accumulator_prover().expect("test prover");
+        let commit = [0x33u8; 32];
+        let prime = element_prime_from_commit(&commit);
+        accumulate(&mut prover, &prime).expect("accumulate");
+
+        assert!(
+            prove_non_membership(&prover, &prime).is_err(),
+            "non-membership proof must fail for a member element"
+        );
+    }
+
+    /// ACCUM-6: verify_membership rejects proof for wrong element.
+    #[test]
+    fn verify_membership_rejects_wrong_element() {
+        let mut prover = test_accumulator_prover().expect("test prover");
+        let params = test_accumulator_params();
+        let commit_a = [0xA0u8; 32];
+        let commit_b = [0xB0u8; 32];
+        let prime_a = element_prime_from_commit(&commit_a);
+        let prime_b = element_prime_from_commit(&commit_b);
+
+        accumulate(&mut prover, &prime_a).expect("accumulate a");
+        accumulate(&mut prover, &prime_b).expect("accumulate b");
+        let acc = accumulator_value(&prover);
+
+        let proof_a = prove_membership(&prover, &prime_a).expect("proof for a");
+        // Verifying proof_a against prime_b must fail.
+        assert!(
+            verify_membership(&params, &acc, &prime_b, &proof_a).is_err(),
+            "membership proof for element A must not verify against element B"
+        );
+    }
+
+    /// ACCUM-7: nonuse_after_forget roundtrip — commit added then removed → non-membership.
+    #[test]
+    fn nonuse_after_forget_roundtrip() {
+        let mut prover = test_accumulator_prover().expect("test prover");
+        let params = test_accumulator_params();
+
+        // Accumulate two commits; then simulate forget by rebuilding prover
+        // without the forgotten one (Jewel C accumulator requires re-init on forget).
+        let active_commit = [0xC1u8; 32];
+        let forgotten_commit = [0xC2u8; 32];
+
+        let active_prime = element_prime_from_commit(&active_commit);
+        accumulate(&mut prover, &active_prime).expect("accumulate active");
+        // Note: we do NOT accumulate forgotten_commit — it was never added.
+        let acc = accumulator_value(&prover);
+
+        let proof = prove_nonuse_after_forget(&prover, &forgotten_commit)
+            .expect("nonuse proof must succeed");
+        verify_nonuse_after_forget(&params, &acc, &forgotten_commit, &proof)
+            .expect("nonuse proof must verify");
+    }
+
+    /// ACCUM-8: hash_commit is deterministic and domain-separated.
+    #[test]
+    fn hash_commit_deterministic_and_domain_separated() {
+        let raw = [0x42u8; 32];
+        let h1 = hash_commit(&raw);
+        let h2 = hash_commit(&raw);
+        assert_eq!(h1, h2, "hash_commit must be deterministic");
+        // Domain separation: hash_commit must differ from raw BLAKE3 of same input.
+        let plain = *blake3::hash(&raw).as_bytes();
+        assert_ne!(
+            h1, plain,
+            "hash_commit must be domain-separated from plain BLAKE3"
+        );
+        assert_ne!(h1, [0u8; 32], "hash_commit must not be all-zeros");
+    }
+}

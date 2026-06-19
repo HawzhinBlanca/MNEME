@@ -62,7 +62,8 @@ pub use complete_knn::{
     prove_complete_knn, squared_euclidean, verify_complete_knn, verify_complete_knn_cost_bounded,
 };
 pub use complete_knn_cert::{
-    CompleteKnnCertAttachment, decode_complete_knn_attachment, encode_complete_knn_attachment,
+    CompleteKnnCertAttachment, decode_complete_knn_attachment, decode_proof_bytes_direct,
+    encode_complete_knn_attachment, hash_proof,
 };
 pub use error::IndexError;
 pub use key_index::KeyIndex;
@@ -115,7 +116,7 @@ pub use cognition_cert::{
     assemble_cognition_certificate_v1_with_beacon,
     assemble_cognition_certificate_v1_with_extensions, fuzz_cognition_cert_wire,
     parse_cognition_certificate, verify_cognition_certificate_v1,
-    verify_cognition_certificate_v1_with_spot_check,
+    verify_cognition_certificate_v1_ext, verify_cognition_certificate_v1_with_spot_check,
 };
 #[cfg(feature = "context_gate")]
 pub use context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
@@ -165,9 +166,8 @@ pub use piop_research::{
 
 /// ADS backend enabled when the `ads` feature is on.
 /// Privacy path is `commitment_binding` only — a tagged BLAKE3 binding envelope,
-/// not SNARK, not Plonky2. (The legacy `zk` Cargo feature alias was dropped
-/// because it implied zero-knowledge, which the BLAKE3 envelope is not. The
-/// deprecated `plonky2_prover` alias maps to `pedersen_schnorr_zk`, not this path.)
+/// not SNARK, not ZK. (The legacy `zk` Cargo feature alias was dropped
+/// because it implied zero-knowledge, which the BLAKE3 envelope is not.)
 #[cfg(feature = "ads")]
 pub const SEMANTIC_BACKEND_ENABLED: bool = true;
 

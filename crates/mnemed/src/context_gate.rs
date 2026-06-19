@@ -4,6 +4,7 @@ use mneme_cap::Capability;
 use mneme_core::{
     ContextConsumptionAttestation, DistanceMetric, FixedPointEmbedding, MnemeError, OutputBinding,
     Procedure, ProcedureAlgo, Query, decode_context_consumption_attestation, decode_output_binding,
+    from_bytes_strict,
 };
 use mneme_store::{ContextGateRecallOpts, Store};
 
@@ -52,7 +53,7 @@ pub fn recall_verified_context_gated_from_b64(
         None => None,
     };
     let emb_bytes = decode_context_embedding_b64_bytes(input.embedding_b64)?;
-    let embedding = FixedPointEmbedding::from_bytes(&emb_bytes)?;
+    let embedding = from_bytes_strict(&emb_bytes)?;
     let model_output = match input.model_output_b64 {
         Some(b64) => Some(decode_context_model_output_b64_bytes(b64)?),
         None => None,

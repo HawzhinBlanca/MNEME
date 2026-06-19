@@ -30,7 +30,7 @@ impl Store {
                 proc,
                 embedding,
                 root.preimage_hash,
-                mneme_core::RetrievalProofLevel::ExactDominance,
+                mneme_core::RetrievalProofLevel::ProcedureFaithfulTopK,
             )
             .map_err(crate::index_err)?;
         let mut seed_ids: Vec<[u8; 32]> = receipt

@@ -1,6 +1,6 @@
 # Security Policy
 
-MNEME is a verifiable memory substrate for AI agents. Correctness, tamper resistance,
+MNEME is a fail-closed verifiable recall system for AI-agent memory. Correctness, tamper resistance,
 and fail-closed verification are core design goals — not optional hardening.
 
 ## Supported versions
@@ -39,7 +39,7 @@ Include:
 The following are documented product limits, not verifier bypasses:
 
 - **Semantic truth.** Signed entries verify even when content is false (*authenticated ≠ true*).
-- **Exact nearest neighbors.** Verifiable retrieval proves procedure-faithfulness over committed
+- **Exact nearest neighbors.** Verifiable retrieval (§3) proves procedure-faithfulness over committed
   geometry, not that returned items are the true top-k by query-to-embedding distance.
 - **Non-optimal ANN rankings** unless they bypass the verification gate or panic inside the
   budgeted TCB (`mneme-verify`, ≤500 lines).

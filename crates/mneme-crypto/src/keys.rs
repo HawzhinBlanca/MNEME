@@ -118,3 +118,103 @@ impl TrustConfig {
 pub fn public_key_from_bytes(bytes: &[u8; 32]) -> Result<VerifyingKey, MnemeError> {
     crate::sign::verifying_key_from_bytes(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::verify_signature;
+
+    /// KEYS-1: from_seed is deterministic — same seed → same public key every time.
+    /// A non-deterministic keygen would silently produce a different keypair on each
+    /// run, breaking any stored public key reference.
+    #[test]
+    fn keypair_from_seed_is_deterministic() {
+        let seed = [0xA1u8; 32];
+        let kp1 = KeyPair::from_seed(seed);
+        let kp2 = KeyPair::from_seed(seed);
+        assert_eq!(
+            kp1.public_key_bytes(),
+            kp2.public_key_bytes(),
+            "same seed must always produce the same public key"
+        );
+    }
+
+    /// KEYS-2: sign + verify roundtrip succeeds for an arbitrary message.
+    #[test]
+    fn keypair_sign_verify_roundtrip() {
+        let kp = KeyPair::from_seed([0x42u8; 32]);
+        let msg = b"hello mneme security test";
+        let sig = kp.sign(msg);
+        let pk = public_key_from_bytes(&kp.public_key_bytes()).expect("valid pubkey");
+        assert!(
+            verify_signature(&pk, msg, &sig).is_ok(),
+            "a freshly signed message must verify against its own public key"
+        );
+    }
+
+    /// KEYS-3: A signature verified against the wrong public key must fail.
+    /// This guards the core non-repudiation property — a signature is bound to one key.
+    #[test]
+    fn signature_rejected_for_wrong_public_key() {
+        let signer = KeyPair::from_seed([0x11u8; 32]);
+        let wrong = KeyPair::from_seed([0x22u8; 32]);
+        let msg = b"message signed by signer, not wrong";
+        let sig = signer.sign(msg);
+        let wrong_pk = public_key_from_bytes(&wrong.public_key_bytes()).expect("valid pubkey");
+        assert!(
+            verify_signature(&wrong_pk, msg, &sig).is_err(),
+            "signature must be rejected when verified against a different public key"
+        );
+    }
+
+    /// KEYS-4: vault_channel_key is deterministic for the same seed.
+    #[test]
+    fn vault_channel_key_is_deterministic() {
+        let kp = KeyPair::from_seed([0xBBu8; 32]);
+        let k1 = kp.vault_channel_key();
+        let k2 = kp.vault_channel_key();
+        assert_eq!(k1, k2, "vault_channel_key must be deterministic");
+        assert_ne!(k1, [0u8; 32], "vault_channel_key must not be all-zeros");
+    }
+
+    /// KEYS-5: vault_channel_key differs between two different keypairs.
+    #[test]
+    fn vault_channel_key_differs_between_keypairs() {
+        let kp_a = KeyPair::from_seed([0x01u8; 32]);
+        let kp_b = KeyPair::from_seed([0x02u8; 32]);
+        assert_ne!(
+            kp_a.vault_channel_key(),
+            kp_b.vault_channel_key(),
+            "distinct keypairs must produce distinct vault_channel_keys"
+        );
+    }
+
+    /// KEYS-6: TrustConfig.trusts_operator and trusts_writer behave correctly.
+    #[test]
+    fn trust_config_operator_and_writer_checks() {
+        let op = KeyPair::from_seed([0xCCu8; 32]);
+        let other = KeyPair::from_seed([0xDDu8; 32]);
+        let trust = TrustConfig::new(op.public_key_bytes());
+
+        assert!(
+            trust.trusts_operator(&op.public_key_bytes()),
+            "operator key must be trusted"
+        );
+        assert!(
+            !trust.trusts_operator(&other.public_key_bytes()),
+            "non-operator key must not be trusted"
+        );
+
+        // trusts_writer checks BLAKE3(pubkey) against stored BLAKE3(pubkey) hashes
+        let op_hash = *blake3::hash(&op.public_key_bytes()).as_bytes();
+        assert!(
+            trust.trusts_writer(&op_hash),
+            "operator's writer hash must be trusted"
+        );
+        let other_hash = *blake3::hash(&other.public_key_bytes()).as_bytes();
+        assert!(
+            !trust.trusts_writer(&other_hash),
+            "non-operator writer hash must not be trusted"
+        );
+    }
+}

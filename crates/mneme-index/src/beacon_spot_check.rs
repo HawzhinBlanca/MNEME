@@ -89,7 +89,7 @@ enum BeaconSpotCheckFailure {
     OnlineFetchFailed,
     #[cfg(feature = "beacon_online")]
     OnlineRandomnessMismatch,
-    AuditedRequiresExactDominance,
+    AuditedRequiresProcedureFaithfulTopK,
     AuditedExactNnFailed,
     WireRoundMissing,
     WireRandomnessMissing,
@@ -107,7 +107,7 @@ fn beacon_spot_check_failure_to_mneme(failure: BeaconSpotCheckFailure) -> MnemeE
         | BeaconSpotCheckFailure::BeaconRandomnessEmpty
         | BeaconSpotCheckFailure::BeaconRandomnessLengthInvalid
         | BeaconSpotCheckFailure::BindingDigestMismatch
-        | BeaconSpotCheckFailure::AuditedRequiresExactDominance
+        | BeaconSpotCheckFailure::AuditedRequiresProcedureFaithfulTopK
         | BeaconSpotCheckFailure::AuditedExactNnFailed
         | BeaconSpotCheckFailure::WireRoundMissing
         | BeaconSpotCheckFailure::WireRandomnessMissing
@@ -311,9 +311,9 @@ pub fn verify_beacon_spot_check(
     ) {
         return Ok(BeaconAuditOutcome::NotSelected);
     }
-    if level != RetrievalProofLevel::ExactDominance {
+    if level != RetrievalProofLevel::ProcedureFaithfulTopK {
         return Err(beacon_spot_check_error(
-            BeaconSpotCheckFailure::AuditedRequiresExactDominance,
+            BeaconSpotCheckFailure::AuditedRequiresProcedureFaithfulTopK,
         ));
     }
     if let Some(ctx) = spot_check {
@@ -419,6 +419,7 @@ mod tests {
                 procedure_id: [0x22; 32],
                 query_commit: [0x33; 32],
                 result_ids: vec![ObjectId([0x01; 32])],
+                candidates_embeddings: None,
             },
         )
     }
@@ -480,6 +481,7 @@ mod tests {
             procedure_id: [0x22; 32],
             query_commit: query.commit(),
             result_ids: vec![id],
+            candidates_embeddings: None,
         };
         let ctx = SpotCheckContext {
             query: &query,

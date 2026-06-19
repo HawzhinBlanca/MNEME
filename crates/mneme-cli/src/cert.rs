@@ -8,9 +8,9 @@ use mneme_core::{
 use mneme_crypto::TrustConfig;
 use mneme_index::{
     BEACON_SPOT_CHECK_HONESTY, BYZANTINE_INFERENCE_HONESTY, DEFAULT_AUDIT_RATE_PPM,
-    SpotCheckContext, audit_lottery_selected, load_store_embeddings, parse_cognition_certificate,
-    verify_audit_beacon_offline, verify_byzantine_inference, verify_cognition_certificate_v1,
-    verify_cognition_certificate_v1_with_spot_check,
+    SpotCheckContext, audit_lottery_selected, decode_proof_bytes_direct, load_store_embeddings,
+    parse_cognition_certificate, verify_audit_beacon_offline, verify_byzantine_inference,
+    verify_cognition_certificate_v1_ext, verify_cognition_certificate_v1_with_spot_check,
 };
 use mneme_store::Store;
 use std::fs;
@@ -25,6 +25,8 @@ pub fn run_certify(
     dim: u16,
     scale: i8,
     level: RetrievalProofLevel,
+    constant_size: bool,
+    proof_out: Option<&Path>,
     out: &Path,
 ) -> Result<(), MnemeError> {
     let embedding = certify_embedding_from_components(components, dim, scale)?;
@@ -43,11 +45,27 @@ pub fn run_certify(
         min_tier: TrustTier::Trusted,
         embedding: Some(embedding.clone()),
     };
-    let bytes = store.issue_cognition_certificate_v1(&query, &proc, cap, level)?;
+    let bytes =
+        store.issue_cognition_certificate_v1_ext(&query, &proc, cap, level, constant_size)?;
     fs::write(out, &bytes).map_err(|e| MnemeError::IoFailed {
         path: out.display().to_string(),
         kind: e.to_string(),
     })?;
+
+    if constant_size {
+        if let Some(p_path) = proof_out {
+            let full_cert_bytes =
+                store.issue_cognition_certificate_v1_ext(&query, &proc, cap, level, false)?;
+            let parsed = parse_cognition_certificate(&full_cert_bytes)?;
+            if let Some(att) = &parsed.receipt.complete_knn {
+                fs::write(p_path, &att.proof_bytes).map_err(|e| MnemeError::IoFailed {
+                    path: p_path.display().to_string(),
+                    kind: e.to_string(),
+                })?;
+            }
+        }
+    }
+
     let _ = trust;
     Ok(())
 }
@@ -64,12 +82,23 @@ pub fn run_verify_cert(
     path: &Path,
     trust: &TrustConfig,
     proc: &Procedure,
+    proof_file: Option<&Path>,
 ) -> Result<(), MnemeError> {
     let bytes = fs::read(path).map_err(|e| MnemeError::IoFailed {
         path: path.display().to_string(),
         kind: e.to_string(),
     })?;
-    verify_cognition_certificate_v1(&bytes, trust, proc)?;
+    let proof = if let Some(p_path) = proof_file {
+        let p_bytes = fs::read(p_path).map_err(|e| MnemeError::IoFailed {
+            path: p_path.display().to_string(),
+            kind: e.to_string(),
+        })?;
+        let p = decode_proof_bytes_direct(&p_bytes)?;
+        Some(p)
+    } else {
+        None
+    };
+    verify_cognition_certificate_v1_ext(&bytes, trust, proc, proof.as_ref())?;
     Ok(())
 }
 

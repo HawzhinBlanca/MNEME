@@ -8,6 +8,7 @@ use crate::beacon_spot_check::{
     AuditBeacon, DEFAULT_AUDIT_RATE_PPM, SpotCheckContext, verify_beacon_spot_check,
 };
 use crate::byzantine_inference::{InferenceConsistency, verify_byzantine_inference};
+use crate::complete_knn::CompleteKnnProof;
 #[cfg(feature = "context_gate")]
 use crate::context_gate::{CONTEXT_GATE_STRICT_STATUS, apply_context_gate_strict};
 use crate::receipt::SemanticRecallReceipt;
@@ -422,7 +423,7 @@ pub fn assemble_cognition_certificate_v1_with_extensions(
             .zkann
             .as_ref()
             .map(|z| z.level)
-            .unwrap_or(RetrievalProofLevel::ExactDominance),
+            .unwrap_or(RetrievalProofLevel::ProcedureFaithfulTopK),
         as_of_seq: match as_of {
             Some(AsOf::RootSeq(s)) => Some(s),
             Some(AsOf::ValidTime(_)) => None,
@@ -472,7 +473,7 @@ pub fn assemble_cognition_certificate_v2_draft_with_beacon(
             .zkann
             .as_ref()
             .map(|z| z.level)
-            .unwrap_or(RetrievalProofLevel::ExactDominance),
+            .unwrap_or(RetrievalProofLevel::ProcedureFaithfulTopK),
         as_of_seq: match as_of {
             Some(AsOf::RootSeq(s)) => Some(s),
             Some(AsOf::ValidTime(_)) => None,
@@ -492,7 +493,16 @@ pub fn verify_cognition_certificate_v1(
     trust: &TrustConfig,
     proc: &Procedure,
 ) -> Result<Root, MnemeError> {
-    verify_cognition_certificate_v1_with_spot_check(bytes, trust, proc, None)
+    verify_cognition_certificate_v1_with_spot_check_ext(bytes, trust, proc, None, None)
+}
+
+pub fn verify_cognition_certificate_v1_ext(
+    bytes: &[u8],
+    trust: &TrustConfig,
+    proc: &Procedure,
+    proof_override: Option<&CompleteKnnProof>,
+) -> Result<Root, MnemeError> {
+    verify_cognition_certificate_v1_with_spot_check_ext(bytes, trust, proc, None, proof_override)
 }
 
 /// Certificate v1 verification with optional embedding-backed beacon spot-check context.
@@ -501,6 +511,17 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
     trust: &TrustConfig,
     proc: &Procedure,
     spot_check: Option<&SpotCheckContext<'_>>,
+) -> Result<Root, MnemeError> {
+    verify_cognition_certificate_v1_with_spot_check_ext(bytes, trust, proc, spot_check, None)
+}
+
+/// Certificate v1 verification with optional embedding-backed beacon spot-check context and proof override.
+pub fn verify_cognition_certificate_v1_with_spot_check_ext(
+    bytes: &[u8],
+    trust: &TrustConfig,
+    proc: &Procedure,
+    spot_check: Option<&SpotCheckContext<'_>>,
+    proof_override: Option<&CompleteKnnProof>,
 ) -> Result<Root, MnemeError> {
     let wire: CognitionCertWire = from_bytes_strict(bytes)
         .map_err(|_| cognition_cert_error(CognitionCertFailure::V1WireDecode))?;
@@ -541,7 +562,7 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
         _ => {}
     }
     if wire.level == RetrievalProofLevel::CompleteTopK {
-        verify_complete_topk_certificate(&wire.receipt)?;
+        verify_complete_topk_certificate_ext(&wire.receipt, proof_override)?;
         return Ok(root);
     }
     let committed_leaf_count = wire.receipt.verification_object.candidates.len();
@@ -564,7 +585,15 @@ pub fn verify_cognition_certificate_v1_with_spot_check(
     Ok(root)
 }
 
+#[allow(dead_code)]
 fn verify_complete_topk_certificate(receipt: &SemanticRecallReceipt) -> Result<(), MnemeError> {
+    verify_complete_topk_certificate_ext(receipt, None)
+}
+
+fn verify_complete_topk_certificate_ext(
+    receipt: &SemanticRecallReceipt,
+    proof_override: Option<&CompleteKnnProof>,
+) -> Result<(), MnemeError> {
     let zkann = receipt
         .zkann
         .as_ref()
@@ -584,7 +613,11 @@ fn verify_complete_topk_certificate(receipt: &SemanticRecallReceipt) -> Result<(
             CognitionCertFailure::CompleteKnnBindingMismatch,
         ));
     }
-    att.verify_offline()
+    if let Some(proof) = proof_override {
+        att.verify_offline_with_proof(proof)
+    } else {
+        att.verify_offline()
+    }
 }
 
 /// Offline verification for the Phase II draft certificate.
@@ -630,7 +663,7 @@ pub fn verify_cognition_certificate_v2_draft(
                 CognitionCertFailure::V2DraftZkannLevelMismatch,
             ));
         }
-        None if wire.level != RetrievalProofLevel::ExactDominance => {
+        None if wire.level != RetrievalProofLevel::ProcedureFaithfulTopK => {
             return Err(cognition_cert_error(
                 CognitionCertFailure::V2DraftZkannMissingForLevel,
             ));
@@ -709,7 +742,7 @@ pub fn verify_cognition_certificate_v2_draft_strict(
                 CognitionCertFailure::V2StrictZkannLevelMismatch,
             ));
         }
-        None if wire.level != RetrievalProofLevel::ExactDominance => {
+        None if wire.level != RetrievalProofLevel::ProcedureFaithfulTopK => {
             return Err(cognition_cert_error(
                 CognitionCertFailure::V2StrictZkannMissingForLevel,
             ));
@@ -1236,7 +1269,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
             }
         }
     }
-    let (nodes, candidates, leaf_indices) = vo_body
+    let (nodes, candidates, leaf_indices, candidates_embeddings) = vo_body
         .ok_or_else(|| cognition_cert_error(CognitionCertFailure::SemanticReceiptVoBodyMissing))?;
     Ok(SemanticRecallReceipt {
         root_bound: root_bound.ok_or_else(|| {
@@ -1258,6 +1291,7 @@ fn decode_semantic_receipt(bytes: &[u8]) -> Result<SemanticRecallReceipt, MnemeE
             result_ids: result_ids.ok_or_else(|| {
                 cognition_cert_error(CognitionCertFailure::SemanticReceiptResultsMissing)
             })?,
+            candidates_embeddings,
         },
         zk_retrieval: None,
         zkann,
@@ -1270,28 +1304,49 @@ fn encode_vo_body(
     enc: &mut Encoder,
     vo: &mneme_core::VerificationObject,
 ) -> Result<(), MnemeError> {
-    enc.begin_map(3)?;
+    let mut map_len = 3;
+    if vo.candidates_embeddings.is_some() {
+        map_len += 1;
+    }
+    enc.begin_map(map_len)?;
     enc.encode_unsigned(1)?;
     encode_vo_nodes(enc, &vo.nodes)?;
     enc.encode_unsigned(2)?;
     encode_candidates(enc, &vo.candidates)?;
     enc.encode_unsigned(3)?;
     encode_leaf_indices(enc, &vo.leaf_indices)?;
+    if let Some(ref embs) = vo.candidates_embeddings {
+        enc.encode_unsigned(4)?;
+        encode_candidates_embeddings(enc, embs)?;
+    }
     Ok(())
 }
 
-fn decode_vo_body(value: &CborValue) -> Result<(VoNodes, VoCandidates, Vec<usize>), MnemeError> {
+#[allow(clippy::type_complexity)]
+fn decode_vo_body(
+    value: &CborValue,
+) -> Result<
+    (
+        VoNodes,
+        VoCandidates,
+        Vec<usize>,
+        Option<Vec<mneme_core::FixedPointEmbedding>>,
+    ),
+    MnemeError,
+> {
     let map = value.as_map().ok_or_else(|| {
         cognition_cert_error(CognitionCertFailure::VerificationObjectBodyMapInvalid)
     })?;
     let mut nodes = None;
     let mut candidates = None;
     let mut leaf_indices = None;
+    let mut candidates_embeddings = None;
     for (k, v) in map {
         match parse_u64_field_key(k)? {
             1 => nodes = Some(decode_vo_nodes(v)?),
             2 => candidates = Some(decode_candidates(v)?),
             3 => leaf_indices = Some(decode_leaf_indices(v)?),
+            4 => candidates_embeddings = Some(decode_candidates_embeddings(v)?),
             _ => return Err(cognition_vo_body_unknown_field_error()),
         }
     }
@@ -1309,12 +1364,45 @@ fn decode_vo_body(value: &CborValue) -> Result<(VoNodes, VoCandidates, Vec<usize
             CognitionCertFailure::VerificationObjectLeafIndexLengthMismatch,
         ));
     }
-    Ok((nodes, candidates, leaf_indices))
+    if let Some(ref embs) = candidates_embeddings {
+        if embs.len() != candidates.len() {
+            return Err(cognition_cert_error(
+                CognitionCertFailure::VerificationObjectLeafIndexLengthMismatch,
+            ));
+        }
+    }
+    Ok((nodes, candidates, leaf_indices, candidates_embeddings))
+}
+
+fn encode_candidates_embeddings(
+    enc: &mut Encoder,
+    embs: &[mneme_core::FixedPointEmbedding],
+) -> Result<(), MnemeError> {
+    enc.begin_array(embs.len() as u64)?;
+    for emb in embs {
+        emb.dcbor_encode(enc)?;
+    }
+    Ok(())
+}
+
+fn decode_candidates_embeddings(
+    value: &CborValue,
+) -> Result<Vec<mneme_core::FixedPointEmbedding>, MnemeError> {
+    let arr = value
+        .as_array()
+        .ok_or_else(|| cognition_cert_error(CognitionCertFailure::CandidateRowsArrayInvalid))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let bytes = to_bytes_canonical(item)?;
+        let emb = from_bytes_strict(&bytes)?;
+        out.push(emb);
+    }
+    Ok(out)
 }
 
 fn level_tag(level: RetrievalProofLevel) -> u64 {
     match level {
-        RetrievalProofLevel::ExactDominance => 0,
+        RetrievalProofLevel::ProcedureFaithfulTopK => 0,
         RetrievalProofLevel::HnswAuditOnDemand => 1,
         RetrievalProofLevel::CompleteTopK => 2,
     }
@@ -1323,7 +1411,7 @@ fn level_tag(level: RetrievalProofLevel) -> u64 {
 fn parse_level(value: &CborValue) -> Result<RetrievalProofLevel, MnemeError> {
     let n = parse_u64(value)?;
     match n {
-        0 => Ok(RetrievalProofLevel::ExactDominance),
+        0 => Ok(RetrievalProofLevel::ProcedureFaithfulTopK),
         1 => Ok(RetrievalProofLevel::HnswAuditOnDemand),
         2 => Ok(RetrievalProofLevel::CompleteTopK),
         _ => Err(cognition_cert_error(

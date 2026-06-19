@@ -1154,4 +1154,87 @@ mod tests {
             "layout sidecar reconstruction should call the named tombstone removal helper"
         );
     }
+
+    // ── Functional correctness tests ──────────────────────────────────────────
+
+    fn hex32(n: u8) -> String {
+        format!("{:064x}", n)
+    }
+
+    /// LAYOUT-FC-1: apply_sidecar maps well-formed hex entries into key_to_object
+    /// and populates the SMT leaf set correctly.
+    #[test]
+    fn apply_sidecar_maps_entries_into_key_to_object() {
+        let mut sidecar = KeyIndexSidecar::default();
+        let k = hex32(1);
+        let v = hex32(2);
+        sidecar.entries.insert(k.clone(), v.clone());
+        let (key_to_object, _key_index) = apply_sidecar(&sidecar).expect("valid sidecar");
+        let kb = mneme_core::decode_hex32(&k).expect("valid key hex");
+        assert!(
+            key_to_object.contains_key(&kb),
+            "key from sidecar entries must appear in key_to_object"
+        );
+    }
+
+    /// LAYOUT-FC-2: A tombstoned key must NOT appear in key_to_object (fail-closed).
+    /// This is the critical invariant: a tombstoned key must be invisible to live recall.
+    #[test]
+    fn apply_sidecar_tombstone_excludes_key_from_key_to_object() {
+        let mut sidecar = KeyIndexSidecar::default();
+        let k = hex32(7);
+        let v = hex32(8);
+        sidecar.entries.insert(k.clone(), v.clone());
+        sidecar.tombstones.push(k.clone());
+        let (key_to_object, _) = apply_sidecar(&sidecar).expect("valid sidecar");
+        let kb = mneme_core::decode_hex32(&k).expect("valid key hex");
+        assert!(
+            !key_to_object.contains_key(&kb),
+            "tombstoned key must NOT appear in key_to_object"
+        );
+    }
+
+    /// LAYOUT-FC-3: layout_journal_line_is_blank recognises blank and whitespace-only lines.
+    #[test]
+    fn layout_journal_line_blank_detection() {
+        assert!(layout_journal_line_is_blank(""), "empty string is blank");
+        assert!(
+            layout_journal_line_is_blank("   "),
+            "whitespace-only is blank"
+        );
+        assert!(layout_journal_line_is_blank("\t\n"), "tab+newline is blank");
+        assert!(
+            !layout_journal_line_is_blank("{\"op\":1}"),
+            "json line is not blank"
+        );
+    }
+
+    /// LAYOUT-FC-4: layout_push_key_index_tombstone_if_absent is idempotent.
+    #[test]
+    fn layout_push_tombstone_if_absent_is_idempotent() {
+        let mut tombstones: Vec<String> = Vec::new();
+        let key = hex32(42);
+        layout_push_key_index_tombstone_if_absent(&mut tombstones, key.clone());
+        layout_push_key_index_tombstone_if_absent(&mut tombstones, key.clone());
+        layout_push_key_index_tombstone_if_absent(&mut tombstones, key.clone());
+        assert_eq!(
+            tombstones.len(),
+            1,
+            "idempotent push must not add duplicates"
+        );
+        assert_eq!(tombstones[0], key);
+    }
+
+    /// LAYOUT-FC-5: hex_encode round-trips through decode_hex32 correctly.
+    #[test]
+    fn hex_encode_roundtrips_through_decode_hex32() {
+        let original = [0xDEu8; 32];
+        let encoded = hex_encode(&original);
+        assert_eq!(encoded.len(), 64, "hex_encode must produce 64 chars");
+        let decoded = mneme_core::decode_hex32(&encoded).expect("hex_encode must be decodable");
+        assert_eq!(
+            decoded, original,
+            "hex_encode → decode_hex32 must roundtrip"
+        );
+    }
 }

@@ -5,7 +5,7 @@ what it deliberately does **not** claim.
 
 ## Verifiable memory, not a truth oracle
 
-MNEME is a **verifiable memory substrate** for AI agents. Every agent read can carry an
+MNEME is a **fail-closed verifiable recall system** for AI-agent memory. Every agent read can carry an
 offline-checkable receipt against a signed root under a declared retrieval procedure.
 
 ```
@@ -40,14 +40,14 @@ Vector recall in MNEME is **verifiable**, not **optimal-by-default**.
 
 | Claim | v0 / Phase I disposition |
 |---|---|
-| Membership + completeness over committed candidates | Proven (ExactDominance / CompleteTopK paths) |
+| Membership + completeness over committed candidates | Proven (ProcedureFaithfulTopK / CompleteTopK paths) |
 | Top-k over prover-asserted distances | Proven for the authenticated candidate set |
 | True top-k by query-to-embedding distance | **Not proven** until verifiers recompute from carried embeddings |
 | Global exact-NN optimality (no closer hidden point) | Phase IV research; no PIOP prover shipped |
 
-Verifiable retrieval proves **procedure-faithfulness**, not exact nearest neighbors: the
+Verifiable retrieval (§3) proves **procedure-faithfulness**, not exact nearest neighbors: the
 declared retrieval procedure ran faithfully over committed, un-tampered data. Phase I
-`ExactDominance` proves membership/completeness plus top-k over prover-asserted distances;
+`ProcedureFaithfulTopK` proves membership/completeness plus top-k over prover-asserted distances;
 true top-k ranking is not proven, and returned items are not top-k by true query-to-embedding distance until verifiers recompute from carried embeddings.
 
 The optional `pedersen_schnorr_zk` feature adds a transparent ZK proof of faithful

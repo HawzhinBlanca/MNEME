@@ -1,7 +1,7 @@
 # mneme-core Interface Contract (§20.3)
 
 **Status:** FROZEN at Wave 0/1  
-**Contract version:** `mneme-core-v1.0.0` (`interface::CONTRACT_VERSION`)
+**Contract version:** `mneme-core-v2.0.0-draft` (`interface::CONTRACT_VERSION`)
 
 ## Change policy
 

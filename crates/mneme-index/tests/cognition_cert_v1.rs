@@ -50,7 +50,7 @@ fn fixture_root(semantic_commit: [u8; 32]) -> StoredRoot {
 
 fn retrieval_level_tag(level: RetrievalProofLevel) -> u64 {
     match level {
-        RetrievalProofLevel::ExactDominance => 0,
+        RetrievalProofLevel::ProcedureFaithfulTopK => 0,
         RetrievalProofLevel::HnswAuditOnDemand => 1,
         RetrievalProofLevel::CompleteTopK => 2,
     }
@@ -394,7 +394,12 @@ fn cognition_cert_v1_roundtrip_offline() {
         .unwrap();
     let commit = index.semantic_commit();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xcc; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xcc; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let stored = fixture_root(commit);
     let bytes = assemble_cognition_certificate_v1(&stored, &receipt, None).unwrap();
@@ -410,7 +415,7 @@ fn cognition_cert_v1_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
     let forged = forge_v1_outer_level(
         &bytes,
         RetrievalProofLevel::HnswAuditOnDemand,
-        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::ProcedureFaithfulTopK,
     );
 
     assert_eq!(
@@ -421,10 +426,11 @@ fn cognition_cert_v1_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
 
 #[test]
 fn cognition_cert_v1_rejects_hnsw_wire_level_with_exact_receipt_zkann() {
-    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ProcedureFaithfulTopK);
     let forged = forge_v1_outer_level(
         &bytes,
-        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::ProcedureFaithfulTopK,
         RetrievalProofLevel::HnswAuditOnDemand,
     );
 
@@ -448,7 +454,8 @@ fn cognition_cert_v1_rejects_hnsw_wire_level_without_receipt_zkann() {
 
 #[test]
 fn cognition_cert_v1_rejects_forged_as_of_sequence_mismatch() {
-    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ProcedureFaithfulTopK);
     let forged = forge_v1_as_of_seq(&bytes, 4);
 
     assert_eq!(
@@ -459,7 +466,8 @@ fn cognition_cert_v1_rejects_forged_as_of_sequence_mismatch() {
 
 #[test]
 fn cognition_cert_v1_rejects_forged_receipt_root_bound_mismatch() {
-    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ProcedureFaithfulTopK);
     let forged = forge_v1_receipt_root_bound(&bytes, [0x9a; 32]);
 
     assert_eq!(
@@ -470,7 +478,8 @@ fn cognition_cert_v1_rejects_forged_receipt_root_bound_mismatch() {
 
 #[test]
 fn cognition_cert_v1_rejects_forged_receipt_semantic_commit_mismatch() {
-    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ProcedureFaithfulTopK);
     let forged = forge_v1_receipt_semantic_commit(&bytes, [0x9b; 32]);
 
     assert_eq!(
@@ -481,7 +490,8 @@ fn cognition_cert_v1_rejects_forged_receipt_semantic_commit_mismatch() {
 
 #[test]
 fn cognition_cert_v1_optional_audit_beacon_field_absent_by_default() {
-    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ProcedureFaithfulTopK);
     let parsed = mneme_index::parse_cognition_certificate(&bytes).unwrap();
     assert!(parsed.audit_beacon.is_none());
     verify_cognition_certificate_v1(&bytes, &trust, &proc()).unwrap();
@@ -489,7 +499,8 @@ fn cognition_cert_v1_optional_audit_beacon_field_absent_by_default() {
 
 #[test]
 fn cognition_cert_v1_audit_beacon_rejects_tampered_binding() {
-    let (bytes, trust) = signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ExactDominance);
+    let (bytes, trust) =
+        signed_v1_fixture_with_receipt_level(RetrievalProofLevel::ProcedureFaithfulTopK);
     let parsed = mneme_index::parse_cognition_certificate(&bytes).unwrap();
     let mut beacon = prove_audit_beacon(50_000, vec![0x42; 32], &parsed.receipt).unwrap();
     beacon.binding_digest[1] ^= 0x80;
@@ -514,7 +525,12 @@ fn cognition_cert_tampered_bytes_fail_closed() {
         .insert(oid(1), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
         .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xcc; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xcc; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let stored = fixture_root(index.semantic_commit());
     let mut bytes = assemble_cognition_certificate_v1(&stored, &receipt, None).unwrap();
@@ -541,7 +557,12 @@ fn cognition_cert_v2_missing_attestation_rejects() {
         .insert(oid(2), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
         .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xee; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xee; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let stored = fixture_root(index.semantic_commit());
     let attestation = ContextAttestationDraft::placeholder([0x11; 32]);
@@ -604,7 +625,12 @@ fn cognition_cert_v2_status_mismatch_rejects() {
         .insert(oid(3), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
         .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xdd; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xdd; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let stored = fixture_root(index.semantic_commit());
     let mut attestation = ContextAttestationDraft::placeholder([0x22; 32]);
@@ -627,7 +653,12 @@ fn cognition_cert_v2_byte_tamper_rejects() {
         .insert(oid(4), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
         .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xbb; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xbb; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     let stored = fixture_root(index.semantic_commit());
     let attestation = ContextAttestationDraft::placeholder([0x33; 32]);
@@ -681,7 +712,7 @@ fn appendix_b_v2_fixture() -> (Vec<u8>, [u8; 32], [u8; 32]) {
             &proc(),
             &q,
             stored.preimage_hash,
-            RetrievalProofLevel::ExactDominance,
+            RetrievalProofLevel::ProcedureFaithfulTopK,
         )
         .unwrap();
     let attestation = ContextAttestationDraft::placeholder([0x11; 32]);
@@ -888,7 +919,7 @@ fn cognition_cert_v2_draft_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
     let forged = forge_v2_outer_level(
         &bytes,
         RetrievalProofLevel::HnswAuditOnDemand,
-        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::ProcedureFaithfulTopK,
     );
 
     assert_eq!(
@@ -902,10 +933,10 @@ fn cognition_cert_v2_draft_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
 fn cognition_cert_v2_draft_rejects_hnsw_wire_level_with_exact_receipt_zkann() {
     let attestation = ContextAttestationDraft::placeholder([0x49; 32]);
     let (bytes, trust) =
-        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::ExactDominance);
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::ProcedureFaithfulTopK);
     let forged = forge_v2_outer_level(
         &bytes,
-        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::ProcedureFaithfulTopK,
         RetrievalProofLevel::HnswAuditOnDemand,
     );
 
@@ -931,7 +962,7 @@ fn cognition_cert_v2_strict_rejects_exact_wire_level_with_hnsw_receipt_zkann() {
     let forged = forge_v2_outer_level(
         &bytes,
         RetrievalProofLevel::HnswAuditOnDemand,
-        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::ProcedureFaithfulTopK,
     );
 
     assert_eq!(
@@ -952,10 +983,10 @@ fn cognition_cert_v2_strict_rejects_hnsw_wire_level_with_exact_receipt_zkann() {
         None,
     );
     let (bytes, trust) =
-        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::ExactDominance);
+        v2_fixture_with_receipt_level(attestation, RetrievalProofLevel::ProcedureFaithfulTopK);
     let forged = forge_v2_outer_level(
         &bytes,
-        RetrievalProofLevel::ExactDominance,
+        RetrievalProofLevel::ProcedureFaithfulTopK,
         RetrievalProofLevel::HnswAuditOnDemand,
     );
 
@@ -971,7 +1002,7 @@ fn cognition_cert_v2_draft_wire_hex_is_frozen() {
     let (bytes, _, _) = appendix_b_v2_fixture();
     assert_eq!(
         hex::encode(bytes),
-        "a50102020004590107a901010258200000000000000000000000000000000000000000000000000000000000000000035820010101010101010101010101010101010101010101010101010101010101010104582082a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b054e00000000000000000000000000000658200000000000000000000000000000000000000000000000000000000000000000075820a9c6882ecf671fa7595e3beb6b6222e13c24761caca110774a635e1dde15c571085840c4681407a501b07fd8fbfff306fed41398791c9b4c9a2aba873752694a17f761ac3b0bb6c3a8eed2ac91132e9bf7313e1724a640059789c36eec3ac0fd74340909010559014ca7015820a9c6882ecf671fa7595e3beb6b6222e13c24761caca110774a635e1dde15c57102582082a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b0358206b57290901159c7b137d09b560c53dbb149bfc7075e975536b1ee8de1f32fc1d045820caaa71e5668ac5b52c5e152c25614db2a5245c103d523dce6d41967f3ac5cb2505815820abababababababababababababababababababababababababababababababab06a3018182582082a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b800281835820abababababababababababababababababababababababababababababababab582061b7d4e910c08bef298678b03b937f92a49cc1f059b7c07be4793e6bf23702ed0103810007a2010002815820abababababababababababababababababababababababababababababababab065845a201781e756e76657269666965645f756e74696c5f70686173655f69695f676174650258201111111111111111111111111111111111111111111111111111111111111111"
+        "a50102020004590107a901010258200000000000000000000000000000000000000000000000000000000000000000035820010101010101010101010101010101010101010101010101010101010101010104582082a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b054e00000000000000000000000000000658200000000000000000000000000000000000000000000000000000000000000000075820a9c6882ecf671fa7595e3beb6b6222e13c24761caca110774a635e1dde15c571085840c4681407a501b07fd8fbfff306fed41398791c9b4c9a2aba873752694a17f761ac3b0bb6c3a8eed2ac91132e9bf7313e1724a640059789c36eec3ac0fd743409090105590157a7015820a9c6882ecf671fa7595e3beb6b6222e13c24761caca110774a635e1dde15c57102582082a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b0358206b57290901159c7b137d09b560c53dbb149bfc7075e975536b1ee8de1f32fc1d045820caaa71e5668ac5b52c5e152c25614db2a5245c103d523dce6d41967f3ac5cb2505815820abababababababababababababababababababababababababababababababab06a4018182582082a2bb6fee0f66efb1aa40cdf7477bbc1aaf2ab7d113d6018bb4c5380b20599b800281835820abababababababababababababababababababababababababababababababab582061b7d4e910c08bef298678b03b937f92a49cc1f059b7c07be4793e6bf23702ed010381000481a3010202000382010007a2010002815820abababababababababababababababababababababababababababababababab065845a201781e756e76657269666965645f756e74696c5f70686173655f69695f676174650258201111111111111111111111111111111111111111111111111111111111111111"
     );
 }
 

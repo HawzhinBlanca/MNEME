@@ -75,6 +75,83 @@ pub fn replay_from_candidates(proc: &Procedure, candidates: &[CandidateRow]) -> 
     sorted.iter().map(|(id, _, _)| *id).collect()
 }
 
+/// Quantized fixed-point embedding: `value = component * 2^scale`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixedPointEmbedding {
+    pub dim: u32,
+    pub scale: i8,
+    pub components: Vec<i16>,
+}
+
+impl FixedPointEmbedding {
+    pub fn new(dim: u32, scale: i8, components: Vec<i16>) -> Result<Self, crate::CrossrefError> {
+        let declared_dim = usize::try_from(dim).map_err(|_| crate::CrossrefError::SchemaDrift)?;
+        if declared_dim == 0 || components.len() != declared_dim {
+            return Err(crate::CrossrefError::SchemaDrift);
+        }
+        Ok(Self {
+            dim,
+            scale,
+            components,
+        })
+    }
+
+    /// `embedding_commit = BLAKE3(SEM ‖ dim_le ‖ scale ‖ concat(components_le_i16))`.
+    pub fn commit(&self) -> [u8; 32] {
+        crate::domain::hash_sem_preimage(self.dim.to_le_bytes(), self.scale, &self.components)
+    }
+
+    pub fn validate_shape(&self) -> Result<(), crate::CrossrefError> {
+        let declared_dim =
+            usize::try_from(self.dim).map_err(|_| crate::CrossrefError::SchemaDrift)?;
+        if declared_dim == 0 || self.components.len() != declared_dim {
+            return Err(crate::CrossrefError::SchemaDrift);
+        }
+        Ok(())
+    }
+
+    fn ensure_compatible_pair(&self, other: &Self) -> Result<(), crate::CrossrefError> {
+        self.validate_shape()?;
+        other.validate_shape()?;
+        if self.dim != other.dim || self.scale != other.scale {
+            return Err(crate::CrossrefError::SchemaDrift);
+        }
+        Ok(())
+    }
+
+    /// Integer squared-L2 distance in the quantized domain (procedure-pinned).
+    pub fn squared_l2_distance(&self, other: &Self) -> Result<i64, crate::CrossrefError> {
+        self.ensure_compatible_pair(other)?;
+        let mut sum: i64 = 0;
+        for (a, b) in self.components.iter().zip(&other.components) {
+            let diff = i64::from(*a) - i64::from(*b);
+            sum = sum
+                .checked_add(
+                    diff.checked_mul(diff)
+                        .ok_or(crate::CrossrefError::SchemaDrift)?,
+                )
+                .ok_or(crate::CrossrefError::SchemaDrift)?;
+        }
+        Ok(sum)
+    }
+
+    /// Integer dot product for cosine-style procedures.
+    pub fn dot_product(&self, other: &Self) -> Result<i64, crate::CrossrefError> {
+        self.ensure_compatible_pair(other)?;
+        let mut sum: i64 = 0;
+        for (a, b) in self.components.iter().zip(&other.components) {
+            sum = sum
+                .checked_add(
+                    i64::from(*a)
+                        .checked_mul(i64::from(*b))
+                        .ok_or(crate::CrossrefError::SchemaDrift)?,
+                )
+                .ok_or(crate::CrossrefError::SchemaDrift)?;
+        }
+        Ok(sum)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

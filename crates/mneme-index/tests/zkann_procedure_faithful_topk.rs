@@ -24,7 +24,7 @@ fn proc() -> Procedure {
 }
 
 #[test]
-fn zkann_exact_dominance_roundtrip() {
+fn zkann_procedure_faithful_topk_roundtrip() {
     let mut index = SemanticIndex::new();
     let q = FixedPointEmbedding::new(2, 0, vec![0, 0]).unwrap();
     index
@@ -34,7 +34,12 @@ fn zkann_exact_dominance_roundtrip() {
         .insert(oid(2), FixedPointEmbedding::new(2, 0, vec![5, 0]).unwrap())
         .unwrap();
     let receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xab; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     verify_zkann_attachment(&receipt, &proc(), 2).unwrap();
     verify_semantic_receipt_vo_zkann(&receipt, &proc(), 2).unwrap();
@@ -51,7 +56,12 @@ fn zkann_reordered_result_fails_dominance() {
         .insert(oid(2), FixedPointEmbedding::new(2, 0, vec![5, 0]).unwrap())
         .unwrap();
     let mut receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xab; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
     receipt.verification_object.result_ids = vec![oid(2)];
     assert_eq!(
@@ -79,7 +89,12 @@ fn zkann_dropped_true_nearest_neighbor_must_be_rejected() {
         .insert(oid(9), FixedPointEmbedding::new(2, 0, vec![1, 0]).unwrap())
         .unwrap();
     let mut receipt = index
-        .recall_receipt_zkann(&proc(), &q, [0xab; 32], RetrievalProofLevel::ExactDominance)
+        .recall_receipt_zkann(
+            &proc(),
+            &q,
+            [0xab; 32],
+            RetrievalProofLevel::ProcedureFaithfulTopK,
+        )
         .unwrap();
 
     let vo = &mut receipt.verification_object;

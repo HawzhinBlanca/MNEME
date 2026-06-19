@@ -47,6 +47,9 @@ fn build_complete_topk_cert() -> (Vec<u8>, TrustConfig) {
         k: k as u32,
         proof,
         beacon: None,
+        constant_proof_hash: None,
+        merkle_hnsw_root: None,
+        constant_size: false,
     };
     let proof_bytes = encode_complete_knn_attachment(&att).expect("encode attachment");
     let mut receipt = SemanticRecallReceipt::new(
@@ -59,6 +62,7 @@ fn build_complete_topk_cert() -> (Vec<u8>, TrustConfig) {
             procedure_id: [0xee; 32],
             query_commit: [0x11; 32],
             result_ids: (0..returned_len).map(|_| ObjectId([0x22; 32])).collect(),
+            candidates_embeddings: None,
         },
     );
     receipt.zkann = Some(ZkannAttachment {
@@ -75,7 +79,6 @@ fn build_complete_topk_cert() -> (Vec<u8>, TrustConfig) {
         [0x01; 32], [0x02; 32], [0xcd; 32], [0x03; 14], [0x00; 32], 1, &operator,
     )
     .expect("stored root");
-    let mut receipt = receipt;
     receipt.root_bound = stored.preimage_hash;
     let bytes = assemble_cognition_certificate_v1(&stored, &receipt, Some(AsOf::RootSeq(1)))
         .expect("assemble");

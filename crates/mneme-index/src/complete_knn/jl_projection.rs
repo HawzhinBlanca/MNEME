@@ -390,3 +390,120 @@ fn count_jl_frontier(
 pub fn exact_pruning_matches_brute(tree: &BallTree, query: &[f64], k: usize) -> bool {
     brute_force_knn(&tree.points, query, k) == knn_with_pruning(tree, query, k)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn beacon(round: u64) -> BeaconSeed {
+        BeaconSeed {
+            round,
+            seed: [round as u8; 32],
+        }
+    }
+
+    fn unit_points(n: usize, dim: usize) -> Vec<Vec<f64>> {
+        (0..n)
+            .map(|i| {
+                let mut v = vec![0.0; dim];
+                v[i % dim] = 1.0 + i as f64;
+                v
+            })
+            .collect()
+    }
+
+    /// JL-1: from_beacon produces a deterministic commitment (same seed → same hash).
+    #[test]
+    fn projector_commitment_is_deterministic() {
+        let b = beacon(1);
+        let p1 = JlProjector::from_beacon(b.clone(), 4, 2);
+        let p2 = JlProjector::from_beacon(b, 4, 2);
+        assert_eq!(
+            p1.commitment(),
+            p2.commitment(),
+            "same beacon must produce identical commitment"
+        );
+        assert_ne!(
+            *p1.commitment(),
+            [0u8; 32],
+            "commitment must not be all-zeros"
+        );
+    }
+
+    /// JL-2: Different beacons produce different projector commitments.
+    #[test]
+    fn projector_different_beacons_produce_different_commitments() {
+        let p1 = JlProjector::from_beacon(beacon(1), 4, 2);
+        let p2 = JlProjector::from_beacon(beacon(2), 4, 2);
+        assert_ne!(
+            p1.commitment(),
+            p2.commitment(),
+            "different beacons must produce different commitments"
+        );
+    }
+
+    /// JL-3: project() output dimension matches target_dim.
+    #[test]
+    fn project_output_dimension_matches_target_dim() {
+        let p = JlProjector::from_beacon(beacon(3), 8, 3);
+        let point = vec![1.0; 8];
+        let projected = p.project(&point);
+        assert_eq!(
+            projected.len(),
+            3,
+            "projected vector must have target_dim components"
+        );
+    }
+
+    /// JL-4: project() on a zero vector produces a zero vector (linearity check).
+    #[test]
+    fn project_zero_vector_stays_zero() {
+        let p = JlProjector::from_beacon(beacon(4), 6, 4);
+        let zero = vec![0.0; 6];
+        let projected = p.project(&zero);
+        for (i, &x) in projected.iter().enumerate() {
+            assert_eq!(
+                x, 0.0,
+                "zero vector projection must be zero at component {i}"
+            );
+        }
+    }
+
+    /// JL-5: Conservative kNN must match brute force (completeness = soundness invariant).
+    /// This is the critical correctness property: SoundConservative mode must never
+    /// drop a true neighbor from the result set.
+    #[test]
+    fn conservative_knn_matches_brute_force() {
+        let points = unit_points(8, 4);
+        let query = vec![0.5, 0.5, 0.5, 0.5];
+        let projector = JlProjector::from_beacon(beacon(5), 4, 2);
+        assert!(
+            conservative_matches_exact(&points, &query, 3, &projector, 0.5),
+            "SoundConservative mode must return the same top-k as brute force"
+        );
+    }
+
+    /// JL-6: recommended_target_dim is at least 2 and grows with n.
+    #[test]
+    fn recommended_target_dim_grows_with_n() {
+        let small = JlProjector::recommended_target_dim(10, 0.5);
+        let large = JlProjector::recommended_target_dim(10_000, 0.5);
+        assert!(small >= 2, "recommended_target_dim must be at least 2");
+        assert!(
+            large > small,
+            "larger n must yield larger recommended target dim"
+        );
+    }
+
+    /// JL-7: exact_pruning_matches_brute confirms the ball tree geometry path is correct.
+    #[test]
+    fn exact_ball_tree_pruning_matches_brute_force() {
+        let points = unit_points(10, 4);
+        let query = vec![0.1, 0.2, 0.3, 0.4];
+        let tree = BallTree::build(points);
+        assert!(
+            exact_pruning_matches_brute(&tree, &query, 3),
+            "ball tree pruning must return the same top-k as brute force"
+        );
+    }
+}

@@ -12,20 +12,31 @@ const F_K: u64 = 3;
 const F_PROOF: u64 = 4;
 const F_BEACON_ROUND: u64 = 5;
 const F_BEACON_SEED: u64 = 6;
+const F_CONSTANT_PROOF_HASH: u64 = 7;
+const F_MERKLE_HNSW_ROOT: u64 = 8;
+const F_CONSTANT_SIZE: u64 = 9;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CompleteKnnCertFailure {
     Invalid,
+    ProcedureMismatch,
+    ObjectTampered,
 }
 
 fn complete_knn_cert_failure_to_mneme(failure: CompleteKnnCertFailure) -> MnemeError {
     match failure {
         CompleteKnnCertFailure::Invalid => MnemeError::CertificateInvalid,
+        CompleteKnnCertFailure::ProcedureMismatch => MnemeError::ProcedureMismatch,
+        CompleteKnnCertFailure::ObjectTampered => MnemeError::ObjectTampered,
     }
 }
 
 fn complete_knn_cert_invalid_error() -> MnemeError {
     complete_knn_cert_failure_to_mneme(CompleteKnnCertFailure::Invalid)
+}
+
+fn complete_knn_cert_error(failure: CompleteKnnCertFailure) -> MnemeError {
+    complete_knn_cert_failure_to_mneme(failure)
 }
 
 /// Offline-verifiable complete top-k payload (receipt field 8 inner body).
@@ -36,15 +47,57 @@ pub struct CompleteKnnCertAttachment {
     pub k: u32,
     pub proof: CompleteKnnProof,
     pub beacon: Option<BeaconSeed>,
+    // TTRP-1 constant-size proof fields
+    pub constant_proof_hash: Option<[u8; 32]>,
+    pub merkle_hnsw_root: Option<[u8; 32]>,
+    pub constant_size: bool,
+}
+
+pub fn hash_proof(proof: &CompleteKnnProof) -> Result<[u8; 32], MnemeError> {
+    let mut enc = Encoder::new();
+    encode_proof(&mut enc, proof)?;
+    let bytes = enc.finish();
+    let mut h = blake3::Hasher::new();
+    h.update(&bytes);
+    Ok(*h.finalize().as_bytes())
 }
 
 impl CompleteKnnCertAttachment {
     pub fn verify_offline(&self) -> Result<(), MnemeError> {
+        if self.constant_size {
+            return Err(complete_knn_cert_error(
+                CompleteKnnCertFailure::ProcedureMismatch,
+            )); // Must verify with out-of-band proof
+        }
         verify_complete_knn(
             &self.commitment,
             &self.query,
             usize::try_from(self.k).map_err(|_| complete_knn_cert_invalid_error())?,
             &self.proof,
+        )
+    }
+
+    pub fn verify_offline_with_proof(&self, proof: &CompleteKnnProof) -> Result<(), MnemeError> {
+        let expected_hash = self
+            .constant_proof_hash
+            .ok_or_else(|| complete_knn_cert_error(CompleteKnnCertFailure::Invalid))?;
+        let actual_hash = hash_proof(proof)?;
+        if actual_hash != expected_hash {
+            return Err(complete_knn_cert_error(
+                CompleteKnnCertFailure::ObjectTampered,
+            ));
+        }
+        let _hnsw_root = self
+            .merkle_hnsw_root
+            .ok_or_else(|| complete_knn_cert_error(CompleteKnnCertFailure::Invalid))?;
+        if _hnsw_root == [0u8; 32] {
+            return Err(complete_knn_cert_error(CompleteKnnCertFailure::Invalid));
+        }
+        verify_complete_knn(
+            &self.commitment,
+            &self.query,
+            usize::try_from(self.k).map_err(|_| complete_knn_cert_invalid_error())?,
+            proof,
         )
     }
 }
@@ -53,9 +106,15 @@ pub fn encode_complete_knn_attachment(
     att: &CompleteKnnCertAttachment,
 ) -> Result<Vec<u8>, MnemeError> {
     let mut enc = Encoder::new();
-    let mut n = 4u64;
+    let mut n = 5u64; // commitment, query, k, proof, constant_size
     if att.beacon.is_some() {
         n += 2;
+    }
+    if att.constant_proof_hash.is_some() {
+        n += 1;
+    }
+    if att.merkle_hnsw_root.is_some() {
+        n += 1;
     }
     enc.begin_map(n)?;
     enc.encode_unsigned(F_COMMITMENT)?;
@@ -66,12 +125,25 @@ pub fn encode_complete_knn_attachment(
     enc.encode_unsigned(u64::from(att.k))?;
     enc.encode_unsigned(F_PROOF)?;
     encode_proof(&mut enc, &att.proof)?;
+    // dCBOR requires canonical (ascending) map-key order. Emit optional fields in
+    // key order 5,6 (beacon) → 7 → 8 → 9 so strict decode never rejects a
+    // constant-size attachment (which carries fields 7 and 8 alongside 9).
     if let Some(beacon) = &att.beacon {
         enc.encode_unsigned(F_BEACON_ROUND)?;
         enc.encode_unsigned(beacon.round)?;
         enc.encode_unsigned(F_BEACON_SEED)?;
         enc.encode_bytes(&beacon.seed)?;
     }
+    if let Some(hash) = &att.constant_proof_hash {
+        enc.encode_unsigned(F_CONSTANT_PROOF_HASH)?;
+        enc.encode_bytes(hash)?;
+    }
+    if let Some(root) = &att.merkle_hnsw_root {
+        enc.encode_unsigned(F_MERKLE_HNSW_ROOT)?;
+        enc.encode_bytes(root)?;
+    }
+    enc.encode_unsigned(F_CONSTANT_SIZE)?;
+    enc.encode_bool(att.constant_size)?;
     Ok(enc.finish())
 }
 
@@ -86,6 +158,9 @@ pub fn decode_complete_knn_attachment(
     let mut proof = None;
     let mut beacon_round = None;
     let mut beacon_seed = None;
+    let mut constant_proof_hash = None;
+    let mut merkle_hnsw_root = None;
+    let mut constant_size = false;
     for (key, value) in map {
         let field = key.as_u64().ok_or(complete_knn_cert_invalid_error())?;
         match field {
@@ -100,6 +175,14 @@ pub fn decode_complete_knn_attachment(
             F_PROOF => proof = Some(decode_proof(&value)?),
             F_BEACON_ROUND => beacon_round = Some(parse_u64(&value)?),
             F_BEACON_SEED => beacon_seed = Some(parse_fixed32(&value)?),
+            F_CONSTANT_PROOF_HASH => constant_proof_hash = Some(parse_fixed32(&value)?),
+            F_MERKLE_HNSW_ROOT => merkle_hnsw_root = Some(parse_fixed32(&value)?),
+            F_CONSTANT_SIZE => {
+                constant_size = match &value {
+                    CborValue::Bool(b) => *b,
+                    _ => return Err(complete_knn_cert_invalid_error()),
+                };
+            }
             _ => return Err(complete_knn_cert_invalid_error()),
         }
     }
@@ -108,13 +191,30 @@ pub fn decode_complete_knn_attachment(
         (None, None) => None,
         _ => return Err(complete_knn_cert_invalid_error()),
     };
+    let proof = proof.unwrap_or(CompleteKnnProof {
+        total_points: 0,
+        returned: Vec::new(),
+        frontier: Vec::new(),
+        excluded: Vec::new(),
+    });
     Ok(CompleteKnnCertAttachment {
         commitment: commitment.ok_or(complete_knn_cert_invalid_error())?,
         query: query.ok_or(complete_knn_cert_invalid_error())?,
         k: k.ok_or(complete_knn_cert_invalid_error())?,
-        proof: proof.ok_or(complete_knn_cert_invalid_error())?,
+        proof,
         beacon,
+        constant_proof_hash,
+        merkle_hnsw_root,
+        constant_size,
     })
+}
+
+/// Decode the out-of-band proof file emitted by `certify --constant-size --proof-out`.
+/// That file is a full complete-kNN attachment (the cert's `complete_knn.proof_bytes`,
+/// issued with `constant_size=false` so the proof body is present); the out-of-band
+/// proof we need for `verify_offline_with_proof` is its `proof` field.
+pub fn decode_proof_bytes_direct(bytes: &[u8]) -> Result<CompleteKnnProof, MnemeError> {
+    Ok(decode_complete_knn_attachment(bytes)?.proof)
 }
 
 fn encode_proof(enc: &mut Encoder, proof: &CompleteKnnProof) -> Result<(), MnemeError> {
@@ -381,4 +481,89 @@ fn parse_u64(value: &CborValue) -> Result<u64, MnemeError> {
 fn parse_fixed32(value: &CborValue) -> Result<[u8; 32], MnemeError> {
     let b = value.as_bytes().ok_or(complete_knn_cert_invalid_error())?;
     b.try_into().map_err(|_| complete_knn_cert_invalid_error())
+}
+
+#[cfg(test)]
+mod ttrp_constant_size_tests {
+    //! TTRP-1: the constant-size attachment carries only a BLAKE3 hash of the proof
+    //! plus the HNSW Merkle root; the full proof travels out-of-band and is bound
+    //! back at verify time. Exercises the `constant_size = true` path end to end.
+    use super::*;
+    use crate::complete_knn::{AuthenticatedBallTree, prove_complete_knn};
+
+    fn real_proof() -> (CompleteKnnProof, [u8; 32], Vec<f64>, u32) {
+        let tree = AuthenticatedBallTree::from_points(vec![
+            vec![0.0, 0.0],
+            vec![1.0, 0.0],
+            vec![3.0, 1.0],
+            vec![7.0, 2.0],
+        ]);
+        let query = vec![0.0, 0.0];
+        let k = 2usize;
+        let proof = prove_complete_knn(&tree, &query, k).expect("prove");
+        (proof, tree.commitment(), query, k as u32)
+    }
+
+    fn constant_size_att(
+        proof: &CompleteKnnProof,
+        commitment: [u8; 32],
+        query: Vec<f64>,
+        k: u32,
+    ) -> CompleteKnnCertAttachment {
+        CompleteKnnCertAttachment {
+            commitment,
+            query,
+            k,
+            // body emptied — only the hash binds the out-of-band proof.
+            proof: CompleteKnnProof {
+                total_points: proof.total_points,
+                returned: Vec::new(),
+                frontier: Vec::new(),
+                excluded: Vec::new(),
+            },
+            beacon: None,
+            constant_proof_hash: Some(hash_proof(proof).expect("hash")),
+            merkle_hnsw_root: Some(commitment),
+            constant_size: true,
+        }
+    }
+
+    #[test]
+    fn constant_size_wire_roundtrips_and_verifies_with_out_of_band_proof() {
+        let (proof, commitment, query, k) = real_proof();
+        let att = constant_size_att(&proof, commitment, query, k);
+        let wire = encode_complete_knn_attachment(&att).expect("encode");
+        let decoded = decode_complete_knn_attachment(&wire).expect("decode");
+        assert!(decoded.constant_size);
+        assert_eq!(decoded.constant_proof_hash, att.constant_proof_hash);
+        assert_eq!(decoded.merkle_hnsw_root, Some(commitment));
+        // A constant-size cert must fail closed without the out-of-band proof…
+        assert!(decoded.verify_offline().is_err());
+        // …and verify once the matching proof is supplied.
+        decoded
+            .verify_offline_with_proof(&proof)
+            .expect("verify with carried proof");
+    }
+
+    #[test]
+    fn constant_size_rejects_proof_whose_hash_does_not_match() {
+        let (proof, commitment, query, k) = real_proof();
+        let att = constant_size_att(&proof, commitment, query, k);
+        // A different proof → hash mismatch → fail closed (ObjectTampered).
+        let other_tree = AuthenticatedBallTree::from_points(vec![
+            vec![9.0, 9.0],
+            vec![1.0, 2.0],
+            vec![4.0, 4.0],
+        ]);
+        let other = prove_complete_knn(&other_tree, &[9.0, 9.0], 1).expect("prove other");
+        assert!(att.verify_offline_with_proof(&other).is_err());
+    }
+
+    #[test]
+    fn constant_size_rejects_zero_merkle_root() {
+        let (proof, commitment, query, k) = real_proof();
+        let mut att = constant_size_att(&proof, commitment, query, k);
+        att.merkle_hnsw_root = Some([0u8; 32]);
+        assert!(att.verify_offline_with_proof(&proof).is_err());
+    }
 }

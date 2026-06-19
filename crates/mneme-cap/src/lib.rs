@@ -486,4 +486,86 @@ mod tests {
             MnemeError::CapMalformed
         );
     }
+
+    /// SEC-CAP-1: Attenuation must never escalate permissions beyond what the
+    /// root capability grants — `OnlyEpisodic` cannot be removed by re-issuance.
+    #[test]
+    fn attenuation_cannot_escalate_permissions() {
+        let issuer = KeyPair::from_seed([0xf1; 32]);
+        let subject = KeyPair::from_seed([0xf2; 32]);
+        // Issue a write cap restricted to Episodic only.
+        let root = Capability::issue(
+            &issuer,
+            subject.public_key_bytes(),
+            vec!["*".into()],
+            vec![MemoryKind::Episodic, MemoryKind::Semantic],
+            TrustTier::Working,
+            TrustTier::Working,
+            Permissions::READ | Permissions::WRITE,
+            vec![Caveat::OnlyEpisodic, Caveat::NotAfter(far_future())],
+        )
+        .unwrap();
+
+        // Attenuate with an additional (non-escalating) namespace caveat — should succeed.
+        let narrowed = root
+            .attenuate(&subject, vec![Caveat::NamespacePrefix("tools/".into())])
+            .unwrap();
+
+        // The OnlyEpisodic caveat still applies in the narrowed cap.
+        assert!(narrowed.permits_write("tools/mcp", MemoryKind::Episodic));
+        assert!(!narrowed.permits_write("tools/mcp", MemoryKind::Semantic));
+
+        // Trying to attenuate with a caveat that would widen (not allowed by caveat_narrows).
+        // We verify the overall caveat count grew (narrowed only, not widened).
+        assert!(
+            narrowed.caveats.len() > root.caveats.len(),
+            "attenuation must only append caveats, not remove them"
+        );
+    }
+
+    /// SEC-CAP-2: A capability with wrong issuer must be rejected.
+    #[test]
+    fn wrong_issuer_is_rejected() {
+        let real_issuer = KeyPair::from_seed([0xf3; 32]);
+        let fake_issuer = KeyPair::from_seed([0xf4; 32]);
+        let subject = KeyPair::from_seed([0xf5; 32]);
+        let cap = agent_cap(&real_issuer, subject.public_key_bytes()).unwrap();
+        // Verify against wrong issuer must fail.
+        assert_eq!(
+            cap.verify(&fake_issuer, &test_hlc(1)).unwrap_err(),
+            MnemeError::CapDenied
+        );
+    }
+
+    /// SEC-CAP-3: Namespace prefix caveat enforces read and write boundaries.
+    #[test]
+    fn namespace_prefix_caveat_enforces_boundaries() {
+        let issuer = KeyPair::from_seed([0xf6; 32]);
+        let subject = KeyPair::from_seed([0xf7; 32]);
+        let cap = Capability::issue(
+            &issuer,
+            subject.public_key_bytes(),
+            vec!["*".into()],
+            vec![MemoryKind::Episodic, MemoryKind::Working],
+            TrustTier::Working,
+            TrustTier::Working,
+            Permissions::READ | Permissions::WRITE,
+            vec![
+                Caveat::NamespacePrefix("tools/".into()),
+                Caveat::NotAfter(far_future()),
+            ],
+        )
+        .unwrap();
+
+        // Access within the allowed prefix must succeed.
+        assert!(cap.permits_write("tools/mcp", MemoryKind::Episodic));
+        assert!(cap.permits_read("tools/mcp", TrustTier::Working));
+
+        // Access outside the prefix must be denied.
+        assert!(!cap.permits_write("agent/memory", MemoryKind::Episodic));
+        assert!(!cap.permits_read("agent/memory", TrustTier::Working));
+
+        // Exact prefix without trailing content is also gated.
+        assert!(!cap.permits_write("other", MemoryKind::Working));
+    }
 }

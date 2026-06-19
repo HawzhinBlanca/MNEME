@@ -123,3 +123,105 @@ impl Store {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_core::{ForgetMode, ForgetTarget, LogicalKey, MemoryKind, ObjectId, TrustTier};
+
+    fn make_key(ns: &str, name: &str) -> LogicalKey {
+        LogicalKey {
+            namespace: ns.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    /// ACTION-1: action_commit_forget is deterministic.
+    #[test]
+    fn forget_commit_is_deterministic() {
+        let target = ForgetTarget::LogicalKey(make_key("ns", "key"));
+        let a = action_commit_forget(&target, ForgetMode::Shred);
+        let b = action_commit_forget(&target, ForgetMode::Shred);
+        assert_eq!(a, b, "action_commit_forget must be deterministic");
+    }
+
+    /// ACTION-2: Shred and Redact modes produce different commits.
+    #[test]
+    fn forget_commit_mode_distinguishes_shred_vs_redact() {
+        let target = ForgetTarget::LogicalKey(make_key("ns", "key"));
+        let shred = action_commit_forget(&target, ForgetMode::Shred);
+        let redact = action_commit_forget(&target, ForgetMode::Redact);
+        assert_ne!(
+            shred, redact,
+            "Shred and Redact must produce different action commits"
+        );
+    }
+
+    /// ACTION-3: Different keys produce different forget commits.
+    #[test]
+    fn forget_commit_domain_separates_keys() {
+        let t1 = ForgetTarget::LogicalKey(make_key("ns", "key1"));
+        let t2 = ForgetTarget::LogicalKey(make_key("ns", "key2"));
+        assert_ne!(
+            action_commit_forget(&t1, ForgetMode::Shred),
+            action_commit_forget(&t2, ForgetMode::Shred),
+            "different keys must produce different action commits",
+        );
+    }
+
+    /// ACTION-4: action_commit_remember is deterministic and separates MemoryKind.
+    #[test]
+    fn remember_commit_is_deterministic_and_kind_separates() {
+        let draft_ep = mneme_core::Draft {
+            namespace: "ns".to_string(),
+            logical_name: "name".to_string(),
+            kind: MemoryKind::Episodic,
+            body: vec![],
+            parent_ids: vec![],
+            session: [0u8; 16],
+            trust_tier: None,
+            embedding: None,
+            valid_time_ms: None,
+        };
+        let draft_id = mneme_core::Draft {
+            namespace: "ns".to_string(),
+            logical_name: "name".to_string(),
+            kind: MemoryKind::Identity,
+            body: vec![],
+            parent_ids: vec![],
+            session: [0u8; 16],
+            trust_tier: None,
+            embedding: None,
+            valid_time_ms: None,
+        };
+        let a = action_commit_remember(&draft_ep);
+        let b = action_commit_remember(&draft_ep);
+        assert_eq!(a, b, "action_commit_remember must be deterministic");
+        let c = action_commit_remember(&draft_id);
+        assert_ne!(a, c, "different MemoryKind must produce different commits");
+    }
+
+    /// ACTION-5: remember, forget, promote commits are mutually domain-separated.
+    #[test]
+    fn action_commits_are_cross_domain_separated() {
+        let target = ForgetTarget::LogicalKey(make_key("ns", "k"));
+        let draft = mneme_core::Draft {
+            namespace: "ns".to_string(),
+            logical_name: "k".to_string(),
+            kind: MemoryKind::Episodic,
+            body: vec![],
+            parent_ids: vec![],
+            session: [0u8; 16],
+            trust_tier: None,
+            embedding: None,
+            valid_time_ms: None,
+        };
+        let id = ObjectId([0x01u8; 32]);
+        let r = action_commit_remember(&draft);
+        let f = action_commit_forget(&target, ForgetMode::Shred);
+        let p = action_commit_promote(&id, TrustTier::Trusted);
+        assert_ne!(r, f, "remember and forget must be domain-separated");
+        assert_ne!(r, p, "remember and promote must be domain-separated");
+        assert_ne!(f, p, "forget and promote must be domain-separated");
+    }
+}

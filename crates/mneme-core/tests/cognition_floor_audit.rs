@@ -1,6 +1,6 @@
 use mneme_core::cognition_bounds::{
-    EXACT_DOMINANCE_FLOOR_HONESTY, FLOOR_ATTRIBUTION_HONESTY, FLOOR_GAP_HONESTY,
-    NON_USE_EPOCH_FLOOR_HONESTY, computational_online_floor_queries, log2_ceil,
+    FLOOR_ATTRIBUTION_HONESTY, FLOOR_GAP_HONESTY, NON_USE_EPOCH_FLOOR_HONESTY,
+    PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY, computational_online_floor_queries, log2_ceil,
     open_log_log_gap_factor,
 };
 const DOC: &str = include_str!("../../../docs/theory/PRICE_OF_VERIFIABLE_COGNITION.md");
@@ -21,7 +21,7 @@ fn doc_honesty() {
         "Authenticated ≠ true",
         "validation-lane.sh bounds",
         "recall_floor",
-        "exact_dominance_floor",
+        "procedure_faithful_topk_floor",
     ] {
         assert!(DOC.contains(p), "{p}");
     }
@@ -39,7 +39,7 @@ fn no_overclaim() {
 fn strings() {
     assert!(FLOOR_ATTRIBUTION_HONESTY.contains("Ω(log n / log log n)"));
     assert!(FLOOR_GAP_HONESTY.contains("OPEN"));
-    assert!(EXACT_DOMINANCE_FLOOR_HONESTY.contains("Θ(n)"));
+    assert!(PROCEDURE_FAITHFUL_TOPK_FLOOR_HONESTY.contains("Θ(n)"));
     assert!(NON_USE_EPOCH_FLOOR_HONESTY.contains("Ω(N)"));
 }
 #[test]

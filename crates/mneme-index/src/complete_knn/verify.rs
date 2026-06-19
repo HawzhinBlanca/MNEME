@@ -6,7 +6,7 @@ use super::prove::{CompleteKnnProof, FrontierNode};
 use mneme_core::MnemeError;
 
 /// Honesty string for complete-kNN verification surface.
-pub const COMPLETE_KNN_HONESTY: &str = "complete-kNN proves completeness of retrieval (no closer neighbor hidden), not semantic truth; authenticated ≠ true";
+pub const COMPLETE_KNN_HONESTY: &str = "complete-kNN proves completeness of retrieval (recall@k under declared graph), not absolute nearest neighbor or semantic truth; authenticated ≠ true";
 
 /// Verify a complete-kNN proof; fail-closed on any tamper.
 pub fn verify_complete_knn(

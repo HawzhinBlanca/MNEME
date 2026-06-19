@@ -221,7 +221,7 @@ pub fn verify_semantic_receipt_full(
 pub const HONESTY_NOT_EXACT_NN: &str = concat!(
     "MNEME semantic receipts prove procedure-faithfulness over authenticated data, ",
     "not semantic truth, not exact nearest-neighbor optimality, and not true nearest neighbors. ",
-    "ExactDominance v1 proves membership/completeness plus top-k over prover-asserted distances; ",
+    "ProcedureFaithfulTopK v1 proves membership/completeness plus top-k over prover-asserted distances; ",
     "true top-k ranking is not proven and it is not top-k by true query-to-embedding distance ",
     "until verifiers recompute candidate distances."
 );
@@ -281,6 +281,7 @@ mod tests {
             procedure_id: procedure_id(&proc),
             query_commit: query.commit(),
             result_ids,
+            candidates_embeddings: None,
         };
         (vo, root, proc)
     }

@@ -95,9 +95,15 @@ case "$LANE" in
     bash scripts/ci/verify-tcb-guard.sh
     # MNEME applied to MNEME: docs may not cite commits/features that don't verify.
     bash scripts/ci/claims-lint.sh
+    # Check that all key claims carry the required honesty qualifier.
+    bash scripts/ci/doc-honesty-lint.sh
     cargo test -p mneme-verify --test tcb_budget -- --nocapture
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
+    # CRDT convergence and crypto-shred forget invariants run on every quick lane.
+    cargo test -p mneme-crdt -p mneme-forget --lib -- --nocapture
+    # VCP D1 convergence certificate sidecar (bidirectional-sync + multiset commitment).
+    cargo test -p mneme-crdt --features convergence_cert --lib -- --nocapture
     bash scripts/ci/kill-resume-smoke.sh
     bash scripts/ci/mcp-smoke.sh
     bash scripts/ci/validation-contract-smoke.sh
@@ -109,6 +115,11 @@ case "$LANE" in
     # crash-safe append test must pass.
     cargo clippy -p mneme-store --features root_pace_log --tests -- -D warnings
     cargo test -p mneme-store --features root_pace_log --test root_pace_log -- --nocapture
+    # Optional `bitemporal_recall` feature: bi-temporal verified recall (Phase I P1-2).
+    # Must compile clean, and the recall_at::tests module (valid-time filter, ext encoding,
+    # HLC round-trip) must pass before they ship into a release gate.
+    cargo clippy -p mneme-store --features bitemporal_recall --lib -- -D warnings
+    cargo test -p mneme-store --features bitemporal_recall --lib -- --nocapture
     ;;
 
   p3-local)
@@ -155,7 +166,7 @@ case "$LANE" in
     echo "validation-lane ($LANE): Pillar B floor audit — Ω(log n / log log n) honesty (see docs/theory/PRICE_OF_VERIFIABLE_COGNITION.md)"
     cargo test -p mneme-core --test cognition_floor_audit -- --nocapture
     cargo test -p mneme-smt --test recall_floor -- --nocapture
-    cargo test -p mneme-index --test exact_dominance_floor -- --nocapture
+    cargo test -p mneme-index --test procedure_faithful_topk_floor -- --nocapture
     ;;
 
   full-preflight)

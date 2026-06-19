@@ -141,7 +141,7 @@ fn validation_lane_bounds_runs_floor_audit_tests() {
         "docs/theory/PRICE_OF_VERIFIABLE_COGNITION.md",
         "cargo test -p mneme-core --test cognition_floor_audit",
         "cargo test -p mneme-smt --test recall_floor",
-        "cargo test -p mneme-index --test exact_dominance_floor",
+        "cargo test -p mneme-index --test procedure_faithful_topk_floor",
     ] {
         assert!(bounds_lane.contains(phrase));
     }

@@ -61,7 +61,7 @@ pub fn verify_zkann_attachment(
         .ok_or_else(|| zkann_error(ZkannFailure::AttachmentMissing))?;
     verify_ads_vo(&receipt.verification_object, &receipt.semantic_commit, proc)?;
     match zkann.level {
-        RetrievalProofLevel::ExactDominance => {
+        RetrievalProofLevel::ProcedureFaithfulTopK => {
             // SOUNDNESS (red-team finding, docs/redteam/PHASE_I_ZKANN_SOUNDNESS.md):
             // completeness MUST be bound to the SIGNED root, never to a prover-supplied
             // count. Authenticate that the candidate set IS the entire committed set by
@@ -241,6 +241,7 @@ mod tests {
             procedure_id: [0x33; 32],
             query_commit: [0x44; 32],
             result_ids: vec![oid(1)],
+            candidates_embeddings: None,
         }
     }
 

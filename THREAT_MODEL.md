@@ -84,7 +84,7 @@ lints, generative tamper suites (`validation-lane.sh tamper`).
 These are **not** mitigated by the v0 verifier and must not be marketed as guarantees:
 
 1. **Authenticated ≠ true.** Valid signatures do not prove factual correctness of content.
-2. **Procedure-faithfulness, not exact nearest neighbors.** Verifiable retrieval proves procedure-faithfulness over committed data: membership/completeness plus top-k over prover-asserted distances. True top-k ranking is not proven; returned items are not top-k by true query-to-embedding distance until verifiers recompute candidate distances from carried embeddings.
+2. **Procedure-faithfulness, not exact nearest neighbors.** Verifiable retrieval (§3) proves procedure-faithfulness over committed data: membership/completeness plus top-k over prover-asserted distances. True top-k ranking is not proven; returned items are not top-k by true query-to-embedding distance until verifiers recompute candidate distances from carried embeddings.
 
 Semantic VO distance-recompute (v-next interface change) is tracked in
 `docs/research/SEMANTIC_VO_DISTANCE_RECOMPUTE_VNEXT.md` — not silently shipped.

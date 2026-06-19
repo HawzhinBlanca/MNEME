@@ -1,4 +1,4 @@
-# MNEME — Verifiable Memory Substrate for AI Agents
+# MNEME — Fail-Closed Verifiable Recall for AI-Agent Memory
 
 **A complete, agent-ready engineering blueprint.**
 
@@ -94,7 +94,7 @@ Two limits are first-class and must appear in the README, the API docs, and the 
 
 1. **Authenticated ≠ true.** A correctly-signed entry from an authorized writer verifies even if its *content* is false. MNEME proves integrity, provenance, and authorization. It does not adjudicate truth.
 
-2. **Verifiable retrieval proves procedure-faithfulness, not optimality.** A recall receipt proves the declared (approximate) retrieval procedure ran faithfully over un-tampered, committed data. It does **not** prove the returned items are the true nearest neighbors. This is consistent with the state of the art: V3DB (arXiv:2603.03065) and ANNProof (FGCS Vol. 156, 2024) both prove faithful execution of a committed procedure, not exact-NN optimality.
+2. **Verifiable retrieval (§3) proves procedure-faithfulness, not optimality.** A recall receipt proves the declared (approximate) retrieval procedure ran faithfully over un-tampered, committed data. It does **not** prove the returned items are the true nearest neighbors. This is consistent with the state of the art: V3DB (arXiv:2603.03065) and ANNProof (FGCS Vol. 156, 2024) both prove faithful execution of a committed procedure, not exact-NN optimality.
 
 Designing honestly around these two limits is what separates MNEME from snake oil. Every claim the system makes is bounded by them.
 

@@ -11,13 +11,13 @@ A fully general computational floor matching Merkle's `O(log n)` upper bound is 
 
 MNEME SMT recall uses **256** probes (`O(log n)`). Position vs floor: **up to an `O(log log n)` factor**. Claiming an exact floor match is an overclaim.
 
-**ExactDominance** verification is **Θ(n)** in committed candidate count under the **transparent non-succinct** model.
+**ProcedureFaithfulTopK** verification is **Θ(n)** in committed candidate count under the **transparent non-succinct** model.
 
 In the **non-aggregating epoch model**, non-use costs **Ω(N)**.
 
 ## 5. CI floor audit
 
-`scripts/ci/validation-lane.sh bounds` runs `cognition_floor_audit`, `recall_floor`, `exact_dominance_floor`.
+`scripts/ci/validation-lane.sh bounds` runs `cognition_floor_audit`, `recall_floor`, `procedure_faithful_topk_floor`.
 
 ## 6. Honesty strings
 

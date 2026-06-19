@@ -10,7 +10,7 @@ use std::fmt;
 pub use crate::error::MnemeError;
 
 /// Contract version bumped only via interface-change request.
-pub const CONTRACT_VERSION: &str = "mneme-core-v1.0.0";
+pub const CONTRACT_VERSION: &str = "mneme-core-v2.0.0-draft";
 
 // ---------------------------------------------------------------------------
 // Core identity types (§5.5, §20.3)
@@ -137,15 +137,25 @@ pub enum DistanceMetric {
 /// Phase I: level of retrieval proof bundled in a Cognition Certificate (§5 honesty).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetrievalProofLevel {
-    /// membership/completeness for the complete authenticated member set plus top-k dominance over
-    /// prover-asserted distances; true top-k ranking is not proven and this is not top-k by true query-to-embedding distance
-    /// until verifiers recompute candidate distances.
-    ExactDominance = 0,
+    /// Procedure-faithful top-k: membership/completeness for the complete authenticated member set
+    /// plus top-k over prover-asserted distances; true top-k ranking is not proven and this is
+    /// not top-k by true query-to-embedding distance until verifiers recompute candidate distances.
+    /// (Renamed from `ExactDominance` — the old name implied exact nearest-neighbor dominance,
+    /// which this level does not prove.)
+    ProcedureFaithfulTopK = 0,
     /// Dominance over a prover-asserted set of authenticated members (`visited_order`); not graph replay.
     HnswAuditOnDemand = 1,
     /// Provably-complete top-k via authenticated ball-tree pruning frontier (CR-6). Proves no closer
     /// neighbor was hidden in committed geometry — not semantic truth, not exact-NN-by-relevance.
     CompleteTopK = 2,
+}
+
+impl RetrievalProofLevel {
+    /// Deprecated alias for backward compatibility. Use `ProcedureFaithfulTopK` instead.
+    #[deprecated(
+        note = "renamed to ProcedureFaithfulTopK — ExactDominance implied exact-NN which this level does not prove"
+    )]
+    pub const EXACT_DOMINANCE: Self = Self::ProcedureFaithfulTopK;
 }
 
 /// Phase I bi-temporal anchor (transaction-time via signed root; valid-time in P1-2).
@@ -192,6 +202,7 @@ pub struct VerificationObject {
     pub procedure_id: [u8; 32],
     pub query_commit: [u8; 32],
     pub result_ids: Vec<ObjectId>,
+    pub candidates_embeddings: Option<Vec<crate::FixedPointEmbedding>>,
 }
 
 /// Retrieval receipt binding recall to a signed root (§9.2).
@@ -412,7 +423,7 @@ mod tests {
 
     #[test]
     fn contract_version_is_frozen_string() {
-        assert_eq!(CONTRACT_VERSION, "mneme-core-v1.0.0");
+        assert_eq!(CONTRACT_VERSION, "mneme-core-v2.0.0-draft");
     }
 
     #[test]
@@ -430,28 +441,33 @@ mod tests {
 
         assert!(
             !source.contains("True top-k"),
-            "ExactDominance docs must not claim true top-k until candidate distances are verifier-recomputed"
+            "ProcedureFaithfulTopK docs must not claim true top-k until candidate distances are verifier-recomputed"
         );
         assert!(
             source.contains("prover-asserted distances"),
-            "ExactDominance docs must state that current dominance is over prover-asserted distances"
+            "ProcedureFaithfulTopK docs must state that top-k is over prover-asserted distances"
         );
         assert!(
             source.contains("membership/completeness"),
-            "ExactDominance docs must state that current proof is membership/completeness scoped"
+            "ProcedureFaithfulTopK docs must state that current proof is membership/completeness scoped"
         );
         assert!(
             source.contains("top-k ranking is not proven"),
-            "ExactDominance docs must say top-k ranking is not proven"
+            "ProcedureFaithfulTopK docs must say top-k ranking is not proven"
         );
         assert!(
             source.contains("not top-k by true query-to-embedding distance"),
-            "ExactDominance docs must keep the distance-binding caveat explicit"
+            "ProcedureFaithfulTopK docs must keep the distance-binding caveat explicit"
+        );
+        // Guard: the old over-claiming name must only appear in the deprecated alias context
+        assert!(
+            !source.contains("ExactDominance = 0"),
+            "ExactDominance variant was renamed to ProcedureFaithfulTopK — the old name must not appear as a primary enum variant"
         );
     }
 
     #[test]
-    fn verification_object_v1_shape_stays_frozen_until_contract_bump() {
+    fn verification_object_v2_shape_stays_frozen_until_contract_bump() {
         let source = include_str!("interface.rs")
             .split_once("#[cfg(test)]")
             .map(|(production, _tests)| production)
@@ -463,14 +479,108 @@ mod tests {
             .split_once("/// Retrieval receipt binding recall")
             .expect("VerificationObject remains before key-index Receipt");
 
-        assert_eq!(CONTRACT_VERSION, "mneme-core-v1.0.0");
+        assert_eq!(CONTRACT_VERSION, "mneme-core-v2.0.0-draft");
         assert!(
             verification_object.contains("pub candidates: Vec<(ObjectId, [u8; 32], i64)>"),
             "v1 VerificationObject candidate rows stay `(ObjectId, embedding_commit, distance)` until a formal interface-change request bumps CONTRACT_VERSION"
         );
         assert!(
-            !verification_object.contains("FixedPointEmbedding"),
-            "embedding-carrying semantic VO support must be additive v-next work, not a silent v1 shape mutation"
+            verification_object
+                .contains("pub candidates_embeddings: Option<Vec<crate::FixedPointEmbedding>>"),
+            "embedding-carrying semantic VO support must carry candidates_embeddings"
         );
+    }
+
+    /// KEY-HASH-1: LogicalKey::hash is deterministic.
+    #[test]
+    fn logical_key_hash_is_deterministic() {
+        let k = LogicalKey {
+            namespace: "test".to_string(),
+            name: "obj".to_string(),
+        };
+        assert_eq!(k.hash(), k.hash(), "LogicalKey::hash must be deterministic");
+    }
+
+    /// KEY-HASH-2: The null-byte separator in LogicalKey::hash is NOT sufficient
+    /// when namespace/name strings contain embedded null bytes. This test documents
+    /// the known limitation: inputs with embedded null bytes CAN collide.
+    ///
+    /// Mitigation: namespace/name values must not contain null bytes — this is
+    /// enforced at the API level (MCP/CLI inputs, CBOR decode validation).
+    /// The hash function itself does not re-validate its inputs.
+    #[test]
+    fn logical_key_hash_null_byte_in_input_can_collide_known_limitation() {
+        // ("a\x00b", "c") and ("a", "b\x00c") produce identical BLAKE3 streams.
+        // This is a known limitation when null bytes appear in inputs.
+        let k1 = LogicalKey {
+            namespace: "a\x00b".to_string(),
+            name: "c".to_string(),
+        };
+        let k2 = LogicalKey {
+            namespace: "a".to_string(),
+            name: "b\x00c".to_string(),
+        };
+        // These DO collide — document this property explicitly.
+        assert_eq!(
+            k1.hash(),
+            k2.hash(),
+            "KNOWN LIMITATION: null bytes in namespace/name can cause LogicalKey hash collisions; \
+             prevent via input validation at API boundaries"
+        );
+    }
+
+    /// KEY-HASH-3: different namespace produces different hash (cross-namespace separation).
+    #[test]
+    fn logical_key_hash_cross_namespace_separation() {
+        let k1 = LogicalKey {
+            namespace: "ns1".to_string(),
+            name: "key".to_string(),
+        };
+        let k2 = LogicalKey {
+            namespace: "ns2".to_string(),
+            name: "key".to_string(),
+        };
+        assert_ne!(
+            k1.hash(),
+            k2.hash(),
+            "keys in different namespaces must produce different hashes"
+        );
+    }
+
+    /// KEY-HASH-4: well-formed keys (no null bytes) are always domain-separated.
+    #[test]
+    fn logical_key_hash_well_formed_keys_are_distinct() {
+        let keys = [
+            LogicalKey {
+                namespace: "ns".to_string(),
+                name: "a".to_string(),
+            },
+            LogicalKey {
+                namespace: "ns".to_string(),
+                name: "b".to_string(),
+            },
+            LogicalKey {
+                namespace: "ns2".to_string(),
+                name: "a".to_string(),
+            },
+            LogicalKey {
+                namespace: "".to_string(),
+                name: "key".to_string(),
+            },
+            LogicalKey {
+                namespace: "key".to_string(),
+                name: "".to_string(),
+            },
+        ];
+        let hashes: Vec<[u8; 32]> = keys.iter().map(|k| k.hash()).collect();
+        for i in 0..hashes.len() {
+            for j in (i + 1)..hashes.len() {
+                assert_ne!(
+                    hashes[i], hashes[j],
+                    "well-formed keys[{}] and keys[{}] must hash differently",
+                    i, j
+                );
+            }
+        }
     }
 }

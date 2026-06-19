@@ -1,6 +1,6 @@
 # MNEME ∞ — Phase I Task Specification
 
-**Verifiable Retrieval + Cognition Certificate v1** — the first credible step from
+**Verifiable Retrieval (§3) + Cognition Certificate v1** — the first credible step from
 *"novel verifiable memory"* toward *Proof-Carrying Cognition* (see
 [`VISION_PROOF_CARRYING_COGNITION.md`](VISION_PROOF_CARRYING_COGNITION.md)).
 

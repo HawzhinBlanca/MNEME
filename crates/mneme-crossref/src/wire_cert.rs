@@ -61,6 +61,7 @@ pub fn verify_committed_certificate(
     bytes: &[u8],
     operator_pubkey: &[u8; 32],
     proc: &Procedure,
+    query_emb: Option<&crate::procedure::FixedPointEmbedding>,
 ) -> Result<(), CrossrefError> {
     let cert = decode_cert(bytes)?;
     if cert.version != CERT_VERSION_V1 && cert.version != CERT_VERSION_V2_DRAFT {
@@ -106,6 +107,7 @@ pub fn verify_committed_certificate(
             proc,
             receipt.zkann.as_ref(),
             committed_leaf_count,
+            query_emb,
         )?;
     }
 
@@ -188,7 +190,8 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
         }
     }
 
-    let (nodes, candidates, leaf_indices) = vo_body.ok_or(CrossrefError::CertificateInvalid)?;
+    let (nodes, candidates, leaf_indices, candidates_embeddings) =
+        vo_body.ok_or(CrossrefError::CertificateInvalid)?;
     Ok(SemanticReceipt {
         root_bound: root_bound.ok_or(CrossrefError::CertificateInvalid)?,
         semantic_commit: semantic_commit.ok_or(CrossrefError::CertificateInvalid)?,
@@ -199,6 +202,7 @@ fn decode_receipt(bytes: &[u8]) -> Result<SemanticReceipt, CrossrefError> {
             procedure_id: procedure_id.ok_or(CrossrefError::CertificateInvalid)?,
             query_commit: query_commit.ok_or(CrossrefError::CertificateInvalid)?,
             result_ids: result_ids.ok_or(CrossrefError::CertificateInvalid)?,
+            candidates_embeddings,
         },
         zkann,
         complete_knn,
@@ -221,18 +225,25 @@ fn verify_complete_topk_certificate(receipt: &SemanticReceipt) -> Result<(), Cro
 }
 
 type NodeRow = ([u8; 32], Vec<[u8; 32]>);
-type VoBody = (Vec<NodeRow>, Vec<CandidateRow>, Vec<usize>);
+type VoBody = (
+    Vec<NodeRow>,
+    Vec<CandidateRow>,
+    Vec<usize>,
+    Option<Vec<crate::procedure::FixedPointEmbedding>>,
+);
 
 fn decode_vo_body(value: &CborValue) -> Result<VoBody, CrossrefError> {
     let map = value.as_map().ok_or(CrossrefError::SchemaDrift)?;
     let mut nodes = None;
     let mut candidates = None;
     let mut leaf_indices = None;
+    let mut candidates_embeddings = None;
     for (k, v) in map {
         match field_key(k)? {
             1 => nodes = Some(decode_nodes(v)?),
             2 => candidates = Some(decode_candidates(v)?),
             3 => leaf_indices = Some(decode_leaf_indices(v)?),
+            4 => candidates_embeddings = Some(decode_candidates_embeddings(v)?),
             _ => return Err(CrossrefError::SchemaDrift),
         }
     }
@@ -242,7 +253,25 @@ fn decode_vo_body(value: &CborValue) -> Result<VoBody, CrossrefError> {
     if leaf_indices.len() != nodes.len() || leaf_indices.len() != candidates.len() {
         return Err(CrossrefError::CertificateInvalid);
     }
-    Ok((nodes, candidates, leaf_indices))
+    if let Some(ref embs) = candidates_embeddings {
+        if embs.len() != candidates.len() {
+            return Err(CrossrefError::CertificateInvalid);
+        }
+    }
+    Ok((nodes, candidates, leaf_indices, candidates_embeddings))
+}
+
+fn decode_candidates_embeddings(
+    value: &CborValue,
+) -> Result<Vec<crate::procedure::FixedPointEmbedding>, CrossrefError> {
+    let arr = value.as_array().ok_or(CrossrefError::SchemaDrift)?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let bytes = crate::dcbor::encode_canonical(item)?;
+        let emb = crate::dcbor::decode_strict(&bytes)?;
+        out.push(emb);
+    }
+    Ok(out)
 }
 
 fn decode_nodes(value: &CborValue) -> Result<Vec<NodeRow>, CrossrefError> {
@@ -336,7 +365,7 @@ fn decode_id_list(value: &CborValue) -> Result<Vec<[u8; 32]>, CrossrefError> {
 
 fn parse_level(value: &CborValue) -> Result<RetrievalProofLevel, CrossrefError> {
     match value.as_u64().ok_or(CrossrefError::SchemaDrift)? {
-        0 => Ok(RetrievalProofLevel::ExactDominance),
+        0 => Ok(RetrievalProofLevel::ProcedureFaithfulTopK),
         1 => Ok(RetrievalProofLevel::HnswAuditOnDemand),
         2 => Ok(RetrievalProofLevel::CompleteTopK),
         _ => Err(CrossrefError::CertificateInvalid),

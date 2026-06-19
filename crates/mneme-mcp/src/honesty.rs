@@ -3,7 +3,7 @@
 /// Shared footer for all memory tools (authenticated ≠ true; receipts ≠ exact-NN).
 pub const HONESTY_FOOTER: &str = "Honesty: authenticated≠true (integrity/provenance only, not truth). \
 Receipts prove procedure-faithfulness over committed data, not exact nearest-neighbor optimality. \
-Phase I ExactDominance proves membership/completeness plus top-k over prover-asserted distances; \
+Phase I ProcedureFaithfulTopK proves membership/completeness plus top-k over prover-asserted distances; \
 true top-k ranking is not proven and it is not top-k by true query-to-embedding distance until \
 verifiers recompute candidate distances.";
 

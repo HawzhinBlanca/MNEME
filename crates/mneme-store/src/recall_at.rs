@@ -184,7 +184,7 @@ impl Store {
                 proc,
                 embedding,
                 root.preimage_hash,
-                mneme_core::RetrievalProofLevel::ExactDominance,
+                mneme_core::RetrievalProofLevel::ProcedureFaithfulTopK,
             )
             .map_err(crate::index_err)?;
         let mut seed_ids: Vec<[u8; 32]> = receipt
@@ -263,4 +263,117 @@ fn filter_entries_valid_time(entries: Vec<Entry>, bound_ms: u64) -> Vec<Entry> {
         .into_iter()
         .filter(|e| valid_time_from_ext(&e.record.ext).is_none_or(|t| t <= bound_ms))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mneme_core::{
+        EXT_VALID_TIME_MS, HlcWire, ObjectId, ObjectRecord, PayloadEnc, ext_map_with_valid_time,
+        valid_time_from_ext,
+    };
+
+    fn make_entry(valid_time_ms: Option<u64>) -> Entry {
+        let ext = valid_time_ms.map(ext_map_with_valid_time);
+        let record = ObjectRecord {
+            version: 1,
+            kind: 1,
+            parent_ids: vec![],
+            writer: [0u8; 32],
+            session: [0u8; 16],
+            hlc: HlcWire {
+                wall_ms: 0,
+                counter: 0,
+                node_id: [0u8; 16],
+            },
+            trust_tier: 1,
+            payload_enc: PayloadEnc {
+                alg: 0,
+                key_id: None,
+                nonce: None,
+                body: vec![],
+            },
+            embedding_commit: None,
+            redaction_slot: None,
+            ext,
+        };
+        Entry {
+            id: ObjectId([0u8; 32]),
+            record,
+            plaintext: vec![],
+        }
+    }
+
+    /// All entries without a valid_time pass through regardless of bound.
+    #[test]
+    fn filter_valid_time_no_ext_always_passes() {
+        let entries = vec![make_entry(None), make_entry(None)];
+        let result = filter_entries_valid_time(entries, 0);
+        assert_eq!(
+            result.len(),
+            2,
+            "entries without valid_time must always pass"
+        );
+    }
+
+    /// Entries at exactly the bound must pass (boundary inclusive).
+    #[test]
+    fn filter_valid_time_boundary_inclusive() {
+        let entries = vec![make_entry(Some(100))];
+        let at_bound = filter_entries_valid_time(entries, 100);
+        assert_eq!(at_bound.len(), 1, "entry at exactly bound must pass (<=)");
+    }
+
+    /// Entries after the bound must be filtered out.
+    #[test]
+    fn filter_valid_time_after_bound_excluded() {
+        let entries = vec![make_entry(Some(101))];
+        let before = filter_entries_valid_time(entries, 100);
+        assert!(before.is_empty(), "entry after bound must be excluded");
+    }
+
+    /// Mixed: some pass, some are filtered.
+    #[test]
+    fn filter_valid_time_mixed_boundary() {
+        let entries = vec![
+            make_entry(None),       // no valid_time: always passes
+            make_entry(Some(50)),   // before bound: passes
+            make_entry(Some(100)),  // at bound: passes (<=)
+            make_entry(Some(101)),  // after bound: filtered
+            make_entry(Some(9999)), // far future: filtered
+        ];
+        let result = filter_entries_valid_time(entries, 100);
+        assert_eq!(
+            result.len(),
+            3,
+            "should have 3 passing entries: None, 50, 100"
+        );
+    }
+
+    /// ext_map_with_valid_time must encode and valid_time_from_ext must decode correctly.
+    #[test]
+    fn ext_map_round_trips_valid_time() {
+        for ms in [0u64, 1, 100, u64::MAX / 2, u64::MAX - 1] {
+            let map = ext_map_with_valid_time(ms);
+            assert!(map.contains_key(&EXT_VALID_TIME_MS));
+            let decoded = valid_time_from_ext(&Some(map));
+            assert_eq!(decoded, Some(ms), "round-trip failed for ms={ms}");
+        }
+        assert_eq!(valid_time_from_ext(&None), None);
+    }
+
+    /// hlc_wire_bytes must produce a 14-byte array with correct LE fields.
+    #[test]
+    fn hlc_wire_bytes_round_trips_wall_ms() {
+        let wire = HlcWire {
+            wall_ms: 0xDEAD_BEEF_CAFE_0001,
+            counter: 42,
+            node_id: [0xAB; 16],
+        };
+        let bytes = hlc_wire_bytes(&wire);
+        let wall = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+        assert_eq!(wall, wire.wall_ms);
+        let counter = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+        assert_eq!(counter, wire.counter);
+    }
 }

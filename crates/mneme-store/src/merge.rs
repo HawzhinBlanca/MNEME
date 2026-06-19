@@ -397,21 +397,37 @@ fn copy_peer_vault_keys(
 }
 
 /// Live object closure: MST winners, OR-set alternates (same logical-key hash), parents.
+///
+/// Complexity: O(keys + objects) — precomputes a reverse index from logical-key-hash to
+/// object-ids so the OR-set alternate lookup is O(1) per winner instead of the previous
+/// O(|object_keys|), turning an O(n²) inner scan into an O(n) pass.
 fn converged_object_ids(
     key_index: &mneme_smt::SparseMerkleTree,
     key_to_object: &std::collections::HashMap<[u8; 32], [u8; 32]>,
     object_keys: &std::collections::HashMap<[u8; 32], LogicalKey>,
     objects: &std::collections::HashMap<[u8; 32], Vec<u8>>,
 ) -> std::collections::HashSet<[u8; 32]> {
+    // Precompute reverse map: logical-key-hash → all object-ids that reference it.
+    // This replaces the previous O(|object_keys|) linear scan per winner.
+    let mut key_hash_to_ids: std::collections::HashMap<[u8; 32], Vec<[u8; 32]>> =
+        std::collections::HashMap::new();
+    for (object_id, lk) in object_keys {
+        key_hash_to_ids
+            .entry(lk.hash())
+            .or_default()
+            .push(*object_id);
+    }
+
     let mut keep = std::collections::HashSet::new();
     for (key_hash, &winner) in key_to_object {
         if key_index.is_tombstoned(key_hash) {
             continue;
         }
         keep.insert(winner);
-        for (object_id, lk) in object_keys {
-            if lk.hash() == *key_hash {
-                keep.insert(*object_id);
+        // OR-set alternates: all objects mapped to the same logical-key-hash (O(1) lookup).
+        if let Some(alts) = key_hash_to_ids.get(key_hash) {
+            for alt_id in alts {
+                keep.insert(*alt_id);
             }
         }
     }
@@ -564,5 +580,83 @@ mod d2_object_set_convergence_tests {
         merge_both_ways(&mut a, &mut b);
         assert_eq!(object_id_set(&a), object_id_set(&b));
         assert_eq!(object_id_set(&a).len(), 1);
+    }
+
+    /// Root short-circuit invariant: merging two already-converged stores must leave
+    /// both stores byte-identical (same object-id sets and same root sequence).
+    ///
+    /// This validates that the `apply_peer_snapshot` root-identity fast-path does
+    /// not corrupt state when called on fully-synced stores.
+    #[test]
+    fn manifest_delta_idempotent_on_already_converged_stores() {
+        let op = KeyPair::from_seed([0xd5; 32]);
+        let cap = test_cap(&op);
+        let da = tempdir().unwrap();
+        let db = tempdir().unwrap();
+        let mut a = Store::create(da.path(), op.clone()).unwrap();
+        let mut b = Store::create(db.path(), op).unwrap();
+        a.trust_mut().authorized_writers.push(cap.subject);
+        b.trust_mut().authorized_writers.push(cap.subject);
+        a.remember(test_draft("sync", "shared-key", b"shared-body"), &cap)
+            .unwrap();
+        b.remember(test_draft("sync", "shared-key", b"shared-body"), &cap)
+            .unwrap();
+        // First merge: both learn about each other's identical object.
+        merge_both_ways(&mut a, &mut b);
+        let ids_after_first = object_id_set(&a);
+
+        // Second merge: stores are now converged — fast-path must apply and produce no changes.
+        merge_both_ways(&mut a, &mut b);
+        assert_eq!(
+            object_id_set(&a),
+            ids_after_first,
+            "converged merge must not change object-id sets"
+        );
+        assert_eq!(
+            object_id_set(&a),
+            object_id_set(&b),
+            "both stores must remain identical after idempotent merge"
+        );
+    }
+
+    /// Tombstone propagation: if peer has forgotten a key that local still holds live,
+    /// the tombstone must win and the key must be absent from both stores after merge.
+    #[test]
+    fn manifest_delta_tombstone_propagation_peer_wins_over_local_live() {
+        let op = KeyPair::from_seed([0xd6; 32]);
+        let cap = test_cap(&op);
+        let da = tempdir().unwrap();
+        let db = tempdir().unwrap();
+        let mut a = Store::create(da.path(), op.clone()).unwrap();
+        let mut b = Store::create(db.path(), op).unwrap();
+        a.trust_mut().authorized_writers.push(cap.subject);
+        b.trust_mut().authorized_writers.push(cap.subject);
+        // Both write the same key.
+        a.remember(test_draft("sync", "will-forget", b"to-be-forgotten"), &cap)
+            .unwrap();
+        b.remember(test_draft("sync", "will-forget", b"to-be-forgotten"), &cap)
+            .unwrap();
+        // B forgets its copy.
+        b.forget(
+            ForgetTarget::LogicalKey(LogicalKey {
+                namespace: "sync".into(),
+                name: "will-forget".into(),
+            }),
+            &cap,
+            ForgetMode::Shred,
+        )
+        .unwrap();
+        // After merge, A must adopt B's tombstone.
+        merge_both_ways(&mut a, &mut b);
+        // The tombstone key must not appear as a live object in either store's manifest.
+        // (The manifest only exports live object IDs, not tombstones.)
+        let ids_a = object_id_set(&a);
+        let ids_b = object_id_set(&b);
+        assert_eq!(ids_a, ids_b, "stores must converge");
+        // Both must have exactly the tombstone (zero live keys) since the only key was forgotten.
+        assert!(
+            ids_a.is_empty(),
+            "tombstone must win: no live objects expected"
+        );
     }
 }

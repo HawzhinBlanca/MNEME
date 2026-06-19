@@ -50,7 +50,7 @@ fn signed_fixture() -> (StoredRoot, mneme_index::SemanticRecallReceipt, TrustCon
             &proc(),
             &q,
             stored.preimage_hash,
-            RetrievalProofLevel::ExactDominance,
+            RetrievalProofLevel::ProcedureFaithfulTopK,
         )
         .unwrap();
     (
@@ -152,7 +152,7 @@ fn spot_check_exact_nn_accepts_true_distances() {
         verify_beacon_spot_check(
             &beacon,
             &receipt,
-            RetrievalProofLevel::ExactDominance,
+            RetrievalProofLevel::ProcedureFaithfulTopK,
             &proc(),
             1_000_000,
             Some(&ctx),
@@ -187,7 +187,7 @@ fn beacon_spot_check_appendix_b_fixture() -> (Vec<u8>, TrustConfig, mneme_index:
             &proc(),
             &q,
             stored.preimage_hash,
-            RetrievalProofLevel::ExactDominance,
+            RetrievalProofLevel::ProcedureFaithfulTopK,
         )
         .unwrap();
     let beacon = non_selected_audit_beacon(4_646_464, &receipt);
@@ -244,7 +244,7 @@ fn appendix_b_audit_beacon_fixture() -> (Vec<u8>, TrustConfig, FixedPointEmbeddi
             &proc(),
             &q,
             stored.preimage_hash,
-            RetrievalProofLevel::ExactDominance,
+            RetrievalProofLevel::ProcedureFaithfulTopK,
         )
         .unwrap();
     let beacon = prove_audit_beacon(1_000_000, vec![0xcd; 32], &receipt).unwrap();

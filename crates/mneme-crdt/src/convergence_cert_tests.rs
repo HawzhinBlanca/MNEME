@@ -12,7 +12,7 @@ use mneme_crypto::{KeyPair, TrustConfig};
 use mneme_dag::DagIndex;
 use mneme_smt::SparseMerkleTree;
 use proptest::prelude::*;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 fn sample_record(writer: [u8; 32], kind: MemoryKind, wall_ms: u64) -> ObjectRecord {
     ObjectRecord {

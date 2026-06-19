@@ -1,7 +1,9 @@
 //! Live semantic-index issuance for `RetrievalProofLevel::CompleteTopK` (CR-6 store wiring).
 
-use crate::complete_knn::{AuthenticatedBallTree, prove_complete_knn};
-use crate::complete_knn_cert::{CompleteKnnCertAttachment, encode_complete_knn_attachment};
+use crate::complete_knn::{AuthenticatedBallTree, CompleteKnnProof, prove_complete_knn};
+use crate::complete_knn_cert::{
+    CompleteKnnCertAttachment, encode_complete_knn_attachment, hash_proof,
+};
 use crate::error::IndexError;
 use crate::procedure::procedure_id;
 use crate::receipt::{CompleteKnnAttachment, SemanticRecallReceipt, ZkannAttachment};
@@ -13,12 +15,7 @@ use mneme_core::{
 /// Dequantize fixed-point components to `R^d` for complete-kNN geometry (same scale as ingest).
 pub fn fixed_point_to_f64(emb: &FixedPointEmbedding) -> Result<Vec<f64>, MnemeError> {
     emb.validate_shape()?;
-    let scale = f64::powi(2.0, i32::from(emb.scale));
-    Ok(emb
-        .components
-        .iter()
-        .map(|&c| f64::from(c) * scale)
-        .collect())
+    Ok(emb.components.iter().map(|&c| f64::from(c)).collect())
 }
 
 /// Build a complete-kNN semantic receipt from committed embeddings (fail-closed).
@@ -29,6 +26,7 @@ pub fn build_complete_topk_receipt(
     root_bound: [u8; 32],
     proc: &Procedure,
     query: &FixedPointEmbedding,
+    constant_size: bool,
 ) -> Result<SemanticRecallReceipt, IndexError> {
     if proc.distance != DistanceMetric::SquaredL2I64 {
         return Err(IndexError::SemanticNotImplemented);
@@ -64,12 +62,34 @@ pub fn build_complete_topk_receipt(
         .map(|rp| object_ids[rp.index])
         .collect();
 
+    let actual_proof_hash = if constant_size {
+        Some(hash_proof(&proof).map_err(|_| IndexError::EmbeddingShape)?)
+    } else {
+        None
+    };
+
     let att = CompleteKnnCertAttachment {
         commitment: tree.commitment(),
         query: query_f64.clone(),
         k: proc.k,
-        proof,
+        proof: if constant_size {
+            CompleteKnnProof {
+                total_points: proof.total_points,
+                returned: Vec::new(),
+                frontier: Vec::new(),
+                excluded: Vec::new(),
+            }
+        } else {
+            proof
+        },
         beacon: None,
+        constant_proof_hash: actual_proof_hash,
+        merkle_hnsw_root: if constant_size {
+            Some(tree.commitment())
+        } else {
+            None
+        },
+        constant_size,
     };
     let proof_bytes = encode_complete_knn_attachment(&att).map_err(IndexError::from)?;
 
@@ -80,6 +100,7 @@ pub fn build_complete_topk_receipt(
         procedure_id: procedure_id(proc),
         query_commit: query.commit(),
         result_ids,
+        candidates_embeddings: None,
     };
 
     let mut receipt = SemanticRecallReceipt::new(root_bound, semantic_commit, vo);

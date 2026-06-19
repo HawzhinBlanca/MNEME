@@ -31,7 +31,7 @@ use std::process::ExitCode;
 #[command(
     name = "mneme",
     version,
-    about = "Verifiable memory substrate — fail-closed verify, recall, forget, merge",
+    about = "Fail-closed verifiable recall — verify, recall, forget, merge",
     long_about = None
 )]
 struct Cli {
@@ -123,8 +123,14 @@ enum Commands {
         dim: u16,
         #[arg(long, default_value_t = 0)]
         scale: i8,
-        #[arg(long = "proof-level", default_value = "exact-dominance")]
+        #[arg(long = "proof-level", default_value = "procedure-faithful-top-k")]
         proof_level: ProofLevelArg,
+        /// TTRP-1: Emit a constant-size completeness proof committed via proof_hash
+        #[arg(long = "constant-size", default_value_t = false)]
+        constant_size: bool,
+        /// TTRP-1: Optional output path for the out-of-band full proof file
+        #[arg(long = "proof-out")]
+        proof_out: Option<PathBuf>,
     },
     /// Offline verify Cognition Certificate v1 (Phase I)
     VerifyCert {
@@ -149,6 +155,9 @@ enum Commands {
         ef_search: u32,
         #[arg(long, default_value_t = 1)]
         k: u32,
+        /// Optional out-of-band proof file for constant-size certificates
+        #[arg(long = "proof-file")]
+        proof_file: Option<PathBuf>,
     },
     /// Certified Counterfactual Replay (weak mode): assemble a verified context from
     /// KEYS with and without one entry; emit a signed offline-verifiable certificate
@@ -284,6 +293,18 @@ enum Commands {
         name: String,
         #[arg(long = "out")]
         out: PathBuf,
+        /// FCC-2: Optional DP epsilon parameter for T3 DP-influence bound
+        #[arg(long = "dp-epsilon")]
+        dp_epsilon: Option<f64>,
+        /// FCC-2: Optional DP delta parameter for T3 DP-influence bound
+        #[arg(long = "dp-delta")]
+        dp_delta: Option<f64>,
+        /// FCC-3: Optional small model retraining checkpoint hash (64 hex)
+        #[arg(long = "unlearn-checkpoint-hash")]
+        unlearn_checkpoint_hash: Option<String>,
+        /// FCC-3: Optional Spartan proof binary file path
+        #[arg(long = "unlearn-spartan-proof")]
+        unlearn_spartan_proof: Option<PathBuf>,
     },
     /// Offline verify a Forgetting-Closure Certificate (signature + tier re-derivation)
     VerifyFcc {
@@ -291,6 +312,16 @@ enum Commands {
         /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
+    },
+    /// FCC-3: Verify a certified-unlearning receipt and print the smoothness/scale gap
+    CertifyUnlearning {
+        cert: PathBuf,
+        /// Expected small model retraining checkpoint hash (64 hex)
+        #[arg(long = "checkpoint-hash")]
+        checkpoint_hash: String,
+        /// Expected Spartan proof binary file path
+        #[arg(long = "proof-bytes")]
+        proof_bytes: Option<PathBuf>,
     },
     /// MTL-1: append the store's current signed root to an append-only transparency
     /// log and emit an offline-verifiable inclusion receipt for it.
@@ -481,7 +512,8 @@ enum ForgetModeArg {
 #[derive(Clone, Copy, ValueEnum, Default)]
 enum ProofLevelArg {
     #[default]
-    ExactDominance,
+    #[value(alias = "exact-dominance")]
+    ProcedureFaithfulTopK,
     HnswAuditOnDemand,
     CompleteTopK,
 }
@@ -489,7 +521,7 @@ enum ProofLevelArg {
 impl From<ProofLevelArg> for RetrievalProofLevel {
     fn from(v: ProofLevelArg) -> Self {
         match v {
-            ProofLevelArg::ExactDominance => RetrievalProofLevel::ExactDominance,
+            ProofLevelArg::ProcedureFaithfulTopK => RetrievalProofLevel::ProcedureFaithfulTopK,
             ProofLevelArg::HnswAuditOnDemand => RetrievalProofLevel::HnswAuditOnDemand,
             ProofLevelArg::CompleteTopK => RetrievalProofLevel::CompleteTopK,
         }
@@ -959,11 +991,43 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             namespace,
             name,
             out,
+            dp_epsilon,
+            dp_delta,
+            unlearn_checkpoint_hash,
+            unlearn_spartan_proof,
         } => {
             if name.trim().is_empty() {
                 eprintln!("mneme: fcc --name must not be empty");
                 return Err(CliErrorKind::Usage);
             }
+            if dp_epsilon.is_some() != dp_delta.is_some() {
+                eprintln!(
+                    "mneme: both --dp-epsilon and --dp-delta must be specified to enable T3 DP influence-bound"
+                );
+                return Err(CliErrorKind::Usage);
+            }
+
+            let cp_hash = if let Some(ref hex_str) = unlearn_checkpoint_hash {
+                let bytes = parse_seed_hex(hex_str)?;
+                Some(bytes)
+            } else {
+                None
+            };
+
+            let proof_bytes = if let Some(ref path) = unlearn_spartan_proof {
+                let bytes = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
+                Some(bytes)
+            } else {
+                None
+            };
+
+            if cp_hash.is_some() != proof_bytes.is_some() {
+                eprintln!(
+                    "mneme: both --unlearn-checkpoint-hash and --unlearn-spartan-proof must be specified to certify unlearning"
+                );
+                return Err(CliErrorKind::Usage);
+            }
+
             require_store_dir(&store)?;
             let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
             let mut mneme_store = open_store(&store, operator.clone(), cli.vault)?;
@@ -985,6 +1049,10 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             let cert = fcc::ForgettingClosureCertV1::from_forget_proof(
                 &proven.proof,
                 proven.root.sequence,
+                dp_epsilon,
+                dp_delta,
+                cp_hash,
+                proof_bytes,
             )
             .map_err(CliErrorKind::Kernel)?;
             let tier = cert.tier_achieved;
@@ -1003,7 +1071,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             Ok(())
         }
         Commands::VerifyFcc { cert, operator_pk } => {
-            let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
+            let wire = std::fs::read(cert).map_err(|_| CliErrorKind::Usage)?;
             let pinned = match operator_pk {
                 Some(hex) => Some(parse_seed_hex(&hex)?),
                 None => None,
@@ -1013,6 +1081,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             let tier_label = match parsed.tier_achieved {
                 fcc::TIER_CRYPTO_SHRED => "T1 crypto-shred",
                 fcc::TIER_TOMBSTONE_ABSENCE => "T2 crypto-shred + provable absence",
+                fcc::TIER_DP_INFLUENCE => "T3 DP-influence bound",
                 _ => "unknown",
             };
             println!(
@@ -1023,12 +1092,51 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 hex::encode(parsed.target_commit),
                 hex::encode(parsed.operator_pk)
             );
+            if parsed.tier_achieved == fcc::TIER_DP_INFLUENCE {
+                if let (Some(eps), Some(del)) = (parsed.dp_epsilon, parsed.dp_delta) {
+                    println!("T3 DP parameter bound: epsilon={} delta={}", eps, del);
+                }
+            } else {
+                println!("T3: not-applicable (model not DP-trained)");
+            }
+            if let (Some(hash), Some(proof)) = (
+                parsed.unlearn_checkpoint_hash.as_ref(),
+                parsed.unlearn_spartan_proof.as_ref(),
+            ) {
+                println!("unlearning checkpoint hash: {}", hex::encode(hash));
+                println!("unlearning Spartan proof size: {} bytes", proof.len());
+                println!("honesty: {}", fcc::UNLEARNING_HONESTY);
+            }
             if pinned.is_none() {
                 println!(
                     "note: operator key not pinned — verified against the embedded key; confirm it out-of-band"
                 );
             }
             println!("honesty: {}", fcc::FCC_HONESTY);
+            Ok(())
+        }
+        Commands::CertifyUnlearning {
+            cert,
+            checkpoint_hash,
+            proof_bytes,
+        } => {
+            let wire = std::fs::read(cert).map_err(|_| CliErrorKind::Usage)?;
+            let parsed = fcc::ForgettingClosureCertV1::verify(&wire, None)
+                .map_err(CliErrorKind::VerifyFailed)?;
+            let expected_hash = parse_seed_hex(&checkpoint_hash)?;
+            if parsed.unlearn_checkpoint_hash != Some(expected_hash) {
+                eprintln!("unlearn-checkpoint-hash mismatch");
+                return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
+            }
+            if let Some(ref path) = proof_bytes {
+                let expected_proof = std::fs::read(path).map_err(|_| CliErrorKind::Usage)?;
+                if parsed.unlearn_spartan_proof.as_ref() != Some(&expected_proof) {
+                    eprintln!("unlearn-spartan-proof bytes mismatch");
+                    return Err(CliErrorKind::VerifyFailed(MnemeError::ObjectTampered));
+                }
+            }
+            println!("verify-unlearning ok: checkpoint_hash matches cert");
+            println!("honesty: {}", fcc::UNLEARNING_HONESTY);
             Ok(())
         }
         Commands::Mtl {
@@ -1528,6 +1636,8 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             dim,
             scale,
             proof_level,
+            constant_size,
+            proof_out,
         } => {
             require_store_dir(&store)?;
             let comps = parse_i16_list(&components)?;
@@ -1544,6 +1654,8 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 dim,
                 scale,
                 proof_level.into(),
+                constant_size,
+                proof_out.as_deref(),
                 &out,
             )
             .map_err(CliErrorKind::VerifyFailed)?;
@@ -1560,6 +1672,7 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             scale,
             ef_search,
             k,
+            proof_file,
         } => {
             require_file_exists(&cert, "cognition certificate")?;
             let pk = if let Some(ref seed) = cli.operator_seed {
@@ -1605,7 +1718,8 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 })?;
                 println!("{msg}");
             } else {
-                cert::run_verify_cert(&cert, &trust, &proc).map_err(CliErrorKind::VerifyFailed)?;
+                cert::run_verify_cert(&cert, &trust, &proc, proof_file.as_deref())
+                    .map_err(CliErrorKind::VerifyFailed)?;
                 println!("verify-cert ok: cognition certificate v1 valid offline");
             }
             Ok(())

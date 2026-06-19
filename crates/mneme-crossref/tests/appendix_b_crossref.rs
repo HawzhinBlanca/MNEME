@@ -275,7 +275,7 @@ fn crossref_cognition_cert_byte_exact() {
             seed: proc_spec["seed"].as_u64().unwrap(),
         };
         let operator = read_hex32(entry["operator_pubkey_hex"].as_str().unwrap());
-        wire_cert::verify_committed_certificate(&bytes, &operator, &proc)
+        wire_cert::verify_committed_certificate(&bytes, &operator, &proc, None)
             .unwrap_or_else(|e| panic!("{name}: {e:?}"));
     }
 }
@@ -344,7 +344,7 @@ fn crossref_beacon_spot_check_fixture() {
         seed: proc_spec["seed"].as_u64().unwrap(),
     };
     let operator = read_hex32(entry["operator_pubkey_hex"].as_str().unwrap());
-    wire_cert::verify_committed_certificate(&bytes, &operator, &proc)
+    wire_cert::verify_committed_certificate(&bytes, &operator, &proc, None)
         .unwrap_or_else(|e| panic!("beacon_spot_check: {e:?}"));
 
     let beacon_spec = &entry["audit_beacon"];
