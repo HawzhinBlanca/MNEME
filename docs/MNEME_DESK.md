@@ -71,6 +71,18 @@ The forget proof is an SMT non-membership proof bound to a fresh signed Ed25519 
 third party checks, offline, that the key is absent from the committed index after the
 deletion — the one thing no RAG/vector-DB stack can show.
 
+## Verify the whole stack
+
+```bash
+scripts/ci/desk-live-e2e.sh    # boots cap-mint -> mnemed -> ui/serve.mjs and asserts the chain
+```
+
+It proves, against the real binaries, every load-bearing claim: same-origin serve,
+fail-closed auth (401), cap-injected recall, remember → verified recall, a root-bound
+ForgetProof, **fail-closed deletion** (recall returns 410 Gone, `prove-absent` confirms
+absence under the signed root), and **least-privilege** (a read-only cap is denied
+forget, 403). Any mismatch aborts non-zero.
+
 ## Security checklist (do not skip)
 
 - The cap file is a bearer credential. Treat it like an SSH key; never commit it, never
