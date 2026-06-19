@@ -944,3 +944,106 @@ fn agent_card_sign_and_verify_journey() {
         .failure()
         .code(4);
 }
+
+// --- Phase Y0: capability minting (the trust root) ---
+
+#[test]
+fn cap_mint_inspect_and_daemon_style_verify() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let cap_file = dir.path().join("cap.txt");
+    let seed = [0x07; 32];
+    let seed_hex = hex::encode(seed);
+    mneme()
+        .args([
+            "init",
+            store.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "cap",
+            "mint",
+            store.to_str().unwrap(),
+            "--read",
+            "--write",
+            "--out",
+            cap_file.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+
+    // inspect prints the signed scope (default namespace = tools, READ|WRITE = 0b00011)
+    mneme()
+        .args(["cap", "inspect", cap_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("namespaces:   [\"tools\"]"))
+        .stdout(predicate::str::contains("permissions:  0b00011"));
+
+    // The token must verify EXACTLY as the daemon checks it:
+    // base64(STANDARD) -> Capability::from_bytes -> verify(operator).
+    let token = fs::read_to_string(&cap_file).unwrap();
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, token.trim())
+        .expect("token is standard base64");
+    let cap = mneme_cap::Capability::from_bytes(&bytes).expect("decodes to a capability");
+    let operator = KeyPair::from_seed(seed);
+    cap.verify(
+        &operator,
+        &mneme_core::Hlc {
+            wall_ms: 0,
+            counter: 0,
+            node_id: mneme_core::NodeId([0u8; 16]),
+        },
+    )
+    .expect("daemon-style verify under operator");
+
+    // Fail-closed: a single flipped byte must not verify.
+    let mut bad = bytes.clone();
+    let mid = bad.len() / 2;
+    bad[mid] ^= 0x01;
+    let tampered = mneme_cap::Capability::from_bytes(&bad).and_then(|c| {
+        c.verify(
+            &operator,
+            &mneme_core::Hlc {
+                wall_ms: 0,
+                counter: 0,
+                node_id: mneme_core::NodeId([0u8; 16]),
+            },
+        )
+    });
+    assert!(tampered.is_err(), "tampered cap must fail closed");
+}
+
+#[test]
+fn cap_mint_without_permissions_is_rejected() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let seed_hex = hex::encode([0x08; 32]);
+    mneme()
+        .args([
+            "init",
+            store.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    // Least privilege: a cap that grants nothing is a usage error.
+    mneme()
+        .args([
+            "cap",
+            "mint",
+            store.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .failure()
+        .code(2);
+}

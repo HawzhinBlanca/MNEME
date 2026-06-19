@@ -52,4 +52,5 @@ mneme-store.workspace = true
 mneme-verify.workspace = true
 mneme-index.workspace = true
 hex.workspace = true
+base64.workspace = true
 walkdir = "2.5"

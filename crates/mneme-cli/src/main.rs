@@ -424,6 +424,51 @@ enum Commands {
         #[command(subcommand)]
         command: PaceCommands,
     },
+    /// Phase Y0 trust root: mint / inspect offline-verifiable capability tokens.
+    Cap {
+        #[command(subcommand)]
+        command: CapCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CapCommands {
+    /// Mint a base64 capability token (Authorization: Bearer …) signed by the
+    /// store operator. Least-privilege by default: you must grant each permission
+    /// explicitly, the namespace scope defaults to `tools` (Quarantine-safe), and
+    /// a NotAfter expiry caveat is always attached.
+    Mint {
+        store: PathBuf,
+        /// Subject public key (64 hex). Defaults to the operator's own key (self-cap).
+        #[arg(long = "subject")]
+        subject: Option<String>,
+        /// Namespace prefix scope (repeatable). Default: `tools`. Use `*` for all.
+        #[arg(long = "namespace")]
+        namespaces: Vec<String>,
+        /// Grant read.
+        #[arg(long = "read", default_value_t = false)]
+        read: bool,
+        /// Grant write.
+        #[arg(long = "write", default_value_t = false)]
+        write: bool,
+        /// Grant forget.
+        #[arg(long = "forget", default_value_t = false)]
+        forget: bool,
+        /// Grant promote (privilege escalation of trust tier — off by default).
+        #[arg(long = "promote", default_value_t = false)]
+        promote: bool,
+        /// Maximum trust tier the holder may read/promote to.
+        #[arg(long = "tier-max", default_value = "working")]
+        tier_max: TrustTierArg,
+        /// Write the token to a file instead of stdout.
+        #[arg(long = "out")]
+        out: Option<PathBuf>,
+    },
+    /// Decode a capability token file and print its (signed) scope — no secrets.
+    Inspect {
+        /// File containing a base64 capability token.
+        token: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1780,6 +1825,114 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             } => {
                 require_file_exists(&log, "pace log")?;
                 pace::run_verify(&log, min_iterations).map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+        },
+        Commands::Cap { command } => match command {
+            CapCommands::Mint {
+                store,
+                subject,
+                namespaces,
+                read,
+                write,
+                forget,
+                promote,
+                tier_max,
+                out,
+            } => {
+                require_store_dir(&store)?;
+                let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+                // Subject defaults to the operator's own key (single-user self-cap).
+                let subject = match subject {
+                    Some(hex_str) => parse_seed_hex(&hex_str)?,
+                    None => operator.public_key_bytes(),
+                };
+                // Least privilege: refuse to mint a cap that grants nothing.
+                let mut perms = mneme_cap::Permissions::empty();
+                if read {
+                    perms |= mneme_cap::Permissions::READ;
+                }
+                if write {
+                    perms |= mneme_cap::Permissions::WRITE;
+                }
+                if forget {
+                    perms |= mneme_cap::Permissions::FORGET;
+                }
+                if promote {
+                    perms |= mneme_cap::Permissions::PROMOTE;
+                }
+                if perms.is_empty() {
+                    eprintln!(
+                        "mneme: cap mint requires at least one of --read/--write/--forget/--promote"
+                    );
+                    return Err(CliErrorKind::Usage);
+                }
+                let namespaces = if namespaces.is_empty() {
+                    vec!["tools".to_string()]
+                } else {
+                    namespaces
+                };
+                let tier_max: TrustTier = tier_max.into();
+                // Always attach an expiry. If scoped to a single concrete namespace,
+                // also pin a NamespacePrefix caveat (defense in depth: an attenuated
+                // holder can only narrow, never widen, the scope).
+                let mut caveats =
+                    vec![mneme_core::Caveat::NotAfter(mneme_cap::default_cap_expiry())];
+                if namespaces.len() == 1 && namespaces[0] != "*" {
+                    caveats.push(mneme_core::Caveat::NamespacePrefix(namespaces[0].clone()));
+                }
+                let kinds = vec![
+                    MemoryKind::Episodic,
+                    MemoryKind::Semantic,
+                    MemoryKind::Procedural,
+                    MemoryKind::Working,
+                    MemoryKind::Identity,
+                ];
+                let cap = mneme_cap::Capability::issue(
+                    &operator,
+                    subject,
+                    namespaces,
+                    kinds,
+                    tier_max,
+                    // tier floor stays Quarantine; reaching tier_max needs PROMOTE.
+                    TrustTier::Quarantine,
+                    perms,
+                    caveats,
+                )
+                .map_err(CliErrorKind::Kernel)?;
+                let bytes = cap.to_bytes().map_err(CliErrorKind::Kernel)?;
+                let token =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                match out {
+                    Some(path) => {
+                        std::fs::write(&path, &token).map_err(|_| CliErrorKind::Usage)?;
+                        eprintln!(
+                            "cap minted -> {} (perms 0b{:05b}, {}-byte token)",
+                            path.display(),
+                            perms.bits(),
+                            token.len()
+                        );
+                    }
+                    None => println!("{token}"),
+                }
+                Ok(())
+            }
+            CapCommands::Inspect { token } => {
+                require_file_exists(&token, "capability token")?;
+                let raw = std::fs::read_to_string(&token).map_err(|_| CliErrorKind::Usage)?;
+                let bytes =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw.trim())
+                        .map_err(|_| CliErrorKind::Usage)?;
+                let cap =
+                    mneme_cap::Capability::from_bytes(&bytes).map_err(CliErrorKind::Kernel)?;
+                let inner = cap.inner();
+                println!("issuer:       {}", hex::encode(inner.issuer));
+                println!("subject:      {}", hex::encode(inner.subject));
+                println!("namespaces:   {:?}", inner.namespaces);
+                println!("permissions:  0b{:05b}", inner.permissions);
+                println!("tier_max:     {}", inner.tier_max);
+                println!("tier_default: {}", inner.tier_default);
+                println!("caveats:      {}", inner.caveats.len());
                 Ok(())
             }
         },
