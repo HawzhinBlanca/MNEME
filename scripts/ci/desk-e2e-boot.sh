@@ -21,17 +21,17 @@ BIN="$ROOT/target/debug/mneme"
 DAEMON="$ROOT/target/debug/mnemed"
 
 "$BIN" init "$TMP/store" >/dev/null 2>&1
-"$BIN" cap mint "$TMP/store" --read --write --forget --namespace '*' --tier-max trusted --out "$TMP/cap.txt" >/dev/null 2>&1
+"$BIN" cap mint "$TMP/store" --read --write --forget --promote --namespace '*' --tier-max trusted --out "$TMP/cap.txt" >/dev/null 2>&1
 
 "$DAEMON" --store "$TMP/store" --http "127.0.0.1:$DPORT" >"$TMP/daemon.log" 2>&1 &
 DPID=$!
 for _ in $(seq 1 80); do curl -sf "http://127.0.0.1:$DPORT/v1/health" >/dev/null 2>&1 && break; sleep 0.25; done
 
 AUTH="Authorization: Bearer $(cat "$TMP/cap.txt")"
-curl -s -X POST "http://127.0.0.1:$DPORT/v1/memory" -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"namespace":"notes","name":"hello","kind":"episodic","body":"verified-recall-works"}' >/dev/null
-curl -s -X POST "http://127.0.0.1:$DPORT/v1/memory" -H "$AUTH" -H 'content-type: application/json' \
-  -d '{"namespace":"notes","name":"forgetme","kind":"episodic","body":"delete-with-a-receipt"}' >/dev/null
+seed() { curl -s -X POST "http://127.0.0.1:$DPORT/v1/memory" -H "$AUTH" -H 'content-type: application/json' -d "$1" >/dev/null; }
+seed '{"namespace":"notes","name":"hello","kind":"episodic","body":"verified-recall-works"}'
+seed '{"namespace":"notes","name":"forgetme","kind":"episodic","body":"delete-with-a-receipt"}'
+seed '{"namespace":"notes","name":"promoteme","kind":"episodic","body":"raise-my-trust-tier"}'
 
 MNEME_CAP_FILE="$TMP/cap.txt" MNEME_UI_PORT="$UPORT" MNEME_DAEMON="http://127.0.0.1:$DPORT" \
   node "$ROOT/ui/serve.mjs" &

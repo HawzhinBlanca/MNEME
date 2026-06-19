@@ -161,6 +161,47 @@
             </div>
           </div>
         </section>
+
+        <!-- Remember (write) Console -->
+        <section class="card recall-card" aria-labelledby="remember-title">
+          <h3 id="remember-title" class="card-title">Remember (write)</h3>
+          <form class="recall-form" id="remember-form">
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="remember-ns">Namespace</label>
+                <div class="input-wrapper"><input type="text" id="remember-ns" name="namespace" placeholder="notes" required></div>
+              </div>
+              <div class="form-group flex-1">
+                <label for="remember-name">Name</label>
+                <div class="input-wrapper"><input type="text" id="remember-name" name="name" placeholder="hello" required></div>
+              </div>
+              <div class="form-group flex-1">
+                <label for="remember-kind">Kind</label>
+                <select id="remember-kind" name="kind">
+                  <option value="episodic">episodic</option>
+                  <option value="semantic">semantic</option>
+                  <option value="procedural">procedural</option>
+                  <option value="working">working</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="remember-body">Body</label>
+                <div class="input-wrapper"><input type="text" id="remember-body" name="body" placeholder="value to commit" required></div>
+              </div>
+              <div class="form-group align-bottom">
+                <button type="submit" class="btn btn-secondary" id="btn-remember">
+                  <span class="btn-text">Remember</span>
+                  <span class="spinner" id="remember-spinner" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+          </form>
+          <div class="recall-results-container hidden" id="remember-result-area">
+            <div class="results-grid" id="remember-result-grid"></div>
+          </div>
+        </section>
       </div>
 
       <!-- SETTINGS VIEW -->

@@ -92,10 +92,18 @@ want_status "$after" '^(410|404)$' "recall after forget is absent/tombstoned"
 # 8. prove-absent corroborates the deletion under the signed root
 want_grep "$(curl -s "$UI/v1/prove-absent/notes/hello")" '"absent":true' "prove-absent confirms key gone"
 
-# 9. least-privilege: a read-only cap is denied the forget op
-curl -s -X POST "$DAEMON_URL/v1/memory" -H "$RW" -H 'content-type: application/json' \
-  -d '{"namespace":"notes","name":"keep","kind":"episodic","body":"keep-me"}' >/dev/null
-want_status "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$DAEMON_URL/v1/forget-proof/notes/keep" -H "$RO")" \
-  '^(401|403)$' "read-only cap denied forget"
+# 9. least-privilege (granular): caps are denied ops they were not granted.
+keep=$(curl -s -X POST "$DAEMON_URL/v1/memory" -H "$RW" -H 'content-type: application/json' \
+  -d '{"namespace":"notes","name":"keep","kind":"episodic","body":"keep-me"}')
+keep_oid=$(printf '%s' "$keep" | grep -o '"object_id_hex":"[0-9a-f]*"' | sed 's/.*:"//;s/"//')
+if [ "${#keep_oid}" = "64" ]; then pass "seeded notes/keep"; else fail "could not seed notes/keep: $keep"; fi
+
+ro_forget=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$DAEMON_URL/v1/forget-proof/notes/keep" -H "$RO")
+want_status "$ro_forget" '^(401|403)$' "read-only cap denied forget"
+
+promote_body="{\"object_id_hex\":\"$keep_oid\",\"to_tier\":\"trusted\"}"
+rw_promote=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$DAEMON_URL/v1/memory/promote" -H "$RW" \
+  -H 'content-type: application/json' -d "$promote_body")
+want_status "$rw_promote" '^(401|403)$' "cap without PROMOTE denied promote"
 
 echo "desk-live-e2e: OK"

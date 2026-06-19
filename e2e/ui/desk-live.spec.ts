@@ -34,6 +34,30 @@ test.describe("MNEME Desk — live", () => {
     await expect(page.getByTestId("recall-result")).toHaveCount(0);
   });
 
+  test("remember commits a new memory and it recalls back", async ({ page }) => {
+    await page.locator("#remember-ns").fill("notes");
+    await page.locator("#remember-name").fill("from-ui");
+    await page.locator("#remember-body").fill("written-through-the-console");
+    await page.getByRole("button", { name: /^remember$/i }).click();
+    await expect(page.locator("#remember-result-grid")).toContainText(/committed/i);
+    // and it is now recallable
+    await page.getByRole("searchbox", { name: /recall query/i }).fill("notes/from-ui");
+    await page.getByLabel(/minimum trust tier/i).selectOption("quarantine");
+    await page.getByRole("button", { name: /^recall$/i }).click();
+    await expect(page.getByTestId("recall-result").first()).toContainText("written-through-the-console");
+  });
+
+  test("promote raises an entry to the trusted tier", async ({ page }) => {
+    await page.getByRole("searchbox", { name: /recall query/i }).fill("notes/promoteme");
+    await page.getByLabel(/minimum trust tier/i).selectOption("quarantine");
+    await page.getByRole("button", { name: /^recall$/i }).click();
+    const result = page.getByTestId("recall-result").first();
+    await expect(result).toBeVisible();
+    await result.getByRole("button", { name: /promote/i }).click();
+    await expect(result.locator(".tier-badge")).toHaveText(/trusted/i);
+    await expect(result).toContainText(/promoted to trusted/i);
+  });
+
   test("forget downloads a ForgetProof and marks the entry forgotten", async ({ page }) => {
     await page.getByRole("searchbox", { name: /recall query/i }).fill("notes/forgetme");
     await page.getByLabel(/minimum trust tier/i).selectOption("quarantine");

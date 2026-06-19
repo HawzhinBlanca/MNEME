@@ -189,10 +189,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function buildResultCard({ ns, name, body, tier }) {
+  function buildResultCard({ ns, name, body, tier, objectId }) {
     const card = document.createElement('div');
     card.className = 'result-card';
     card.setAttribute('data-testid', 'recall-result');
+    const canPromote = !DEMO && objectId && tier !== 'trusted' && tier !== 'identity';
+    const promoteBtn = canPromote
+      ? '<button class="btn btn-secondary btn-promote" type="button">Promote &rarr; Trusted</button>'
+      : '';
     card.innerHTML = `
       <div class="result-main">
         <div class="result-header-row">
@@ -205,10 +209,37 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="result-verdict">
         ${tierBadge(tier)}
         ${receiptBadge()}
+        ${promoteBtn}
         <button class="btn btn-danger btn-forget" type="button">Forget + proof</button>
       </div>`;
     card.querySelector('.btn-forget').addEventListener('click', () => forgetWithProof(ns, name, card));
+    const pb = card.querySelector('.btn-promote');
+    if (pb) pb.addEventListener('click', () => promoteEntry(objectId, card));
     return card;
+  }
+
+  // Promote a committed object to a higher trust tier (requires a PROMOTE cap).
+  async function promoteEntry(objectId, cardEl) {
+    const statusEl = cardEl.querySelector('.forget-status');
+    try {
+      const r = await fetch(api('/v1/memory/promote'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ object_id_hex: objectId, to_tier: 'trusted' }),
+      });
+      if (!r.ok) {
+        statusEl.textContent = r.status === 403 ? 'promote denied — capability lacks PROMOTE' : `promote failed (${r.status})`;
+        return;
+      }
+      const head = await r.json();
+      const badge = cardEl.querySelector('.tier-badge');
+      if (badge) { badge.className = 'tier-badge trusted'; badge.textContent = 'trusted'; }
+      const pb = cardEl.querySelector('.btn-promote');
+      if (pb) pb.remove();
+      statusEl.textContent = `promoted to trusted · root seq ${head.sequence}`;
+    } catch (e) {
+      statusEl.textContent = 'promote failed — daemon unreachable';
+    }
   }
 
   // --- Memory Recall ---
@@ -256,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await r.json();
         const entries = data.entries || [];
         if (!entries.length) { renderInfoCard('No authenticated entry — fail-closed.'); return; }
-        entries.forEach((en) => resultsGrid.appendChild(buildResultCard({ ns: key.ns, name: key.name, body: en.body, tier: tierName(en.trust_tier) })));
+        entries.forEach((en) => resultsGrid.appendChild(buildResultCard({ ns: key.ns, name: key.name, body: en.body, tier: tierName(en.trust_tier), objectId: en.object_id_hex })));
         if (data.robr_receipt_b64) {
           const rc = document.createElement('div');
           rc.className = 'result-card';
@@ -266,6 +297,44 @@ document.addEventListener('DOMContentLoaded', () => {
         resultsArea.classList.remove('hidden');
       })
       .catch(() => { done(); renderInfoCard('Recall failed — daemon unreachable (fail-closed).'); });
+  });
+
+  // --- Remember (write) ---
+  const rememberForm = document.getElementById('remember-form');
+  const btnRemember = document.getElementById('btn-remember');
+  const rememberResultArea = document.getElementById('remember-result-area');
+  const rememberResultGrid = document.getElementById('remember-result-grid');
+  rememberForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const ns = document.getElementById('remember-ns').value.trim();
+    const name = document.getElementById('remember-name').value.trim();
+    const kind = document.getElementById('remember-kind').value;
+    const body = document.getElementById('remember-body').value;
+    btnRemember.classList.add('loading');
+    btnRemember.disabled = true;
+    const finish = () => { btnRemember.classList.remove('loading'); btnRemember.disabled = false; };
+    const show = (msg) => {
+      rememberResultGrid.innerHTML = `<div class="result-card"><div class="result-main"><span class="result-name">${msg}</span></div></div>`;
+      rememberResultArea.classList.remove('hidden');
+    };
+    if (DEMO) {
+      setTimeout(() => { finish(); show(`(demo) would commit <code>${esc(ns)}/${esc(name)}</code>`); }, 300);
+      return;
+    }
+    fetch(api('/v1/memory'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ namespace: ns, name, kind, body }),
+    })
+      .then(async (r) => {
+        finish();
+        if (r.status === 401) { show('Unauthorized — capability lacks WRITE.'); return; }
+        if (!r.ok) { show(`Remember rejected (daemon ${r.status}) — fail-closed.`); return; }
+        const d = await r.json();
+        show(`Committed <code>${esc(ns)}/${esc(name)}</code> · object ${esc(d.object_id_hex.slice(0, 12))}… · root ${esc(d.root_hash_hex.slice(0, 12))}…`);
+        rememberForm.reset();
+      })
+      .catch(() => { finish(); show('Remember failed — daemon unreachable (fail-closed).'); });
   });
 
   // --- Settings ---
