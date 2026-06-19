@@ -8,7 +8,8 @@
     "test:e2e:mcp": "node --test e2e/mcp/*.test.mjs",
     "test:e2e:ui": "playwright test",
     "test:e2e:ui:headed": "playwright test --headed",
-    "playwright:install": "playwright install chromium"
+    "playwright:install": "playwright install chromium",
+    "test:e2e:ui:live": "playwright test --config playwright.live.config.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

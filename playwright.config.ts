@@ -11,6 +11,8 @@ const uiBaseUrl = process.env.MNEME_UI_BASE_URL.replace(/\/$/, "");
  */
 export default defineConfig({
   testDir: "./e2e/ui",
+  // The live-stack suite has its own config (playwright.live.config.ts) + webServer.
+  testIgnore: /desk-live\.spec\.ts/,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
