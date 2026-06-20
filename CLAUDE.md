@@ -79,6 +79,7 @@ Toolchain: Rust **1.86.0** (see `rust-toolchain.toml`; `rustfmt` and `clippy` co
 | `mneme-cli` | `mneme` binary: `verify`, `recall`, `remember`, `forget`, `merge`, `attest`, `determinism` |
 | `mnemed` | Local daemon with HTTP (`:7845`) + optional gRPC + Unix socket APIs, sync over WebSocket |
 | `mneme-crossref` | Independent reference implementation of Appendix B vectors (zero `mneme-*` deps) |
+| `mneme-evolve` | **EXPERIMENTAL, off-TCB**: verifiable self-play episode harness (PROVENANCE L1 step 1) — propose / verify-with-real-reward / commit, with signed, attributable, reversible improvements. Proves the loop ran faithfully; **not** model learning |
 | `fuzz/` | `cargo-fuzz` targets; excluded from workspace build |
 
 ## Architecture invariants (never violate)

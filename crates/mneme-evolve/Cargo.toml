@@ -1,0 +1,16 @@
+[package]
+name = "mneme-evolve"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "EXPERIMENTAL: verifiable self-play episode harness (PROVENANCE L1 step 1; off-TCB)"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-store.workspace = true
+mneme-cap.workspace = true
+
+[dev-dependencies]
+mneme-crypto.workspace = true
+tempfile = "3.14"

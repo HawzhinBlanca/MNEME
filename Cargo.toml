@@ -23,6 +23,7 @@ members = [
     "crates/mneme-crossref",
     "crates/mneme-accum",
     "crates/mneme-optimistic",
+    "crates/mneme-evolve",
 ]
 default-members = ["crates/mneme-store"]
 exclude = ["fuzz", "scripts/piop-flat-prototype"]
