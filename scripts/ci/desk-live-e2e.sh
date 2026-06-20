@@ -84,6 +84,23 @@ proof=$(curl -s -X DELETE "$UI/v1/forget-proof/notes/hello")
 want_grep "$proof" '"proof_cbor_b64"' "forget emits ForgetProof"
 want_grep "$proof" '"root_hash_hex"' "ForgetProof bound to a signed root"
 
+# 6b. that downloaded proof verifies OFFLINE under the pinned operator key — and a
+#     tampered field is rejected. This is the moat: a deletion receipt a third party
+#     checks without trusting the operator's database.
+printf '%s' "$proof" >"$TMP/forget-proof.json"
+operator_pk=$("$BIN" cap inspect "$TMP/cap.txt" | awk '/^issuer:/{print $2}')
+if "$BIN" verify-forget-proof "$TMP/forget-proof.json" --operator-pk "$operator_pk" >/dev/null 2>&1; then
+  pass "ForgetProof verifies offline under pinned operator key"
+else
+  fail "ForgetProof did not verify offline"
+fi
+sed 's/"key_index_root_hex":".\{2\}/"key_index_root_hex":"00/' "$TMP/forget-proof.json" >"$TMP/forget-bad.json"
+if "$BIN" verify-forget-proof "$TMP/forget-bad.json" --operator-pk "$operator_pk" >/dev/null 2>&1; then
+  fail "tampered ForgetProof verified (must fail closed)"
+else
+  pass "tampered ForgetProof rejected (fail-closed)"
+fi
+
 # 7. fail-closed deletion: key is tombstoned (410) or absent (404), never the old body
 after=$(curl -s -o /dev/null -w '%{http_code}' "$UI/v1/memory/notes/hello?min_tier=quarantine")
 body=$(curl -s "$UI/v1/memory/notes/hello?min_tier=quarantine")

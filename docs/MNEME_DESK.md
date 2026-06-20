@@ -63,13 +63,21 @@ curl -o /dev/null -w '%{http_code}\n' http://127.0.0.1:7845/v1/head        # => 
 # through the proxy the cap is injected, so the same call succeeds
 curl http://127.0.0.1:8765/v1/head                                          # => 200 + signed root
 
-# forget with a receipt you can hold, then verify it offline
-curl -X DELETE 'http://127.0.0.1:8765/v1/forget-proof/notes/hello'          # => ForgetProof (CBOR b64)
+# forget with a receipt you can hold …
+curl -X DELETE 'http://127.0.0.1:8765/v1/forget-proof/notes/hello' > proof.json
+
+# … then verify it OFFLINE — no daemon, no trust in the operator's database.
+# Pin the operator key out-of-band (it is the `issuer` of `mneme cap inspect`).
+mneme verify-forget-proof proof.json --operator-pk <operator-pubkey-hex>
+#   => verify-forget-proof ok: target … absent … under signed root seq N
 ```
 
-The forget proof is an SMT non-membership proof bound to a fresh signed Ed25519 root: a
-third party checks, offline, that the key is absent from the committed index after the
-deletion — the one thing no RAG/vector-DB stack can show.
+The forget proof is an SMT non-membership proof bound to a fresh signed Ed25519 root.
+`verify-forget-proof` recomputes the root preimage (binding `key_index_root` to the
+signed hash), checks the operator signature over it, and verifies the non-membership —
+so a third party confirms, offline, that the key is absent from the committed index
+after the deletion. Tamper any field and it fails closed. This is the one thing no
+RAG/vector-DB stack can show. (The MNEME Desk app downloads the same `proof.json`.)
 
 ## Verify the whole stack
 

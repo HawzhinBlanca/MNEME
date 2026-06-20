@@ -182,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
       a.click();
       URL.revokeObjectURL(url);
       cardEl.classList.add('forgotten');
-      cardEl.querySelector('.forget-status').textContent = `forgotten · ForgetProof downloaded (root ${proof.root_hash_hex ? proof.root_hash_hex.slice(0, 10) : '?'}…)`;
+      cardEl.querySelector('.forget-status').textContent = `forgotten · ForgetProof downloaded (root ${proof.root_hash_hex ? proof.root_hash_hex.slice(0, 10) : '?'}…) · verify offline: mneme verify-forget-proof`;
       cardEl.querySelector('.btn-forget').disabled = true;
     } catch (e) {
       cardEl.querySelector('.forget-status').textContent = 'forget failed — daemon unreachable';

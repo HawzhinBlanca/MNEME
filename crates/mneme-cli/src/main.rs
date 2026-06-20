@@ -14,13 +14,16 @@ use mneme_account::robr;
 mod shapley;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use mneme_account::verify_forget_proof;
 use mneme_cap::agent_cap;
 use mneme_core::{
     DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
     ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
 };
-use mneme_core::{ForgetProof, encode_forget_proof};
-use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
+use mneme_core::{ForgetProof, Root, RootPreimage, decode_forget_proof, encode_forget_proof};
+use mneme_crypto::{
+    EnvelopeKeyVault, KeyPair, TrustConfig, public_key_from_bytes, verify_signature_bytes,
+};
 use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
 use std::fmt::Write as _;
@@ -310,6 +313,17 @@ enum Commands {
     VerifyFcc {
         cert: PathBuf,
         /// Optional pinned operator public key (64 hex chars)
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
+    /// Offline-verify a daemon ForgetProof JSON (the `DELETE /v1/forget-proof`
+    /// response / MNEME Desk download): recomputes the root preimage, checks the
+    /// operator signature over it, and verifies the SMT non-membership — proving a
+    /// named key is absent from the committed index under a signed root.
+    VerifyForgetProof {
+        /// JSON file: `{ proof_cbor_b64, root: { … } }`.
+        proof: PathBuf,
+        /// Pinned operator public key (64 hex). Or pass `--operator-seed` at the top level.
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
     },
@@ -1113,6 +1127,85 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 tier
             );
             println!("honesty: {}", fcc::FCC_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyForgetProof { proof, operator_pk } => {
+            require_file_exists(&proof, "forget-proof json")?;
+            let text = std::fs::read_to_string(&proof).map_err(|_| CliErrorKind::Usage)?;
+            let v: serde_json::Value =
+                serde_json::from_str(&text).map_err(|_| CliErrorKind::Usage)?;
+
+            // Decode the carried ForgetProof (proof_cbor_b64, STANDARD base64).
+            let proof_b64 = v["proof_cbor_b64"].as_str().ok_or(CliErrorKind::Usage)?;
+            let proof_bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, proof_b64)
+                    .map_err(|_| CliErrorKind::Usage)?;
+            let fp = decode_forget_proof(&proof_bytes).map_err(CliErrorKind::Kernel)?;
+
+            // Reconstruct the signed Root from the carried fields.
+            let r = &v["root"];
+            let hex32 = |key: &str| -> Result<[u8; 32], CliErrorKind> {
+                parse_seed_hex(r[key].as_str().ok_or(CliErrorKind::Usage)?)
+            };
+            let hlc_bytes = hex::decode(r["hlc_max_hex"].as_str().ok_or(CliErrorKind::Usage)?)
+                .map_err(|_| CliErrorKind::Usage)?;
+            if hlc_bytes.len() != 14 {
+                return Err(CliErrorKind::Usage);
+            }
+            let mut hlc_max = [0u8; 14];
+            hlc_max.copy_from_slice(&hlc_bytes);
+            let root = Root {
+                version: u16::try_from(r["version"].as_u64().ok_or(CliErrorKind::Usage)?)
+                    .map_err(|_| CliErrorKind::Usage)?,
+                preimage_hash: hex32("preimage_hash_hex")?,
+                dag_head_root: hex32("dag_head_root_hex")?,
+                key_index_root: hex32("key_index_root_hex")?,
+                semantic_commit: hex32("semantic_commit_hex")?,
+                hlc_max,
+                prev_root: hex32("prev_root_hex")?,
+                signature: hex::decode(r["signature_hex"].as_str().ok_or(CliErrorKind::Usage)?)
+                    .map_err(|_| CliErrorKind::Usage)?,
+                sequence: r["sequence"].as_u64().ok_or(CliErrorKind::Usage)?,
+            };
+
+            // (1) Bind the carried fields to the signed hash: recompute the preimage
+            //     so a forged key_index_root cannot ride on an operator signature.
+            let recomputed = RootPreimage {
+                version: root.version,
+                dag_head_root: root.dag_head_root,
+                key_index_root: root.key_index_root,
+                semantic_commit: root.semantic_commit,
+                hlc_max: root.hlc_max,
+                prev_root: root.prev_root,
+            }
+            .hash();
+            if recomputed != root.preimage_hash {
+                return Err(CliErrorKind::VerifyFailed(MnemeError::RootInconsistent));
+            }
+
+            // (2) The operator must have signed this preimage (pin the key out-of-band).
+            let pk_bytes = match operator_pk {
+                Some(hex_str) => parse_seed_hex(&hex_str)?,
+                None => {
+                    let seed = cli.operator_seed.as_deref().ok_or(CliErrorKind::Usage)?;
+                    KeyPair::from_seed(parse_seed_hex(seed)?).public_key_bytes()
+                }
+            };
+            let pk = public_key_from_bytes(&pk_bytes).map_err(CliErrorKind::VerifyFailed)?;
+            verify_signature_bytes(&pk, &root.preimage_hash, &root.signature)
+                .map_err(CliErrorKind::VerifyFailed)?;
+
+            // (3) The non-membership proof shows the key is absent under that root.
+            verify_forget_proof(&fp, &root).map_err(CliErrorKind::VerifyFailed)?;
+
+            println!(
+                "verify-forget-proof ok: target {} absent from the committed key index under signed root seq {}",
+                hex::encode(fp.target_commit),
+                root.sequence
+            );
+            println!(
+                "honesty: proves SUBSTRATE deletion (key absent from the committed key index under a fresh operator-signed root) — NOT model unlearning; authenticated ≠ true"
+            );
             Ok(())
         }
         Commands::VerifyFcc { cert, operator_pk } => {
