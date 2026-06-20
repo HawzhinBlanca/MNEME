@@ -79,6 +79,24 @@ want_grep "$remember" '"object_id_hex"' "remember notes/hello"
 want_grep "$(curl -s "$UI/v1/memory/notes/hello?min_tier=quarantine")" 'verified-recall-works' \
   "verified recall returns committed value"
 
+# 5b. a recall with the four ROBR inputs mints a binding receipt that verifies
+#     OFFLINE from its base64 form, and a tampered receipt is rejected.
+operator_pk=$("$BIN" cap inspect "$TMP/cap.txt" | awk '/^issuer:/{print $2}')
+h32=$(printf '11%.0s' $(seq 1 32))
+robr_resp=$(curl -s "$UI/v1/memory/notes/hello?min_tier=quarantine&prompt=p&weight_measurement_hex=$h32&sampling_params=greedy&output_token_commit_hex=$h32")
+printf '%s' "$robr_resp" | grep -o '"robr_receipt_b64":"[^"]*"' | sed 's/.*:"//;s/"//' >"$TMP/robr.b64"
+if [ -s "$TMP/robr.b64" ] && "$BIN" verify-robr "$TMP/robr.b64" --base64 --operator-pk "$operator_pk" >/dev/null 2>&1; then
+  pass "ROBR receipt verifies offline (base64)"
+else
+  fail "ROBR receipt did not verify offline"
+fi
+sed 's/./X/20' "$TMP/robr.b64" >"$TMP/robr-bad.b64"
+if "$BIN" verify-robr "$TMP/robr-bad.b64" --base64 --operator-pk "$operator_pk" >/dev/null 2>&1; then
+  fail "tampered ROBR receipt verified (must fail closed)"
+else
+  pass "tampered ROBR receipt rejected (fail-closed)"
+fi
+
 # 6. forget-with-proof emits an offline-verifiable, root-bound ForgetProof
 proof=$(curl -s -X DELETE "$UI/v1/forget-proof/notes/hello")
 want_grep "$proof" '"proof_cbor_b64"' "forget emits ForgetProof"
@@ -88,7 +106,6 @@ want_grep "$proof" '"root_hash_hex"' "ForgetProof bound to a signed root"
 #     tampered field is rejected. This is the moat: a deletion receipt a third party
 #     checks without trusting the operator's database.
 printf '%s' "$proof" >"$TMP/forget-proof.json"
-operator_pk=$("$BIN" cap inspect "$TMP/cap.txt" | awk '/^issuer:/{print $2}')
 if "$BIN" verify-forget-proof "$TMP/forget-proof.json" --operator-pk "$operator_pk" >/dev/null 2>&1; then
   pass "ForgetProof verifies offline under pinned operator key"
 else
