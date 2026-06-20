@@ -1502,6 +1502,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mneme-evolve"
+version = "0.1.0"
+dependencies = [
+ "mneme-cap",
+ "mneme-core",
+ "mneme-crypto",
+ "mneme-store",
+ "tempfile",
+]
+
+[[package]]
 name = "mneme-forget"
 version = "0.1.0"
 dependencies = [
