@@ -483,6 +483,25 @@ enum CapCommands {
         /// File containing a base64 capability token.
         token: PathBuf,
     },
+    /// Attenuate (narrow-only) a self-issued capability for delegation to a
+    /// sub-agent. Adds restricting caveats and re-signs; it can NEVER widen scope.
+    Attenuate {
+        store: PathBuf,
+        /// File containing the base64 capability token to narrow.
+        token: PathBuf,
+        /// Restrict reads/writes to this namespace prefix.
+        #[arg(long = "namespace-prefix")]
+        namespace_prefix: Option<String>,
+        /// Restrict to episodic memories only.
+        #[arg(long = "only-episodic", default_value_t = false)]
+        only_episodic: bool,
+        /// Add a per-window rate limit (operations).
+        #[arg(long = "rate-limit")]
+        rate_limit: Option<u32>,
+        /// Write the narrowed token to a file instead of stdout.
+        #[arg(long = "out")]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2026,6 +2045,67 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 println!("tier_max:     {}", inner.tier_max);
                 println!("tier_default: {}", inner.tier_default);
                 println!("caveats:      {}", inner.caveats.len());
+                Ok(())
+            }
+            CapCommands::Attenuate {
+                store,
+                token,
+                namespace_prefix,
+                only_episodic,
+                rate_limit,
+                out,
+            } => {
+                require_store_dir(&store)?;
+                require_file_exists(&token, "capability token")?;
+                let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+                let raw = std::fs::read_to_string(&token).map_err(|_| CliErrorKind::Usage)?;
+                let bytes =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw.trim())
+                        .map_err(|_| CliErrorKind::Usage)?;
+                let cap =
+                    mneme_cap::Capability::from_bytes(&bytes).map_err(CliErrorKind::Kernel)?;
+                // Attenuation is signed by the holder (subject). We only hold the
+                // operator key, so we can only narrow a self-issued cap.
+                if cap.inner().subject != operator.public_key_bytes() {
+                    eprintln!(
+                        "mneme: cap attenuate can only narrow a capability whose subject is this operator"
+                    );
+                    return Err(CliErrorKind::Usage);
+                }
+                let mut extra = Vec::new();
+                if let Some(prefix) = namespace_prefix {
+                    extra.push(mneme_core::Caveat::NamespacePrefix(prefix));
+                }
+                if only_episodic {
+                    extra.push(mneme_core::Caveat::OnlyEpisodic);
+                }
+                if let Some(n) = rate_limit {
+                    extra.push(mneme_core::Caveat::RateLimited(n));
+                }
+                if extra.is_empty() {
+                    eprintln!(
+                        "mneme: cap attenuate requires at least one restriction (--namespace-prefix/--only-episodic/--rate-limit)"
+                    );
+                    return Err(CliErrorKind::Usage);
+                }
+                let narrowed = cap
+                    .attenuate(&operator, extra)
+                    .map_err(CliErrorKind::Kernel)?;
+                let bytes = narrowed.to_bytes().map_err(CliErrorKind::Kernel)?;
+                let token =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                match out {
+                    Some(path) => {
+                        std::fs::write(&path, &token).map_err(|_| CliErrorKind::Usage)?;
+                        eprintln!(
+                            "cap attenuated -> {} ({} caveats, {}-byte token)",
+                            path.display(),
+                            narrowed.inner().caveats.len(),
+                            token.len()
+                        );
+                    }
+                    None => println!("{token}"),
+                }
                 Ok(())
             }
         },
