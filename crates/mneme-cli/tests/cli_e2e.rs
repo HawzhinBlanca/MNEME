@@ -1047,3 +1047,125 @@ fn cap_mint_without_permissions_is_rejected() {
         .failure()
         .code(2);
 }
+
+#[test]
+fn cap_attenuate_narrows_scope_and_still_verifies() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let broad = dir.path().join("broad.txt");
+    let narrow = dir.path().join("narrow.txt");
+    let seed = [0x0a; 32];
+    let seed_hex = hex::encode(seed);
+    mneme()
+        .args([
+            "init",
+            store.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "cap",
+            "mint",
+            store.to_str().unwrap(),
+            "--read",
+            "--namespace",
+            "*",
+            "--tier-max",
+            "trusted",
+            "--out",
+            broad.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "cap",
+            "attenuate",
+            store.to_str().unwrap(),
+            broad.to_str().unwrap(),
+            "--namespace-prefix",
+            "tools",
+            "--out",
+            narrow.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+
+    let token = fs::read_to_string(&narrow).unwrap();
+    let bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, token.trim()).unwrap();
+    let cap = mneme_cap::Capability::from_bytes(&bytes).expect("narrowed token decodes");
+    let operator = KeyPair::from_seed(seed);
+    let now = mneme_core::Hlc {
+        wall_ms: 0,
+        counter: 0,
+        node_id: mneme_core::NodeId([0u8; 16]),
+    };
+    cap.verify(&operator, &now)
+        .expect("narrowed cap still verifies under operator");
+    // narrow-only: in-scope reads allowed, out-of-scope denied.
+    assert!(
+        cap.permits_read("tools", TrustTier::Quarantine),
+        "in-scope read allowed"
+    );
+    assert!(
+        cap.permits_read("tools/sub", TrustTier::Quarantine),
+        "prefixed read allowed"
+    );
+    assert!(
+        !cap.permits_read("other", TrustTier::Quarantine),
+        "out-of-scope read denied"
+    );
+}
+
+#[test]
+fn cap_attenuate_requires_a_restriction() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let broad = dir.path().join("broad.txt");
+    let seed_hex = hex::encode([0x0b; 32]);
+    mneme()
+        .args([
+            "init",
+            store.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    mneme()
+        .args([
+            "cap",
+            "mint",
+            store.to_str().unwrap(),
+            "--read",
+            "--namespace",
+            "*",
+            "--out",
+            broad.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .success();
+    // No restriction flag -> usage error (narrowing nothing is meaningless).
+    mneme()
+        .args([
+            "cap",
+            "attenuate",
+            store.to_str().unwrap(),
+            broad.to_str().unwrap(),
+            "--operator-seed",
+            &seed_hex,
+        ])
+        .assert()
+        .failure()
+        .code(2);
+}
