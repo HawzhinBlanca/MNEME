@@ -14,13 +14,16 @@ use mneme_account::robr;
 mod shapley;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use mneme_account::verify_forget_proof;
 use mneme_cap::agent_cap;
 use mneme_core::{
     DistanceMetric, Draft, ForgetMode, ForgetTarget, LogicalKey, MemoryKind, MnemeError, Procedure,
     ProcedureAlgo, Query, RetrievalProofLevel, TrustTier,
 };
-use mneme_core::{ForgetProof, encode_forget_proof};
-use mneme_crypto::{EnvelopeKeyVault, KeyPair, TrustConfig};
+use mneme_core::{ForgetProof, Root, RootPreimage, decode_forget_proof, encode_forget_proof};
+use mneme_crypto::{
+    EnvelopeKeyVault, KeyPair, TrustConfig, public_key_from_bytes, verify_signature_bytes,
+};
 use mneme_store::{Store, repair_store};
 use mneme_verify::verify_store;
 use std::fmt::Write as _;
@@ -313,6 +316,17 @@ enum Commands {
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
     },
+    /// Offline-verify a daemon ForgetProof JSON (the `DELETE /v1/forget-proof`
+    /// response / MNEME Desk download): recomputes the root preimage, checks the
+    /// operator signature over it, and verifies the SMT non-membership — proving a
+    /// named key is absent from the committed index under a signed root.
+    VerifyForgetProof {
+        /// JSON file: `{ proof_cbor_b64, root: { … } }`.
+        proof: PathBuf,
+        /// Pinned operator public key (64 hex). Or pass `--operator-seed` at the top level.
+        #[arg(long = "operator-pk")]
+        operator_pk: Option<String>,
+    },
     /// FCC-3: Verify a certified-unlearning receipt and print the smoothness/scale gap
     CertifyUnlearning {
         cert: PathBuf,
@@ -423,6 +437,51 @@ enum Commands {
     Pace {
         #[command(subcommand)]
         command: PaceCommands,
+    },
+    /// Phase Y0 trust root: mint / inspect offline-verifiable capability tokens.
+    Cap {
+        #[command(subcommand)]
+        command: CapCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CapCommands {
+    /// Mint a base64 capability token (Authorization: Bearer …) signed by the
+    /// store operator. Least-privilege by default: you must grant each permission
+    /// explicitly, the namespace scope defaults to `tools` (Quarantine-safe), and
+    /// a NotAfter expiry caveat is always attached.
+    Mint {
+        store: PathBuf,
+        /// Subject public key (64 hex). Defaults to the operator's own key (self-cap).
+        #[arg(long = "subject")]
+        subject: Option<String>,
+        /// Namespace prefix scope (repeatable). Default: `tools`. Use `*` for all.
+        #[arg(long = "namespace")]
+        namespaces: Vec<String>,
+        /// Grant read.
+        #[arg(long = "read", default_value_t = false)]
+        read: bool,
+        /// Grant write.
+        #[arg(long = "write", default_value_t = false)]
+        write: bool,
+        /// Grant forget.
+        #[arg(long = "forget", default_value_t = false)]
+        forget: bool,
+        /// Grant promote (privilege escalation of trust tier — off by default).
+        #[arg(long = "promote", default_value_t = false)]
+        promote: bool,
+        /// Maximum trust tier the holder may read/promote to.
+        #[arg(long = "tier-max", default_value = "working")]
+        tier_max: TrustTierArg,
+        /// Write the token to a file instead of stdout.
+        #[arg(long = "out")]
+        out: Option<PathBuf>,
+    },
+    /// Decode a capability token file and print its (signed) scope — no secrets.
+    Inspect {
+        /// File containing a base64 capability token.
+        token: PathBuf,
     },
 }
 
@@ -1068,6 +1127,85 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
                 tier
             );
             println!("honesty: {}", fcc::FCC_HONESTY);
+            Ok(())
+        }
+        Commands::VerifyForgetProof { proof, operator_pk } => {
+            require_file_exists(&proof, "forget-proof json")?;
+            let text = std::fs::read_to_string(&proof).map_err(|_| CliErrorKind::Usage)?;
+            let v: serde_json::Value =
+                serde_json::from_str(&text).map_err(|_| CliErrorKind::Usage)?;
+
+            // Decode the carried ForgetProof (proof_cbor_b64, STANDARD base64).
+            let proof_b64 = v["proof_cbor_b64"].as_str().ok_or(CliErrorKind::Usage)?;
+            let proof_bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, proof_b64)
+                    .map_err(|_| CliErrorKind::Usage)?;
+            let fp = decode_forget_proof(&proof_bytes).map_err(CliErrorKind::Kernel)?;
+
+            // Reconstruct the signed Root from the carried fields.
+            let r = &v["root"];
+            let hex32 = |key: &str| -> Result<[u8; 32], CliErrorKind> {
+                parse_seed_hex(r[key].as_str().ok_or(CliErrorKind::Usage)?)
+            };
+            let hlc_bytes = hex::decode(r["hlc_max_hex"].as_str().ok_or(CliErrorKind::Usage)?)
+                .map_err(|_| CliErrorKind::Usage)?;
+            if hlc_bytes.len() != 14 {
+                return Err(CliErrorKind::Usage);
+            }
+            let mut hlc_max = [0u8; 14];
+            hlc_max.copy_from_slice(&hlc_bytes);
+            let root = Root {
+                version: u16::try_from(r["version"].as_u64().ok_or(CliErrorKind::Usage)?)
+                    .map_err(|_| CliErrorKind::Usage)?,
+                preimage_hash: hex32("preimage_hash_hex")?,
+                dag_head_root: hex32("dag_head_root_hex")?,
+                key_index_root: hex32("key_index_root_hex")?,
+                semantic_commit: hex32("semantic_commit_hex")?,
+                hlc_max,
+                prev_root: hex32("prev_root_hex")?,
+                signature: hex::decode(r["signature_hex"].as_str().ok_or(CliErrorKind::Usage)?)
+                    .map_err(|_| CliErrorKind::Usage)?,
+                sequence: r["sequence"].as_u64().ok_or(CliErrorKind::Usage)?,
+            };
+
+            // (1) Bind the carried fields to the signed hash: recompute the preimage
+            //     so a forged key_index_root cannot ride on an operator signature.
+            let recomputed = RootPreimage {
+                version: root.version,
+                dag_head_root: root.dag_head_root,
+                key_index_root: root.key_index_root,
+                semantic_commit: root.semantic_commit,
+                hlc_max: root.hlc_max,
+                prev_root: root.prev_root,
+            }
+            .hash();
+            if recomputed != root.preimage_hash {
+                return Err(CliErrorKind::VerifyFailed(MnemeError::RootInconsistent));
+            }
+
+            // (2) The operator must have signed this preimage (pin the key out-of-band).
+            let pk_bytes = match operator_pk {
+                Some(hex_str) => parse_seed_hex(&hex_str)?,
+                None => {
+                    let seed = cli.operator_seed.as_deref().ok_or(CliErrorKind::Usage)?;
+                    KeyPair::from_seed(parse_seed_hex(seed)?).public_key_bytes()
+                }
+            };
+            let pk = public_key_from_bytes(&pk_bytes).map_err(CliErrorKind::VerifyFailed)?;
+            verify_signature_bytes(&pk, &root.preimage_hash, &root.signature)
+                .map_err(CliErrorKind::VerifyFailed)?;
+
+            // (3) The non-membership proof shows the key is absent under that root.
+            verify_forget_proof(&fp, &root).map_err(CliErrorKind::VerifyFailed)?;
+
+            println!(
+                "verify-forget-proof ok: target {} absent from the committed key index under signed root seq {}",
+                hex::encode(fp.target_commit),
+                root.sequence
+            );
+            println!(
+                "honesty: proves SUBSTRATE deletion (key absent from the committed key index under a fresh operator-signed root) — NOT model unlearning; authenticated ≠ true"
+            );
             Ok(())
         }
         Commands::VerifyFcc { cert, operator_pk } => {
@@ -1780,6 +1918,114 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             } => {
                 require_file_exists(&log, "pace log")?;
                 pace::run_verify(&log, min_iterations).map_err(pace_error_to_cli)?;
+                Ok(())
+            }
+        },
+        Commands::Cap { command } => match command {
+            CapCommands::Mint {
+                store,
+                subject,
+                namespaces,
+                read,
+                write,
+                forget,
+                promote,
+                tier_max,
+                out,
+            } => {
+                require_store_dir(&store)?;
+                let operator = load_or_generate_operator(&store, cli.operator_seed.as_deref())?;
+                // Subject defaults to the operator's own key (single-user self-cap).
+                let subject = match subject {
+                    Some(hex_str) => parse_seed_hex(&hex_str)?,
+                    None => operator.public_key_bytes(),
+                };
+                // Least privilege: refuse to mint a cap that grants nothing.
+                let mut perms = mneme_cap::Permissions::empty();
+                if read {
+                    perms |= mneme_cap::Permissions::READ;
+                }
+                if write {
+                    perms |= mneme_cap::Permissions::WRITE;
+                }
+                if forget {
+                    perms |= mneme_cap::Permissions::FORGET;
+                }
+                if promote {
+                    perms |= mneme_cap::Permissions::PROMOTE;
+                }
+                if perms.is_empty() {
+                    eprintln!(
+                        "mneme: cap mint requires at least one of --read/--write/--forget/--promote"
+                    );
+                    return Err(CliErrorKind::Usage);
+                }
+                let namespaces = if namespaces.is_empty() {
+                    vec!["tools".to_string()]
+                } else {
+                    namespaces
+                };
+                let tier_max: TrustTier = tier_max.into();
+                // Always attach an expiry. If scoped to a single concrete namespace,
+                // also pin a NamespacePrefix caveat (defense in depth: an attenuated
+                // holder can only narrow, never widen, the scope).
+                let mut caveats =
+                    vec![mneme_core::Caveat::NotAfter(mneme_cap::default_cap_expiry())];
+                if namespaces.len() == 1 && namespaces[0] != "*" {
+                    caveats.push(mneme_core::Caveat::NamespacePrefix(namespaces[0].clone()));
+                }
+                let kinds = vec![
+                    MemoryKind::Episodic,
+                    MemoryKind::Semantic,
+                    MemoryKind::Procedural,
+                    MemoryKind::Working,
+                    MemoryKind::Identity,
+                ];
+                let cap = mneme_cap::Capability::issue(
+                    &operator,
+                    subject,
+                    namespaces,
+                    kinds,
+                    tier_max,
+                    // tier floor stays Quarantine; reaching tier_max needs PROMOTE.
+                    TrustTier::Quarantine,
+                    perms,
+                    caveats,
+                )
+                .map_err(CliErrorKind::Kernel)?;
+                let bytes = cap.to_bytes().map_err(CliErrorKind::Kernel)?;
+                let token =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                match out {
+                    Some(path) => {
+                        std::fs::write(&path, &token).map_err(|_| CliErrorKind::Usage)?;
+                        eprintln!(
+                            "cap minted -> {} (perms 0b{:05b}, {}-byte token)",
+                            path.display(),
+                            perms.bits(),
+                            token.len()
+                        );
+                    }
+                    None => println!("{token}"),
+                }
+                Ok(())
+            }
+            CapCommands::Inspect { token } => {
+                require_file_exists(&token, "capability token")?;
+                let raw = std::fs::read_to_string(&token).map_err(|_| CliErrorKind::Usage)?;
+                let bytes =
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw.trim())
+                        .map_err(|_| CliErrorKind::Usage)?;
+                let cap =
+                    mneme_cap::Capability::from_bytes(&bytes).map_err(CliErrorKind::Kernel)?;
+                let inner = cap.inner();
+                println!("issuer:       {}", hex::encode(inner.issuer));
+                println!("subject:      {}", hex::encode(inner.subject));
+                println!("namespaces:   {:?}", inner.namespaces);
+                println!("permissions:  0b{:05b}", inner.permissions);
+                println!("tier_max:     {}", inner.tier_max);
+                println!("tier_default: {}", inner.tier_default);
+                println!("caveats:      {}", inner.caveats.len());
                 Ok(())
             }
         },

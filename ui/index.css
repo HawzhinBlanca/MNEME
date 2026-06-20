@@ -696,3 +696,22 @@ select:focus {
 .hidden {
   display: none !important;
 }
+
+/* Phase Y0: forget-with-proof action + forgotten state */
+.btn-danger {
+  background-color: hsla(0, 72%, 48%, 0.12);
+  color: var(--accent-orange);
+  border: 1px solid hsla(0, 72%, 48%, 0.28);
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.btn-danger:hover {
+  background-color: hsla(0, 72%, 48%, 0.2);
+}
+.btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.result-card.forgotten {
+  opacity: 0.5;
+}

@@ -130,7 +130,7 @@
               <div class="form-group flex-2">
                 <label for="recall-query">Recall Query</label>
                 <div class="input-wrapper">
-                  <input type="search" id="recall-query" name="query" placeholder="Enter logical key name or exact SMT key path..." required>
+                  <input type="search" id="recall-query" name="query" placeholder="namespace/name  (e.g. notes/hello)" required>
                   <svg class="input-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="11" cy="11" r="8"></circle>
                     <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -159,6 +159,47 @@
             <div class="results-grid" id="results-grid">
               <!-- Result cards will be dynamically injected here -->
             </div>
+          </div>
+        </section>
+
+        <!-- Remember (write) Console -->
+        <section class="card recall-card" aria-labelledby="remember-title">
+          <h3 id="remember-title" class="card-title">Remember (write)</h3>
+          <form class="recall-form" id="remember-form">
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="remember-ns">Namespace</label>
+                <div class="input-wrapper"><input type="text" id="remember-ns" name="namespace" placeholder="notes" required></div>
+              </div>
+              <div class="form-group flex-1">
+                <label for="remember-name">Name</label>
+                <div class="input-wrapper"><input type="text" id="remember-name" name="name" placeholder="hello" required></div>
+              </div>
+              <div class="form-group flex-1">
+                <label for="remember-kind">Kind</label>
+                <select id="remember-kind" name="kind">
+                  <option value="episodic">episodic</option>
+                  <option value="semantic">semantic</option>
+                  <option value="procedural">procedural</option>
+                  <option value="working">working</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="remember-body">Body</label>
+                <div class="input-wrapper"><input type="text" id="remember-body" name="body" placeholder="value to commit" required></div>
+              </div>
+              <div class="form-group align-bottom">
+                <button type="submit" class="btn btn-secondary" id="btn-remember">
+                  <span class="btn-text">Remember</span>
+                  <span class="spinner" id="remember-spinner" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+          </form>
+          <div class="recall-results-container hidden" id="remember-result-area">
+            <div class="results-grid" id="remember-result-grid"></div>
           </div>
         </section>
       </div>
