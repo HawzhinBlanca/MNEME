@@ -13,3 +13,4 @@
 /fuzz/corpus/
 /fuzz/artifacts/
 .DS_Store
+/e2e/test-results-live/

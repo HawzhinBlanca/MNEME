@@ -262,6 +262,10 @@ enum Commands {
         /// Optional pinned operator public key (64 hex chars)
         #[arg(long = "operator-pk")]
         operator_pk: Option<String>,
+        /// Input is STANDARD base64 (the daemon's `robr_receipt_b64` / MNEME Desk
+        /// receipt), not raw wire bytes — decode it before verifying.
+        #[arg(long = "base64", default_value_t = false)]
+        base64: bool,
         /// ROBR-2: also re-execute the deterministic reference kernel over the committed
         /// envelope and assert the output commitment matches bit-for-bit (proof of
         /// faithful execution, not just binding).
@@ -973,9 +977,16 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
         Commands::VerifyRobr {
             cert,
             operator_pk,
+            base64,
             replay,
         } => {
-            let wire = std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?;
+            let wire = if base64 {
+                let raw = std::fs::read_to_string(&cert).map_err(|_| CliErrorKind::Usage)?;
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw.trim())
+                    .map_err(|_| CliErrorKind::Usage)?
+            } else {
+                std::fs::read(&cert).map_err(|_| CliErrorKind::Usage)?
+            };
             let pinned = match operator_pk {
                 Some(hex) => Some(parse_seed_hex(&hex)?),
                 None => None,
