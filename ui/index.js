@@ -101,6 +101,19 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   if (window.location.pathname.startsWith('/settings')) switchView('settings');
 
+  // --- Welcome banner (plain-language intro; dismissal persists) ---
+  const welcomeBanner = document.getElementById('welcome-banner');
+  const welcomeDismiss = document.getElementById('welcome-dismiss');
+  if (welcomeBanner && welcomeDismiss) {
+    try {
+      if (localStorage.getItem('mneme.welcome.dismissed') === '1') welcomeBanner.hidden = true;
+    } catch { /* storage unavailable — keep banner visible */ }
+    welcomeDismiss.addEventListener('click', () => {
+      welcomeBanner.hidden = true;
+      try { localStorage.setItem('mneme.welcome.dismissed', '1'); } catch { /* ignore */ }
+    });
+  }
+
   // --- Store Lifecycle ---
   function updateStoreState(isOpen, label) {
     if (isOpen) {
