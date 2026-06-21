@@ -24,6 +24,7 @@ mneme-pace.workspace = true
 mneme-index.workspace = true
 mneme-smt.workspace = true
 mneme-account.workspace = true
+mneme-receipts.workspace = true
 mnemed = { path = "../mnemed" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 hex.workspace = true

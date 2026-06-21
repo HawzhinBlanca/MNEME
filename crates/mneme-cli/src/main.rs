@@ -4,14 +4,13 @@ mod attest;
 mod card;
 mod cert;
 mod determinism;
-mod fcc;
 mod freivalds;
-mod mtl;
 mod pace;
-mod replay;
 mod rpt;
 use mneme_account::robr;
-mod shapley;
+// MTL / Shapley / FCC / replay receipts now live in the off-TCB `mneme-receipts`
+// library (lifted out of this binary so other products can construct/verify them).
+use mneme_receipts::{fcc, mtl, replay, shapley};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mneme_account::verify_forget_proof;

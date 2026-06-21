@@ -1,0 +1,13 @@
+[package]
+name = "mneme-receipts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Off-TCB library of MNEME offline-verifiable receipt & transparency-log types (MTL / Shapley / FCC / replay)"
+
+[dependencies]
+mneme-core.workspace = true
+mneme-crypto.workspace = true
+blake3.workspace = true
+hex.workspace = true
