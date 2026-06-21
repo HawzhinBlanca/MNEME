@@ -59,8 +59,15 @@ enum Commands {
         #[arg(long = "pin-root")]
         pin_root: Option<String>,
     },
-    /// [Not yet implemented] Print provenance, writers, tiers, tombstones for a root checkpoint
-    Audit { root: PathBuf },
+    /// Inspect a signed root checkpoint: decode and print its committed roots,
+    /// sequence, and signature. With --operator-pk, also verify the Ed25519
+    /// signature offline. (Object-level provenance is shown by `recall` lineage.)
+    Audit {
+        root: PathBuf,
+        /// Operator public key (64 hex chars) to verify the checkpoint signature offline.
+        #[arg(long)]
+        operator_pk: Option<String>,
+    },
     /// Key recall under min trust tier (verified)
     Recall {
         store: PathBuf,
@@ -618,7 +625,6 @@ enum VaultArg {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliErrorKind {
     Usage,
-    StoreUnavailable,
     VerifyFailed(MnemeError),
     Kernel(MnemeError),
 }
@@ -630,10 +636,6 @@ fn main() -> ExitCode {
         Err(kind) => {
             let (code, msg) = match kind {
                 CliErrorKind::Usage => (2, "invalid usage".to_string()),
-                CliErrorKind::StoreUnavailable => (
-                    3,
-                    "store kernel not available: build mneme-store and re-run".to_string(),
-                ),
                 CliErrorKind::VerifyFailed(e) => (4, format!("verify failed: {e}")),
                 CliErrorKind::Kernel(e) => (5, format!("{e}")),
             };
@@ -1783,18 +1785,75 @@ fn run(cli: Cli) -> Result<(), CliErrorKind> {
             );
             Ok(())
         }
-        Commands::Audit { root } => {
-            // Validate the argument before reporting non-implementation: a missing root path is a
-            // usage error (exit 2), matching `audit_missing_root_is_usage_error`. Only a present,
-            // well-formed argument reaches the not-yet-implemented surface (exit 3).
+        Commands::Audit { root, operator_pk } => {
+            // A missing root path is a usage error (exit 2): audit_missing_root_is_usage_error.
             if !root.exists() {
                 eprintln!("mneme: root checkpoint not found: {}", root.display());
                 return Err(CliErrorKind::Usage);
             }
-            eprintln!(
-                "mneme: audit is not yet implemented (provenance/writer/tier/tombstone dump deferred)"
+            let bytes = std::fs::read(&root).map_err(|_| CliErrorKind::Usage)?;
+            // Decode the signed root checkpoint (roots/<seq>.root.cbor format). A
+            // malformed/empty file fails closed as a kernel decode error (exit 5).
+            let stored = mneme_root::StoredRoot::from_bytes(&bytes).map_err(|e| {
+                eprintln!("mneme: malformed root checkpoint: {e}");
+                CliErrorKind::Kernel(e)
+            })?;
+            println!("root checkpoint: {}", root.display());
+            println!("  version:          {}", stored.version);
+            println!("  sequence:         {}", stored.sequence);
+            println!("  preimage_hash:    {}", hex::encode(stored.preimage_hash));
+            println!("  dag_head_root:    {}", hex::encode(stored.dag_head_root));
+            println!("  key_index_root:   {}", hex::encode(stored.key_index_root));
+            println!(
+                "  semantic_commit:  {}",
+                hex::encode(stored.semantic_commit)
             );
-            Err(CliErrorKind::StoreUnavailable)
+            println!("  hlc_max:          {}", hex::encode(stored.hlc_max));
+            println!("  prev_root:        {}", hex::encode(stored.prev_root));
+            println!("  signature:        {} bytes", stored.signature.len());
+
+            // Structural integrity: the stored preimage_hash must equal the hash of
+            // the committed roots — catches a tampered checkpoint even without a key.
+            let recomputed = RootPreimage {
+                version: stored.version,
+                dag_head_root: stored.dag_head_root,
+                key_index_root: stored.key_index_root,
+                semantic_commit: stored.semantic_commit,
+                hlc_max: stored.hlc_max,
+                prev_root: stored.prev_root,
+            }
+            .hash();
+            if recomputed != stored.preimage_hash {
+                eprintln!("mneme: checkpoint preimage hash mismatch (corrupt)");
+                return Err(CliErrorKind::VerifyFailed(MnemeError::RootInconsistent));
+            }
+            println!("  preimage_consistent: yes");
+
+            // Optional offline signature check against a pinned operator key.
+            match operator_pk {
+                Some(hex_str) => {
+                    let pk_bytes = parse_seed_hex(&hex_str)?;
+                    let pk =
+                        public_key_from_bytes(&pk_bytes).map_err(CliErrorKind::VerifyFailed)?;
+                    verify_signature_bytes(&pk, &stored.preimage_hash, &stored.signature)
+                        .map_err(CliErrorKind::VerifyFailed)?;
+                    println!(
+                        "  signature_status:  VALID under operator {}",
+                        hex::encode(pk_bytes)
+                    );
+                }
+                None => {
+                    println!(
+                        "  signature_status:  not checked (pass --operator-pk <hex> to verify offline)"
+                    );
+                }
+            }
+            println!(
+                "audit: signed-root checkpoint decoded and structurally consistent. This inspects \
+                 the checkpoint's committed roots, not per-object data — object-level provenance is \
+                 shown by `recall` lineage. authenticated != true."
+            );
+            Ok(())
         }
         Commands::Certify {
             store,
