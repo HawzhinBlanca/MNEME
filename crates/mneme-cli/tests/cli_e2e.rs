@@ -499,7 +499,9 @@ fn audit_missing_root_is_usage_error() {
 }
 
 #[test]
-fn audit_stub_returns_store_unavailable_without_fake_path_check() {
+fn audit_malformed_checkpoint_fails_closed() {
+    // A present-but-malformed (empty) checkpoint file is not a usage error: it
+    // decodes fail-closed as a kernel error (exit 5), never a partial dump.
     let dir = tempdir().unwrap();
     let root_path = dir.path().join("checkpoint.cbor");
     fs::write(&root_path, b"").unwrap();
@@ -507,9 +509,59 @@ fn audit_stub_returns_store_unavailable_without_fake_path_check() {
         .args(["audit", root_path.to_str().unwrap()])
         .assert()
         .failure()
-        .code(3)
-        .stderr(predicate::str::contains("audit is not yet implemented"))
-        .stderr(predicate::str::contains("store kernel not available"));
+        .code(5)
+        .stderr(predicate::str::contains("malformed root checkpoint"));
+}
+
+#[test]
+fn audit_decodes_a_real_checkpoint_and_verifies_signature() {
+    let dir = tempdir().unwrap();
+    let store = dir.path().join("store");
+    let operator = KeyPair::from_seed([0x07; 32]);
+    let operator_pk_hex = hex::encode(operator.public_key_bytes());
+    {
+        // Store::create writes the genesis signed checkpoint to roots/<seq>.root.cbor.
+        Store::create(&store, operator.clone()).unwrap();
+    }
+    let checkpoint = fs::read_dir(store.join("roots"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().ends_with(".root.cbor"))
+        .expect("a signed checkpoint file");
+
+    // Decode + structural consistency, no key.
+    mneme()
+        .args(["audit", checkpoint.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("preimage_consistent: yes"))
+        .stdout(predicate::str::contains("signature_status:  not checked"));
+
+    // With the pinned operator key, the signature verifies offline.
+    mneme()
+        .args([
+            "audit",
+            checkpoint.to_str().unwrap(),
+            "--operator-pk",
+            &operator_pk_hex,
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("signature_status:  VALID"));
+
+    // A different (valid) operator key that did not sign fails closed (exit 4).
+    let wrong_pk_hex = hex::encode(KeyPair::from_seed([0x09; 32]).public_key_bytes());
+    mneme()
+        .args([
+            "audit",
+            checkpoint.to_str().unwrap(),
+            "--operator-pk",
+            &wrong_pk_hex,
+        ])
+        .assert()
+        .failure()
+        .code(4);
 }
 
 #[test]

@@ -1413,6 +1413,7 @@ dependencies = [
  "mneme-index",
  "mneme-pace",
  "mneme-receipts",
+ "mneme-root",
  "mneme-smt",
  "mneme-store",
  "mneme-verify",
