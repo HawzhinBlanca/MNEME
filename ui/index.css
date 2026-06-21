@@ -715,3 +715,102 @@ select:focus {
 .result-card.forgotten {
   opacity: 0.5;
 }
+
+/* ── Plain-language welcome banner (dashboard) ───────────────────────────── */
+.welcome-banner {
+  position: relative;
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(
+    135deg,
+    var(--accent-green-glow),
+    var(--bg-card)
+  );
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-green);
+  border-radius: 12px;
+}
+.welcome-banner[hidden] { display: none; }
+.welcome-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+.welcome-lead {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+.welcome-points {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+.welcome-points li { margin-bottom: 0.3rem; }
+.welcome-points strong { color: var(--text-primary); }
+.welcome-honest {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+.welcome-honest a { color: var(--accent-blue); text-decoration: none; }
+.welcome-honest a:hover { text-decoration: underline; }
+.welcome-dismiss {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.75rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.welcome-dismiss:hover {
+  color: var(--text-primary);
+  background: var(--border-color);
+}
+
+/* ── Recall provenance / lineage block ───────────────────────────────────── */
+.result-lineage {
+  margin-top: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: hsla(223, 20%, 10%, 0.5);
+}
+.result-lineage > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  list-style: none;
+}
+.result-lineage > summary::-webkit-details-marker { display: none; }
+.result-lineage > summary::before { content: '▸ '; color: var(--text-muted); }
+.result-lineage[open] > summary::before { content: '▾ '; }
+.result-lineage .lineage-kind { color: var(--accent-blue); text-transform: capitalize; }
+.lineage-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 4px 12px 8px;
+}
+.lineage-grid dt { color: var(--text-muted); }
+.lineage-grid dd { margin: 0; color: var(--text-primary); font-family: var(--font-mono, monospace); }
+.lineage-caveat {
+  padding: 0 12px 8px;
+  color: var(--text-muted);
+  font-style: italic;
+}

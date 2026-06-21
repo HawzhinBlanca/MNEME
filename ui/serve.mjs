@@ -47,6 +47,7 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.md': 'text/markdown; charset=utf-8',
 };
 
 // Reverse-proxy /v1/* to the daemon, injecting the operator cap if the caller

@@ -1412,6 +1412,7 @@ dependencies = [
  "mneme-crypto",
  "mneme-index",
  "mneme-pace",
+ "mneme-receipts",
  "mneme-smt",
  "mneme-store",
  "mneme-verify",
@@ -1596,6 +1597,16 @@ dependencies = [
  "hex",
  "mneme-core",
  "tempfile",
+]
+
+[[package]]
+name = "mneme-receipts"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "hex",
+ "mneme-core",
+ "mneme-crypto",
 ]
 
 [[package]]

@@ -76,8 +76,14 @@ remember=$(curl -s -X POST "$DAEMON_URL/v1/memory" -H "$RW" -H 'content-type: ap
 want_grep "$remember" '"object_id_hex"' "remember notes/hello"
 
 # 5. verified recall through the proxy returns the committed body
-want_grep "$(curl -s "$UI/v1/memory/notes/hello?min_tier=quarantine")" 'verified-recall-works' \
-  "verified recall returns committed value"
+recall_json=$(curl -s "$UI/v1/memory/notes/hello?min_tier=quarantine")
+want_grep "$recall_json" 'verified-recall-works' "verified recall returns committed value"
+
+# 5a. recall carries provenance/lineage (who/when/kind/parents) — additive,
+#     surfaces the "where did this come from" signal without changing the body.
+want_grep "$recall_json" '"lineage"' "recall carries lineage block"
+want_grep "$recall_json" '"kind":"episodic"' "lineage reports the memory kind"
+want_grep "$recall_json" '"writer_hex"' "lineage reports the authenticated writer"
 
 # 5b. a recall with the four ROBR inputs mints a binding receipt that verifies
 #     OFFLINE from its base64 form, and a tampered receipt is rejected.

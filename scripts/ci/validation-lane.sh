@@ -89,8 +89,10 @@ case "$LANE" in
   quick)
     cargo fmt --all -- --check
     # Wave 0/1 + store kernel on quick lane (§18, §19 v0).
+    # mneme-receipts: off-TCB keystone library (MTL/Shapley/FCC/replay receipts)
+    # that products depend on — gated here so its fail-closed paths stay clippy-clean.
     cargo clippy -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
-      -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store \
+      -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store -p mneme-receipts \
       --lib --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
     # MNEME applied to MNEME: docs may not cite commits/features that don't verify.
@@ -99,7 +101,7 @@ case "$LANE" in
     bash scripts/ci/doc-honesty-lint.sh
     cargo test -p mneme-verify --test tcb_budget -- --nocapture
     cargo test -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
-      -p mneme-root -p mneme-cap -p mneme-verify --lib -- --nocapture
+      -p mneme-root -p mneme-cap -p mneme-verify -p mneme-receipts --lib -- --nocapture
     # CRDT convergence and crypto-shred forget invariants run on every quick lane.
     cargo test -p mneme-crdt -p mneme-forget --lib -- --nocapture
     # VCP D1 convergence certificate sidecar (bidirectional-sync + multiset commitment).

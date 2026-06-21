@@ -24,6 +24,7 @@ members = [
     "crates/mneme-accum",
     "crates/mneme-optimistic",
     "crates/mneme-evolve",
+    "crates/mneme-receipts",
 ]
 default-members = ["crates/mneme-store"]
 exclude = ["fuzz", "scripts/piop-flat-prototype"]
@@ -56,6 +57,7 @@ mnemed = { path = "crates/mnemed" }
 mneme-context = { path = "crates/mneme-context" }
 mneme-accum = { path = "crates/mneme-accum" }
 mneme-optimistic = { path = "crates/mneme-optimistic" }
+mneme-receipts = { path = "crates/mneme-receipts" }
 
 blake3 = "1.8"
 ciborium = "0.2"
