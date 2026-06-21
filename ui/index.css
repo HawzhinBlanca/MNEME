@@ -781,3 +781,36 @@ select:focus {
   color: var(--text-primary);
   background: var(--border-color);
 }
+
+/* ── Recall provenance / lineage block ───────────────────────────────────── */
+.result-lineage {
+  margin-top: 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: hsla(223, 20%, 10%, 0.5);
+}
+.result-lineage > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  list-style: none;
+}
+.result-lineage > summary::-webkit-details-marker { display: none; }
+.result-lineage > summary::before { content: '▸ '; color: var(--text-muted); }
+.result-lineage[open] > summary::before { content: '▾ '; }
+.result-lineage .lineage-kind { color: var(--accent-blue); text-transform: capitalize; }
+.lineage-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  padding: 4px 12px 8px;
+}
+.lineage-grid dt { color: var(--text-muted); }
+.lineage-grid dd { margin: 0; color: var(--text-primary); font-family: var(--font-mono, monospace); }
+.lineage-caveat {
+  padding: 0 12px 8px;
+  color: var(--text-muted);
+  font-style: italic;
+}

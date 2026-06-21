@@ -87,6 +87,42 @@ struct RecallEntryJson {
     object_id_hex: String,
     body: String,
     trust_tier: u8,
+    /// Provenance/lineage of this memory (additive — existing fields unchanged).
+    /// Surfaces who wrote it, when, in what session, of what kind, and its
+    /// parents: the "where did this come from" signal. `authenticated != true` —
+    /// this attests origin/integrity/authorization, NOT that the content is true.
+    lineage: LineageJson,
+}
+
+/// Provenance view of a recalled object's signed record. Every field is read
+/// straight from the authenticated `ObjectRecord`; surfacing it adds no trust.
+#[derive(Serialize)]
+struct LineageJson {
+    kind: &'static str,
+    writer_hex: String,
+    session_hex: String,
+    hlc: HlcJson,
+    parent_ids_hex: Vec<String>,
+}
+
+/// Hybrid Logical Clock stamp (wall time + causal counter + node id).
+#[derive(Serialize)]
+struct HlcJson {
+    wall_ms: u64,
+    counter: u32,
+    node_id_hex: String,
+}
+
+/// Human-readable label for a `MemoryKind` discriminant (object.rs).
+fn memory_kind_label(kind: u8) -> &'static str {
+    match kind {
+        0 => "episodic",
+        1 => "semantic",
+        2 => "procedural",
+        3 => "working",
+        4 => "identity",
+        _ => "unknown",
+    }
 }
 
 #[derive(Serialize)]
@@ -528,12 +564,24 @@ fn parse_optional_tier(s: Option<&str>) -> Result<TrustTier, ApiError> {
 
 fn recall_entry_json(entry: Entry) -> Result<RecallEntryJson, ApiError> {
     let trust_tier = TrustTier::from_u8(entry.record.trust_tier).map_err(ApiError::from_mneme)?;
+    let lineage = LineageJson {
+        kind: memory_kind_label(entry.record.kind),
+        writer_hex: hex::encode(entry.record.writer),
+        session_hex: hex::encode(entry.record.session),
+        hlc: HlcJson {
+            wall_ms: entry.record.hlc.wall_ms,
+            counter: entry.record.hlc.counter,
+            node_id_hex: hex::encode(entry.record.hlc.node_id),
+        },
+        parent_ids_hex: entry.record.parent_ids.iter().map(hex::encode).collect(),
+    };
     let body = String::from_utf8(entry.plaintext)
         .map_err(|_| ApiError::from_mneme(MnemeError::SchemaDrift))?;
     Ok(RecallEntryJson {
         object_id_hex: hex::encode(entry.id.as_bytes()),
         body,
         trust_tier: trust_tier.as_u8(),
+        lineage,
     })
 }
 

@@ -202,7 +202,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function buildResultCard({ ns, name, body, tier, objectId }) {
+  // Render the provenance/lineage of a recalled memory: where it came from.
+  // authenticated != true — this attests origin/integrity, not that it's true.
+  function lineageHtml(lineage) {
+    if (!lineage) return '';
+    const t = lineage.hlc && lineage.hlc.wall_ms
+      ? new Date(lineage.hlc.wall_ms).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+      : '—';
+    const writer = lineage.writer_hex ? esc(lineage.writer_hex.slice(0, 8)) + '…' : '—';
+    const session = lineage.session_hex ? esc(lineage.session_hex.slice(0, 8)) + '…' : '—';
+    const parents = Array.isArray(lineage.parent_ids_hex) ? lineage.parent_ids_hex : [];
+    const parentTxt = parents.length
+      ? parents.map((p) => esc(p.slice(0, 8)) + '…').join(', ')
+      : 'none (root)';
+    return `
+      <details class="result-lineage" data-testid="recall-lineage">
+        <summary>Provenance · <span class="lineage-kind">${esc(lineage.kind || 'unknown')}</span> · written ${t}</summary>
+        <dl class="lineage-grid">
+          <dt>Kind</dt><dd>${esc(lineage.kind || 'unknown')}</dd>
+          <dt>Writer</dt><dd title="${esc(lineage.writer_hex || '')}">${writer}</dd>
+          <dt>Session</dt><dd title="${esc(lineage.session_hex || '')}">${session}</dd>
+          <dt>Written</dt><dd>${t}</dd>
+          <dt>Parents</dt><dd>${parentTxt}</dd>
+        </dl>
+        <div class="lineage-caveat">Attests origin &amp; integrity — not that the content is true.</div>
+      </details>`;
+  }
+
+  function buildResultCard({ ns, name, body, tier, objectId, lineage }) {
     const card = document.createElement('div');
     card.className = 'result-card';
     card.setAttribute('data-testid', 'recall-result');
@@ -217,6 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="result-name">${esc(name)}</span>
         </div>
         <div class="result-body-container">${esc(body)}</div>
+        ${lineageHtml(lineage)}
         <div class="forget-status" style="color: var(--text-muted); font-size: 12px; margin-top: 6px;"></div>
       </div>
       <div class="result-verdict">
@@ -300,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await r.json();
         const entries = data.entries || [];
         if (!entries.length) { renderInfoCard('No authenticated entry — fail-closed.'); return; }
-        entries.forEach((en) => resultsGrid.appendChild(buildResultCard({ ns: key.ns, name: key.name, body: en.body, tier: tierName(en.trust_tier), objectId: en.object_id_hex })));
+        entries.forEach((en) => resultsGrid.appendChild(buildResultCard({ ns: key.ns, name: key.name, body: en.body, tier: tierName(en.trust_tier), objectId: en.object_id_hex, lineage: en.lineage })));
         if (data.robr_receipt_b64) {
           const rc = document.createElement('div');
           rc.className = 'result-card';
