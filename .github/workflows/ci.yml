@@ -132,6 +132,32 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
 
+  wasm-auditor:
+    name: browser auditor (wasm + Node)
+    runs-on: ubuntu-latest
+    needs: quick-lane
+    timeout-minutes: 15
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/out/ci-targets/wasm-auditor
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86.0
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mneme-wasm-auditor
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build wasm auditor + run Node verification (real receipt, fail-closed)
+        run: bash scripts/ci/wasm-auditor.sh
+
   e2e-store:
     name: store kernel e2e
     runs-on: ubuntu-latest

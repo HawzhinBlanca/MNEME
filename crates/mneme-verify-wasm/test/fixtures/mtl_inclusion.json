@@ -1,0 +1,6 @@
+{
+  "kind": "mtl_inclusion",
+  "receipt_b64": "TU5FTUUtbXRsLXJlY2VpcHQtdjEBAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAPtiGpgKthMB4XLKT2NDjz9gAe2b/8d87wiXSFXd1aPUAABgcTre9PLvqqh0FJsSQAq5r+aNUcbZnILsu8OqjZa8gepKbGPinFIKvvVQexMuxfmVR3auvr57kkIe6mkURtIsAzjUaDI+g/Odm5tKwVhZD55rwmH8RFXDcN9m5VcxEtfiSbWyfeo1L0FmTJjsDepftkIzsgpN++awaox5G2i6D5AP55hoAwS84EhXSQG920vvCZGEtn2BYiZ9PTALTHP0clONReSLHhRAT+4/umWgS4SnhBY+zd4uUXy+GgQ4DwU=",
+  "operator_pk_hex": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+  "note": "Real MTL inclusion receipt from `mneme mtl --from-checkpoints` over a genesis store (seed 0x07*32). Verifies offline; tamper/wrong-key fail closed."
+}

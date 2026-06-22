@@ -93,6 +93,7 @@ case "$LANE" in
     # that products depend on — gated here so its fail-closed paths stay clippy-clean.
     cargo clippy -p mneme-core -p mneme-crypto -p mneme-smt -p mneme-dag \
       -p mneme-root -p mneme-cap -p mneme-verify -p mneme-store -p mneme-receipts \
+      -p mneme-verify-wasm \
       --lib --tests -- -D warnings
     bash scripts/ci/verify-tcb-guard.sh
     # MNEME applied to MNEME: docs may not cite commits/features that don't verify.
