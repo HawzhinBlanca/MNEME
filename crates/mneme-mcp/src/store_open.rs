@@ -95,44 +95,25 @@ fn operator_seed_bytes(operator: &KeyPair) -> [u8; 32] {
     operator.signing_key().to_bytes()
 }
 
+/// Operator signing-seed custody for the MCP channel.
+///
+/// Delegates to the canonical `mneme_crypto::load_or_generate_operator` shared by
+/// the CLI and daemon, so an MCP process derives the **same operator identity** as
+/// the rest of the system. In particular it honors `MNEME_KMS_MASTER_KEY_HEX`
+/// (sealing the seed under the master at `keys/operator_seed.sealed`, migrating any
+/// legacy plaintext), and **fails closed** (`KeyVaultMissing`) when no seed/master
+/// custody is present — it never silently generates a random key and writes it to a
+/// plaintext `.operator_seed`. The error type is already `mneme_core::MnemeError`,
+/// so no mapping is needed.
+///
+/// (Previously this had a divergent local copy that ignored the KMS master key and
+/// wrote a plaintext seed, so an MCP-opened store under a KMS deployment derived a
+/// DIFFERENT operator than the daemon and its writes failed verification.)
 fn load_or_generate_operator(
     store: &Path,
     seed_hex: Option<&str>,
 ) -> Result<KeyPair, mneme_core::MnemeError> {
-    if let Some(hex) = seed_hex {
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex)?));
-    }
-    if let Ok(hex) = std::env::var("MNEME_OPERATOR_SEED") {
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex.trim())?));
-    }
-    let seed_path = store.join(".operator_seed");
-    if seed_path.exists() {
-        let hex =
-            std::fs::read_to_string(&seed_path).map_err(|e| mneme_core::MnemeError::IoFailed {
-                path: seed_path.display().to_string(),
-                kind: e.to_string(),
-            })?;
-        return Ok(KeyPair::from_seed(parse_seed_hex(hex.trim())?));
-    }
-    let (operator, seed) = KeyPair::generate_with_seed();
-    std::fs::create_dir_all(store).ok();
-    std::fs::write(&seed_path, hex::encode(seed)).map_err(|e| {
-        mneme_core::MnemeError::IoFailed {
-            path: seed_path.display().to_string(),
-            kind: e.to_string(),
-        }
-    })?;
-    Ok(operator)
-}
-
-fn parse_seed_hex(hex_str: &str) -> Result<[u8; 32], mneme_core::MnemeError> {
-    let bytes = hex::decode(hex_str).map_err(|_| mneme_core::MnemeError::CapMalformed)?;
-    if bytes.len() != 32 {
-        return Err(mneme_core::MnemeError::CapMalformed);
-    }
-    let mut seed = [0u8; 32];
-    seed.copy_from_slice(&bytes);
-    Ok(seed)
+    mneme_crypto::load_or_generate_operator(store, seed_hex)
 }
 
 pub fn test_runtime(dir: &Path) -> McpRuntime {
