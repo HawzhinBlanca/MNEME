@@ -48,6 +48,8 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.md': 'text/markdown; charset=utf-8',
+  '.wasm': 'application/wasm',
+  '.ts': 'text/plain; charset=utf-8',
 };
 
 // Reverse-proxy /v1/* to the daemon, injecting the operator cap if the caller

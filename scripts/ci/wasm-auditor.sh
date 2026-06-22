@@ -40,9 +40,11 @@ echo "wasm-auditor: build wasm32"
 cargo build -p mneme-verify-wasm --target wasm32-unknown-unknown --release
 WASM="${CARGO_TARGET_DIR:-$ROOT/target}/wasm32-unknown-unknown/release/mneme_verify_wasm.wasm"
 
-echo "wasm-auditor: generate bindings (node + web)"
+echo "wasm-auditor: generate bindings (node test + web for the Desk)"
 "$WB" --target nodejs --out-dir crates/mneme-verify-wasm/pkg-node "$WASM"
-"$WB" --target web    --out-dir crates/mneme-verify-wasm/pkg-web  "$WASM"
+# Web bindings land in ui/auditor/ so the Desk host (ui/serve.mjs) serves them
+# same-origin for the in-browser Verify panel. Generated (gitignored).
+"$WB" --target web    --out-dir ui/auditor "$WASM"
 
 echo "wasm-auditor: run node verification test"
 node crates/mneme-verify-wasm/test/node-verify.cjs

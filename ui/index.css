@@ -814,3 +814,41 @@ select:focus {
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* ── In-browser receipt auditor (Verify panel) ──────────────────────────── */
+.card-badge {
+  font-size: 0.62em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-green);
+  background: var(--accent-green-glow);
+  border: 1px solid var(--accent-green);
+  border-radius: 999px;
+  padding: 2px 8px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.verify-blurb {
+  margin: 0 0 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-size: 0.9rem;
+  max-width: 72ch;
+}
+#verify-receipt {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+#verify-receipt:focus { outline: 2px solid var(--accent-blue); border-color: var(--accent-blue); }
+.result-card.verify-ok { border-left: 3px solid var(--accent-green); }
+.result-card.verify-fail { border-left: 3px solid var(--accent-orange); }
+.result-card.verify-ok .result-name { color: var(--accent-green); }
+.result-card.verify-fail .result-name { color: var(--accent-orange); }
