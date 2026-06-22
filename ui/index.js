@@ -378,6 +378,66 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(() => { finish(); show('Remember failed — daemon unreachable (fail-closed).'); });
   });
 
+  // --- In-browser receipt auditor (WASM) ---
+  // Verification runs client-side; nothing is sent to a server. Works even in
+  // DEMO mode (no daemon) because it only needs the pasted receipt + operator key.
+  const verifyForm = document.getElementById('verify-form');
+  const btnVerify = document.getElementById('btn-verify');
+  const verifyResultArea = document.getElementById('verify-result-area');
+  const verifyResultGrid = document.getElementById('verify-result-grid');
+  let auditorPromise = null;
+  // Lazy-load + init the wasm auditor once. Rejects if the bundle was not built.
+  function loadAuditor() {
+    if (!auditorPromise) {
+      auditorPromise = import('/auditor/mneme_verify_wasm.js')
+        .then((mod) => mod.default().then(() => mod))
+        .catch((e) => { auditorPromise = null; throw e; });
+    }
+    return auditorPromise;
+  }
+  function showVerify(html) {
+    verifyResultGrid.innerHTML = html;
+    verifyResultArea.classList.remove('hidden');
+  }
+  if (verifyForm) verifyForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const kind = document.getElementById('verify-kind').value;
+    const pk = document.getElementById('verify-pk').value.trim();
+    const receipt = document.getElementById('verify-receipt').value.trim();
+    if (!pk || !receipt) {
+      showVerify('<div class="result-card"><div class="result-main"><span class="result-name">Paste a receipt and the operator public key.</span></div></div>');
+      return;
+    }
+    btnVerify.classList.add('loading'); btnVerify.disabled = true;
+    const finish = () => { btnVerify.classList.remove('loading'); btnVerify.disabled = false; };
+    let mod;
+    try {
+      mod = await loadAuditor();
+    } catch {
+      finish();
+      showVerify('<div class="result-card" data-testid="verify-result"><div class="result-main"><span class="result-name">Auditor not built</span><div class="forget-status">Run <code>scripts/ci/wasm-auditor.sh</code> to build the in-browser verifier (<code>ui/auditor/</code>).</div></div></div>');
+      return;
+    }
+    const fn = {
+      mtl_inclusion: mod.verify_mtl_inclusion,
+      mtl_consistency: mod.verify_mtl_consistency,
+      robr: mod.verify_robr,
+      shapley: mod.verify_shapley,
+    }[kind];
+    try {
+      const res = JSON.parse(fn(receipt, pk));
+      const rows = Object.entries(res)
+        .filter(([k]) => k !== 'ok' && k !== 'honesty')
+        .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join('');
+      finish();
+      showVerify(`<div class="result-card verify-ok" data-testid="verify-result" data-ok="true"><div class="result-main"><span class="result-name">&#10003; Verified &mdash; ${esc(res.kind || kind)}</span><dl class="lineage-grid">${rows}</dl><div class="lineage-caveat">${esc(res.honesty || '')}</div></div></div>`);
+    } catch (err) {
+      finish();
+      const msg = err && err.message ? err.message : String(err);
+      showVerify(`<div class="result-card verify-fail" data-testid="verify-result" data-ok="false"><div class="result-main"><span class="result-name">&#10007; Rejected (fail-closed)</span><div class="forget-status">${esc(msg)}</div></div></div>`);
+    }
+  });
+
   // --- Settings ---
   const savedMinTier = localStorage.getItem('mneme_default_min_tier') || 'quarantine';
   defaultMinTier.value = savedMinTier;

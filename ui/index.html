@@ -223,6 +223,48 @@
             <div class="results-grid" id="remember-result-grid"></div>
           </div>
         </section>
+
+        <!-- In-browser offline receipt auditor (WASM) -->
+        <section class="card recall-card" aria-labelledby="verify-title">
+          <h3 id="verify-title" class="card-title">Verify a Receipt <span class="card-badge">in your browser</span></h3>
+          <p class="verify-blurb">
+            Paste a receipt and the pinned operator key. Verification runs <strong>entirely in your browser</strong>
+            (WebAssembly) — nothing is sent to a server. A genuine receipt is decoded; a tampered one,
+            a wrong key, or garbage is <strong>rejected</strong>. Proves origin &amp; integrity, not that the content is true.
+          </p>
+          <form class="recall-form" id="verify-form">
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="verify-kind">Receipt type</label>
+                <select id="verify-kind" name="kind">
+                  <option value="mtl_inclusion">MTL inclusion</option>
+                  <option value="mtl_consistency">MTL consistency</option>
+                  <option value="robr">ROBR (recall→output)</option>
+                  <option value="shapley">Shapley contribution</option>
+                </select>
+              </div>
+              <div class="form-group flex-2">
+                <label for="verify-pk">Operator public key (64 hex)</label>
+                <div class="input-wrapper"><input type="text" id="verify-pk" name="pk" placeholder="ea4a6c63… (64 hex chars)" autocomplete="off" spellcheck="false"></div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="verify-receipt">Receipt (base64)</label>
+                <div class="input-wrapper"><textarea id="verify-receipt" name="receipt" rows="3" placeholder="base64 receipt bytes…" spellcheck="false"></textarea></div>
+              </div>
+              <div class="form-group align-bottom">
+                <button type="submit" class="btn btn-secondary" id="btn-verify">
+                  <span class="btn-text">Verify</span>
+                  <span class="spinner" id="verify-spinner" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+          </form>
+          <div class="recall-results-container hidden" id="verify-result-area">
+            <div class="results-grid" id="verify-result-grid"></div>
+          </div>
+        </section>
       </div>
 
       <!-- SETTINGS VIEW -->

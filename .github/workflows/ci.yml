@@ -154,9 +154,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Build wasm auditor + run Node verification (real receipt, fail-closed)
         run: bash scripts/ci/wasm-auditor.sh
+
+      - name: Install Node devDependencies
+        run: |
+          if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: In-browser Verify panel e2e (real Chromium, fail-closed)
+        run: npm run test:e2e:ui:verify
 
   e2e-store:
     name: store kernel e2e

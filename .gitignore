@@ -19,3 +19,7 @@
 /crates/mneme-verify-wasm/pkg-node/
 /crates/mneme-verify-wasm/pkg-web/
 /.wasm-tools/
+
+# Desk in-browser auditor: generated wasm web bindings (build via scripts/ci/wasm-auditor.sh)
+/ui/auditor/
+/e2e/test-results-verify/
