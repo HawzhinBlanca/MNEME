@@ -68,6 +68,11 @@ We're honest about the limits:
 
 The Desk runs **entirely on your own computer.** Nothing is sent to the cloud.
 
+**To start it** (one command, needs a terminal): run `scripts/desk/run.sh` from the
+project folder. It sets everything up, opens this console in your browser, and stops
+cleanly when you press Ctrl-C. *(This is a one-command launch for a technical user —
+not yet a click-to-install app.)*
+
 | You want to… | Do this |
 |---|---|
 | **Save a memory** | Fill in a note and click **Remember**. It's signed and stored. |

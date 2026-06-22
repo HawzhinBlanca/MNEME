@@ -29,7 +29,24 @@ The proxy carries bytes; it proves nothing. A compromised page can only drive th
 actions the cap already allows — it cannot read the cap, and the daemon re-verifies
 everything. Bind everything to loopback.
 
-## Launch
+## Launch (one command)
+
+```bash
+scripts/desk/run.sh          # build + custody + store + cap + wasm + daemon + host, then open the browser
+#   --no-open   don't open a browser     --rebuild  force a fresh cargo + wasm build
+#   --debug     debug build (faster)     MNEME_DESK_HOME=~/mneme to relocate state
+```
+
+This generates and persists an operator master key on first run (sealed-seed custody
+at `~/.mneme/desk`, `0600`), creates the store, mints a least-privilege capability,
+builds the in-browser Verify auditor, starts `mnemed` + the same-origin host on
+loopback, and tears everything down on Ctrl-C. Re-runs reuse the same store + key.
+
+> **Honest scope:** this makes the Desk **one-command runnable for a technical user on
+> this machine**. It is **not** a packaged consumer installer — no app bundle, no
+> code-signed binary; the master key is a local file you must protect. `authenticated ≠ true`.
+
+## Launch (manual, step by step)
 
 ```bash
 # 0. one-time: operator custody (a 32-byte hex master key in your shell/keychain)
