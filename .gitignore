@@ -14,3 +14,8 @@
 /fuzz/artifacts/
 .DS_Store
 /e2e/test-results-live/
+
+# mneme-verify-wasm generated bindings + downloaded wasm tooling
+/crates/mneme-verify-wasm/pkg-node/
+/crates/mneme-verify-wasm/pkg-web/
+/.wasm-tools/

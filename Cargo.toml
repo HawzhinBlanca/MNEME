@@ -25,6 +25,7 @@ members = [
     "crates/mneme-optimistic",
     "crates/mneme-evolve",
     "crates/mneme-receipts",
+    "crates/mneme-verify-wasm",
 ]
 default-members = ["crates/mneme-store"]
 exclude = ["fuzz", "scripts/piop-flat-prototype"]
